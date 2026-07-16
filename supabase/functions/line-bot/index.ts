@@ -88,14 +88,29 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
     return json({ error: "ส่งข้อความเข้า LINE ไม่สำเร็จ" }, 502);
   }
 
+  const reopeningClosedEvent = event.status === "closed";
+  if (reopeningClosedEvent) {
+    const { error: clearError } = await userClient
+      .from("signups")
+      .delete()
+      .eq("event_id", event.id)
+      .eq("club_id", event.club_id);
+    if (clearError) {
+      console.error("Clearing old signups failed", clearError);
+      return json({ error: "ส่งการ์ดแล้ว แต่ล้างคำตอบเดิมไม่สำเร็จ กรุณาลองเปิดลงชื่ออีกครั้ง" }, 500);
+    }
+  }
+
   await userClient.from("events").update({ status: "open" }).eq("id", event.id);
   await userClient.from("audit_logs").insert({
     club_id: event.club_id,
     event_id: event.id,
     actor_id: authData.user.id,
-    action: "เปิดลงชื่อและส่งเข้า LINE",
+    action: reopeningClosedEvent
+      ? "ล้างคำตอบเดิม เปิดลงชื่อใหม่ และส่งเข้า LINE"
+      : "เปิดลงชื่อและส่งเข้า LINE",
   });
-  return json({ ok: true });
+  return json({ ok: true, clearedPreviousAnswers: reopeningClosedEvent });
 }
 
 async function receiveLineWebhook(request: Request, rawBody: string) {
