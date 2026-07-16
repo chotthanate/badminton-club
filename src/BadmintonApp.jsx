@@ -344,7 +344,10 @@ function EventControlCard({ clubName, courts, event, mutate }) {
 
   function toggleSignup() {
     if (nextStatus === "open") {
-      return mutate(() => publishEventToLine(event.id), "ส่งรอบเข้า LINE และเปิดลงชื่อแล้ว");
+      const message = event.status === "closed"
+        ? "ล้างคำตอบเดิม ส่งรอบเข้า LINE และเปิดลงชื่อใหม่แล้ว"
+        : "ส่งรอบเข้า LINE และเปิดลงชื่อแล้ว";
+      return mutate(() => publishEventToLine(event.id), message);
     }
     return mutate(() => updateEvent(event.id, { status: "closed" }), "ปิดรอบแล้ว");
   }
