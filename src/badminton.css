@@ -463,10 +463,64 @@
 
 .badminton-event-form {
   display: grid;
-  grid-template-columns: minmax(180px, 1.5fr) minmax(140px, 1fr) 110px 110px auto;
+  grid-template-columns: 140px minmax(220px, 1.5fr) 130px 105px 105px auto;
   gap: 10px;
   align-items: end;
   margin-top: 16px;
+}
+
+.badminton-event-main-form {
+  grid-template-columns: 160px minmax(260px, 1fr) auto auto;
+}
+
+.badminton-courts-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 15px;
+  border-top: 1px solid #e3eadf;
+}
+
+.badminton-courts-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.badminton-courts-heading span {
+  color: #637064;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-court-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 125px 125px 42px 42px;
+  gap: 8px;
+  align-items: end;
+  padding: 9px;
+  border: 1px solid #e3eadf;
+  border-radius: 9px;
+  background: #fbfcf8;
+}
+
+.badminton-court-row.is-new {
+  grid-template-columns: minmax(140px, 1fr) 125px 125px auto;
+  border-style: dashed;
+  background: #fff;
+}
+
+.badminton-court-row label {
+  display: grid;
+  gap: 5px;
+  color: #637064;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-court-row input {
+  min-height: 42px;
 }
 
 .badminton-event-form label,
@@ -634,6 +688,23 @@
 .badminton-price-box p {
   margin: 5px 0 10px;
   color: #637064;
+}
+
+.badminton-court-time-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.badminton-court-time-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid #e3eadf;
+  color: #536056;
+  font-size: 13px;
 }
 
 .badminton-price-head,
@@ -832,5 +903,21 @@
 
   .badminton-add-player {
     width: 100%;
+  }
+
+  .badminton-courts-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .badminton-court-row,
+  .badminton-court-row.is-new {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .badminton-court-row > input:first-child,
+  .badminton-court-row.is-new > input:first-child,
+  .badminton-court-row.is-new > button {
+    grid-column: 1 / -1;
   }
 }

@@ -1,0 +1,2 @@
+[functions.line-bot]
+verify_jwt = false

@@ -5,6 +5,7 @@ import {
   buildLineSummary,
   calculateSettlement,
   minutesBetween,
+  totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
 
@@ -27,6 +28,13 @@ test("minutesBetween rejects malformed or out-of-range times", () => {
   assert.equal(minutesBetween("bad", "00:00"), 0);
   assert.equal(minutesBetween("24:00", "01:00"), 0);
   assert.equal(minutesBetween("21:60", "22:00"), 0);
+});
+
+test("totalCourtHours sums courts with different booking times", () => {
+  assert.equal(totalCourtHours([
+    { startsAt: "21:00", endsAt: "00:00" },
+    { startsAt: "22:00", endsAt: "00:00" },
+  ]), 5);
 });
 
 test("weightFromTimes calculates partial play across midnight", () => {

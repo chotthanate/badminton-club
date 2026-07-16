@@ -18,6 +18,7 @@ migration.
 - `profiles`: application profile linked to `auth.users`
 - `clubs` and `club_members`: club membership and admin roles
 - `events`: badminton sessions
+- `event_courts`: courts and independent booking times for each session
 - `signups` and `attendance`: member responses and actual attendance
 - `expenses` and `payments`: event costs and payment records
 - `audit_logs`: security-relevant activity history
@@ -27,3 +28,42 @@ Members can update their own signup. A member records only their own departure
 through the `mark_self_left_at` database function, which calculates the weight
 server-side. Club admins can manage events, members, expenses, payments, and all
 attendance rows.
+
+## LINE Messaging API setup
+
+Webhook URL for this project:
+
+```text
+https://biwnmiedcfmfwuciybus.supabase.co/functions/v1/line-bot
+```
+
+1. Create or select a LINE Official Account and enable Messaging API.
+2. In LINE Developers, open the channel's **Messaging API** tab:
+   - enable **Use webhook**
+   - enable **Allow bot to join group chats**
+   - set the webhook URL above, then press **Verify**
+   - issue a channel access token
+3. Copy the **Channel secret** from the Basic settings tab.
+4. Store both values only in Supabase Edge Function secrets:
+
+```sh
+supabase secrets set \
+  LINE_CHANNEL_SECRET=YOUR_CHANNEL_SECRET \
+  LINE_CHANNEL_ACCESS_TOKEN=YOUR_CHANNEL_ACCESS_TOKEN \
+  --project-ref biwnmiedcfmfwuciybus
+```
+
+Never put either LINE secret in `.env.production` or frontend source code.
+
+5. Invite the Official Account into the badminton LINE group and send one
+   message in the group. The webhook records the group ID automatically.
+6. Press **เปิดลงชื่อ** in the admin website. The function posts a Flex Message
+   with **ไป**, **อาจจะไป**, and **ไม่ไป** buttons.
+7. Each response is signature-verified, linked to the member's LINE user ID,
+   and saved in `signups`. The open admin dashboard refreshes every five seconds.
+
+Official references:
+
+- https://developers.line.biz/en/docs/messaging-api/receiving-messages/
+- https://developers.line.biz/en/docs/messaging-api/group-chats/
+- https://developers.line.biz/en/reference/messaging-api/

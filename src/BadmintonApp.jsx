@@ -19,6 +19,7 @@ import {
   Users,
 } from "lucide-react";
 import {
+  addCourt,
   addExpense,
   addLineMember,
   createClub,
@@ -26,9 +27,12 @@ import {
   getAdminContext,
   loadDashboard,
   recordAudit,
+  publishEventToLine,
+  removeCourt,
   removeParticipant,
   setPayment,
   updateAttendance,
+  updateCourt,
   updateEvent,
   updateExpense,
   updateSignup,
@@ -40,8 +44,9 @@ import {
   buildLineSummary,
   calculateSettlement,
   createInitialEvent,
-  formatThaiDate,
+  formatThaiLongDate,
   minutesBetween,
+  totalCourtHours,
   weightFromTimes,
 } from "./badmintonLogic.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
@@ -133,8 +138,8 @@ function AdminDashboard({ session }) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
-  async function refresh() {
-    setLoading(true);
+  async function refresh(silent = false) {
+    if (!silent) setLoading(true);
     setError("");
     try {
       const nextContext = await getAdminContext(session.user.id);
@@ -143,11 +148,17 @@ function AdminDashboard({ session }) {
     } catch (nextError) {
       setError(nextError.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
   useEffect(() => { refresh(); }, [session.user.id]);
+
+  useEffect(() => {
+    if (!dashboard?.event || dashboard.event.status !== "open") return undefined;
+    const timer = window.setInterval(() => refresh(true), 5000);
+    return () => window.clearInterval(timer);
+  }, [dashboard?.event?.id, dashboard?.event?.status]);
 
   async function mutate(action, successMessage) {
     setSaving(true);
@@ -196,7 +207,12 @@ function AdminDashboard({ session }) {
           <CreateEventCard context={context} session={session} mutate={mutate} />
         ) : (
           <>
-            <EventControlCard event={dashboard.event} mutate={mutate} />
+            <EventControlCard
+              clubName={context.clubs.name}
+              courts={dashboard.courts}
+              event={dashboard.event}
+              mutate={mutate}
+            />
             <a className="badminton-summary-cta" href="#settlement">
               <span><Calculator size={24} /><strong>ดูสรุปยอด</strong></span>
               <span>{baht(settlement.totalCost)} บาท · {settlement.rows.length} คน</span>
@@ -263,8 +279,9 @@ function ClubSetup({ session, onCreated, error }) {
 function CreateEventCard({ compact = false, context, session, mutate }) {
   const initial = createInitialEvent();
   const [form, setForm] = useState({
-    title: "แบดวันศุกร์",
     eventDate: initial.date,
+    venue: "คอร์ทแบดเขาน้อย (คอร์ทใหม่)",
+    courtName: "คอร์ท 7",
     startsAt: "21:00",
     endsAt: "00:00",
   });
@@ -276,6 +293,7 @@ function CreateEventCard({ compact = false, context, session, mutate }) {
     await mutate(async () => {
       const created = await createEvent({
         clubId: context.club_id,
+        clubName: context.clubs.name,
         userId: session.user.id,
         ...form,
       });
@@ -292,11 +310,12 @@ function CreateEventCard({ compact = false, context, session, mutate }) {
     <section className={`badminton-card ${compact ? "badminton-compact-create" : ""}`}>
       <div className="badminton-card-title">
         <CalendarDays size={20} />
-        <div><h2>{compact ? "สร้างรอบถัดไป" : "เริ่มรอบแรก"}</h2><p>ตั้งวันและเวลา แล้วค่อยเปิดรับคำตอบจาก LINE</p></div>
+        <div><h2>{compact ? "สร้างรอบถัดไป" : "เริ่มรอบแรก"}</h2><p>ชื่อรอบจะสร้างจากชื่อกลุ่มและวันที่ให้อัตโนมัติ</p></div>
       </div>
       <form className="badminton-event-form" onSubmit={submit}>
-        <label>ชื่อรอบ<input onChange={(event) => set("title", event.target.value)} required value={form.title} /></label>
         <label>วันที่<input onChange={(event) => set("eventDate", event.target.value)} required type="date" value={form.eventDate} /></label>
+        <label>สถานที่<input onChange={(event) => set("venue", event.target.value)} required value={form.venue} /></label>
+        <label>คอร์ท<input onChange={(event) => set("courtName", event.target.value)} required value={form.courtName} /></label>
         <label>เริ่ม<input onChange={(event) => set("startsAt", event.target.value)} required type="time" value={form.startsAt} /></label>
         <label>จบ<input onChange={(event) => set("endsAt", event.target.value)} required type="time" value={form.endsAt} /></label>
         <button className="badminton-primary" type="submit"><Plus size={17} /> สร้างรอบ</button>
@@ -305,35 +324,76 @@ function CreateEventCard({ compact = false, context, session, mutate }) {
   );
 }
 
-function EventControlCard({ event, mutate }) {
+function EventControlCard({ clubName, courts, event, mutate }) {
   const [form, setForm] = useState({
-    title: event.title,
     event_date: event.event_date,
-    starts_at: event.starts_at.slice(0, 5),
-    ends_at: event.ends_at.slice(0, 5),
+    venue: event.venue,
   });
+  const [newCourt, setNewCourt] = useState({ courtName: "", startsAt: "21:00", endsAt: "00:00" });
   const nextStatus = event.status === "open" ? "closed" : "open";
+
+  async function addNewCourt(submitEvent) {
+    submitEvent.preventDefault();
+    await mutate(() => addCourt({
+      clubId: event.club_id,
+      eventId: event.id,
+      ...newCourt,
+    }), "เพิ่มคอร์ทแล้ว");
+    setNewCourt({ courtName: "", startsAt: "21:00", endsAt: "00:00" });
+  }
+
+  function toggleSignup() {
+    if (nextStatus === "open") {
+      return mutate(() => publishEventToLine(event.id), "ส่งรอบเข้า LINE และเปิดลงชื่อแล้ว");
+    }
+    return mutate(() => updateEvent(event.id, { status: "closed" }), "ปิดรอบแล้ว");
+  }
 
   return (
     <section className="badminton-event badminton-card">
       <div className="badminton-event-main">
         <div className="badminton-event-title">
           <CalendarDays size={22} />
-          <div><h2>{event.title}</h2><p>{formatThaiDate(event.event_date)} เวลา {event.starts_at.slice(0, 5)}-{event.ends_at.slice(0, 5)}</p></div>
+          <div><h2>{clubName} : วันที่ {formatThaiLongDate(event.event_date)}</h2><p>สถานที่ : {event.venue}</p></div>
         </div>
         <span className={`badminton-status-pill is-${event.status}`}>{EVENT_STATUS_LABELS[event.status]}</span>
       </div>
-      <div className="badminton-event-form">
-        <label>ชื่อรอบ<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+      <div className="badminton-event-form badminton-event-main-form">
         <label>วันที่<input type="date" value={form.event_date} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></label>
-        <label>เริ่ม<input type="time" value={form.starts_at} onChange={(e) => setForm({ ...form, starts_at: e.target.value })} /></label>
-        <label>จบ<input type="time" value={form.ends_at} onChange={(e) => setForm({ ...form, ends_at: e.target.value })} /></label>
+        <label>สถานที่<input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} /></label>
         <button className="badminton-secondary" onClick={() => mutate(() => updateEvent(event.id, form), "บันทึกรายละเอียดรอบแล้ว")} type="button"><Save size={17} /> บันทึก</button>
-        <button className="badminton-primary" onClick={() => mutate(() => updateEvent(event.id, { status: nextStatus }), nextStatus === "open" ? "เปิดรับลงชื่อแล้ว" : "ปิดรอบแล้ว")} type="button">
+        <button className="badminton-primary" onClick={toggleSignup} type="button">
           {nextStatus === "open" ? "เปิดลงชื่อ" : "ปิดรอบ"}
         </button>
       </div>
+      <div className="badminton-courts-editor">
+        <div className="badminton-courts-heading"><strong>คอร์ทที่จอง</strong><span>แต่ละคอร์ทกำหนดเวลาไม่เท่ากันได้</span></div>
+        {courts.map((court) => <CourtEditor key={court.id} court={court} eventId={event.id} mutate={mutate} />)}
+        <form className="badminton-court-row is-new" onSubmit={addNewCourt}>
+          <input aria-label="ชื่อคอร์ทใหม่" placeholder="เช่น คอร์ท 8" required value={newCourt.courtName} onChange={(e) => setNewCourt({ ...newCourt, courtName: e.target.value })} />
+          <label>เริ่ม<input required type="time" value={newCourt.startsAt} onChange={(e) => setNewCourt({ ...newCourt, startsAt: e.target.value })} /></label>
+          <label>จบ<input required type="time" value={newCourt.endsAt} onChange={(e) => setNewCourt({ ...newCourt, endsAt: e.target.value })} /></label>
+          <button className="badminton-secondary" type="submit"><Plus size={16} /> เพิ่มคอร์ท</button>
+        </form>
+      </div>
     </section>
+  );
+}
+
+function CourtEditor({ court, eventId, mutate }) {
+  const [form, setForm] = useState({
+    court_name: court.court_name,
+    starts_at: court.starts_at.slice(0, 5),
+    ends_at: court.ends_at.slice(0, 5),
+  });
+  return (
+    <div className="badminton-court-row">
+      <input aria-label={`ชื่อ ${court.court_name}`} value={form.court_name} onChange={(e) => setForm({ ...form, court_name: e.target.value })} />
+      <label>เริ่ม<input type="time" value={form.starts_at} onChange={(e) => setForm({ ...form, starts_at: e.target.value })} /></label>
+      <label>จบ<input type="time" value={form.ends_at} onChange={(e) => setForm({ ...form, ends_at: e.target.value })} /></label>
+      <button aria-label={`บันทึก ${court.court_name}`} className="badminton-icon-button" onClick={() => mutate(() => updateCourt(court.id, eventId, form), `บันทึก ${form.court_name} แล้ว`)} type="button"><Save size={16} /></button>
+      <button aria-label={`ลบ ${court.court_name}`} className="badminton-delete-button" onClick={() => mutate(() => removeCourt(court.id, eventId), `ลบ ${court.court_name} แล้ว`)} type="button"><Trash2 size={16} /></button>
+    </div>
   );
 }
 
@@ -405,13 +465,13 @@ function PricingPanel({ event, mutate, session }) {
   const [editingShuttle, setEditingShuttle] = useState(false);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
-  const hours = minutesBetween(event.startTime, event.endTime) / 60;
-  const courtCost = hours * event.courtHourlyRate;
+  const courtHours = totalCourtHours(event.courts);
+  const courtCost = courtHours * event.courtHourlyRate;
   const shuttleCost = event.shuttlecockCount * event.shuttlecockUnitPrice;
 
-  function extendTime() {
-    const endsAt = addMinutes(event.endTime, 30);
-    mutate(() => updateEvent(event.id, { ends_at: endsAt }), `ต่อเวลาเป็น ${endsAt} แล้ว`);
+  function extendCourt(court) {
+    const endsAt = addMinutes(court.endsAt, 30);
+    mutate(() => updateCourt(court.id, event.id, { ends_at: endsAt }), `ต่อเวลา ${court.name} เป็น ${endsAt} แล้ว`);
   }
 
   return (
@@ -419,9 +479,15 @@ function PricingPanel({ event, mutate, session }) {
       <div className="badminton-card-title"><Calculator size={20} /><div><h2>เวลาและค่าใช้จ่าย</h2><p>คำนวณค่าคอร์ดและลูกแบดให้อัตโนมัติ</p></div></div>
       <div className="badminton-pricing-grid">
         <article className="badminton-price-box">
-          <div className="badminton-price-head"><span><Clock3 size={18} /> เวลาเล่น</span><strong>{hours.toFixed(hours % 1 ? 1 : 0)} ชม.</strong></div>
-          <p>{event.startTime}–{event.endTime}</p>
-          <button className="badminton-extend-button" onClick={extendTime} type="button"><Plus size={16} /> ต่อเวลา 30 นาที</button>
+          <div className="badminton-price-head"><span><Clock3 size={18} /> เวลาคอร์ทรวม</span><strong>{courtHours.toFixed(courtHours % 1 ? 1 : 0)} ชม.</strong></div>
+          <div className="badminton-court-time-list">
+            {event.courts.map((court) => (
+              <div key={court.id}>
+                <span><strong>{court.name}</strong> {court.startsAt}–{displayEndTime(court.endsAt)}</span>
+                <button className="badminton-edit-price" onClick={() => extendCourt(court)} type="button"><Plus size={14} /> 30 นาที</button>
+              </div>
+            ))}
+          </div>
         </article>
         <article className="badminton-price-box">
           <div className="badminton-price-head"><span>ค่าคอร์ด</span><strong>{baht(courtCost)} บาท</strong></div>
@@ -502,6 +568,13 @@ function mapDashboardToEvent(dashboard) {
   const shuttlecockCount = Number(dashboard.event.shuttlecock_count ?? 0);
   const shuttlecockUnitPrice = Number(dashboard.event.shuttlecock_unit_price ?? 60);
   const extraCosts = dashboard.expenses.map((row) => ({ id: row.id, type: row.category, label: row.label, amount: Number(row.amount) }));
+  const courts = dashboard.courts.map((court) => ({
+    id: court.id,
+    name: court.court_name,
+    startsAt: court.starts_at.slice(0, 5),
+    endsAt: court.ends_at.slice(0, 5),
+  }));
+  const courtHours = totalCourtHours(courts);
   const billableSignups = dashboard.signups.filter((row) => row.status === "coming" || row.status === "maybe");
   const attendance = billableSignups.map((signup) => {
     const row = attendanceByMember.get(signup.member_id);
@@ -524,6 +597,8 @@ function mapDashboardToEvent(dashboard) {
     startTime,
     endTime,
     status: dashboard.event.status,
+    venue: dashboard.event.venue,
+    courts,
     courtHourlyRate,
     shuttlecockCount,
     shuttlecockUnitPrice,
@@ -532,7 +607,7 @@ function mapDashboardToEvent(dashboard) {
     attendance,
     extraCosts,
     costs: [
-      { id: "computed-court", type: "court", label: `ค่าคอร์ด ${minutesBetween(startTime, endTime) / 60} ชม.`, amount: (minutesBetween(startTime, endTime) / 60) * courtHourlyRate },
+      { id: "computed-court", type: "court", label: `ค่าคอร์ดรวม ${courtHours} ชม.`, amount: courtHours * courtHourlyRate },
       { id: "computed-shuttle", type: "shuttle", label: `ค่าลูกแบด ${shuttlecockCount} ลูก`, amount: shuttlecockCount * shuttlecockUnitPrice },
       ...extraCosts,
     ],
@@ -549,6 +624,10 @@ function addMinutes(time, amount) {
   const [hours, minutes] = time.split(":").map(Number);
   const total = (hours * 60 + minutes + amount) % (24 * 60);
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function displayEndTime(time) {
+  return time === "00:00" ? "24:00" : time;
 }
 
 function buildTimeOptions(startTime, endTime) {
