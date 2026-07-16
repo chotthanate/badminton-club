@@ -5,6 +5,12 @@
   font-family: "FC Iconic", "Noto Sans Thai", Tahoma, Arial, sans-serif;
 }
 
+.badminton-app *,
+.badminton-app *::before,
+.badminton-app *::after {
+  box-sizing: border-box;
+}
+
 .badminton-shell {
   width: min(1180px, 100%);
   margin: 0 auto;
@@ -12,7 +18,6 @@
 }
 
 .badminton-header,
-.badminton-event,
 .badminton-grid,
 .badminton-card-title,
 .badminton-event-title,
@@ -82,7 +87,10 @@
 .badminton-costs input,
 .badminton-attendance-row select,
 .badminton-attendance-row input,
-.badminton-card textarea {
+.badminton-card textarea,
+.badminton-card input,
+.badminton-card select,
+.badminton-auth-card input {
   width: 100%;
   border: 1px solid #cad6c8;
   border-radius: 8px;
@@ -93,14 +101,15 @@
 .badminton-viewer select,
 .badminton-costs input,
 .badminton-attendance-row select,
-.badminton-attendance-row input {
+.badminton-attendance-row input,
+.badminton-card input,
+.badminton-card select,
+.badminton-auth-card input {
   min-height: 42px;
   padding: 0 10px;
 }
 
 .badminton-event {
-  justify-content: space-between;
-  gap: 14px;
   padding: 16px;
   margin-bottom: 16px;
 }
@@ -176,6 +185,12 @@
   border-color: #15966a;
   background: #15966a;
   color: #fff;
+}
+
+.badminton-primary:disabled,
+.badminton-secondary:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .badminton-primary,
@@ -306,6 +321,457 @@
   border-bottom: 1px solid #edf1eb;
 }
 
+.badminton-auth-page {
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.badminton-auth-card {
+  width: min(440px, 100%);
+  border: 1px solid #d9e1d7;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(37, 58, 40, 0.12);
+  padding: clamp(24px, 6vw, 42px);
+}
+
+.badminton-auth-card h1 {
+  margin: 0 0 10px;
+  font-size: 34px;
+}
+
+.badminton-auth-card > p {
+  color: #637064;
+  line-height: 1.6;
+}
+
+.badminton-auth-card form,
+.badminton-event-form label,
+.badminton-inline-form {
+  display: grid;
+  gap: 8px;
+}
+
+.badminton-auth-card form {
+  margin-top: 22px;
+}
+
+.badminton-auth-icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border-radius: 14px;
+  background: #e9f7ed;
+  color: #0f7a52;
+}
+
+.badminton-form-message {
+  margin: 14px 0 0;
+  color: #0f7a52 !important;
+  font-weight: 800;
+}
+
+.badminton-form-message.is-error {
+  color: #b42318 !important;
+}
+
+.badminton-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #0f7a52;
+}
+
+.badminton-loading svg {
+  animation: badminton-spin 1s linear infinite;
+}
+
+@keyframes badminton-spin {
+  to { transform: rotate(360deg); }
+}
+
+.badminton-header-actions,
+.badminton-event-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.badminton-secondary,
+.badminton-icon-button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #cad6c8;
+  border-radius: 8px;
+  background: #fff;
+  color: #172018;
+  padding: 0 13px;
+  font-weight: 900;
+}
+
+.badminton-icon-button {
+  width: 42px;
+  padding: 0;
+}
+
+.badminton-alert {
+  margin-bottom: 14px;
+  border: 1px solid;
+  border-radius: 9px;
+  padding: 11px 14px;
+  font-weight: 800;
+}
+
+.badminton-alert.is-success {
+  border-color: #a7d7b8;
+  background: #edf9f1;
+  color: #0f7a52;
+}
+
+.badminton-alert.is-error {
+  border-color: #f0b8b3;
+  background: #fff1f0;
+  color: #b42318;
+}
+
+.badminton-status-pill {
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: #eef1ec;
+  color: #536056;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.badminton-status-pill.is-open {
+  background: #e9f7ed;
+  color: #0f7a52;
+}
+
+.badminton-status-pill.is-closed,
+.badminton-status-pill.is-cancelled {
+  background: #fff1f0;
+  color: #b42318;
+}
+
+.badminton-event-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) minmax(140px, 1fr) 110px 110px auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 16px;
+}
+
+.badminton-event-form label,
+.badminton-inline-form input,
+.badminton-expense-list label {
+  color: #637064;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.badminton-admin-layout {
+  display: grid;
+  grid-template-columns: minmax(460px, 1.2fr) minmax(360px, 0.8fr);
+  gap: 16px;
+}
+
+.badminton-summary-cta {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: #172018;
+  color: #fff;
+  text-decoration: none;
+  box-shadow: 0 12px 26px rgba(23, 32, 24, 0.16);
+}
+
+.badminton-summary-cta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 800;
+}
+
+.badminton-summary-cta strong {
+  font-size: 21px;
+}
+
+.badminton-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.badminton-stats > div {
+  display: grid;
+  gap: 3px;
+  padding: 13px;
+  border-radius: 9px;
+  background: #f4f8f2;
+  text-align: center;
+}
+
+.badminton-stats strong {
+  font-size: 25px;
+}
+
+.badminton-stats span,
+.badminton-line-state p,
+.badminton-member-row span {
+  color: #637064;
+  font-size: 12px;
+}
+
+.badminton-line-state {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px dashed #b9cab8;
+  border-radius: 9px;
+}
+
+.badminton-line-state.is-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  color: #536056;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.badminton-line-state p {
+  margin: 4px 0 0;
+}
+
+.badminton-member-list,
+.badminton-expense-list {
+  display: grid;
+  gap: 8px;
+}
+
+.badminton-member-row {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 8px;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid #edf1eb;
+  border-radius: 8px;
+}
+
+.badminton-member-row > div {
+  display: grid;
+}
+
+.badminton-inline-form {
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  margin-top: 12px;
+}
+
+.badminton-participants-card .badminton-inline-form {
+  grid-template-columns: minmax(180px, 1fr) auto;
+}
+
+.badminton-add-player {
+  width: auto;
+  padding: 0 16px;
+}
+
+.badminton-participants-card .badminton-attendance-list {
+  margin-top: 13px;
+}
+
+.badminton-participants-card .badminton-attendance-row {
+  grid-template-columns: minmax(130px, 1fr) 105px 125px 42px;
+  align-items: center;
+}
+
+.badminton-delete-button {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #efd3cf;
+  border-radius: 8px;
+  background: #fff8f7;
+  color: #b42318;
+}
+
+.badminton-empty {
+  padding: 24px 14px;
+  border: 1px dashed #cbd8c9;
+  border-radius: 9px;
+  color: #637064;
+  text-align: center;
+}
+
+.badminton-pricing-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.badminton-price-box {
+  padding: 13px;
+  border: 1px solid #e3eadf;
+  border-radius: 10px;
+  background: #fbfcf8;
+}
+
+.badminton-price-box p {
+  margin: 5px 0 10px;
+  color: #637064;
+}
+
+.badminton-price-head,
+.badminton-price-head span,
+.badminton-price-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.badminton-price-head span {
+  justify-content: flex-start;
+  font-weight: 800;
+}
+
+.badminton-price-head strong {
+  font-size: 20px;
+}
+
+.badminton-price-setting {
+  margin-top: 8px;
+  color: #637064;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.badminton-price-setting input {
+  width: 120px;
+  min-height: 34px;
+}
+
+.badminton-edit-price,
+.badminton-extend-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #cad6c8;
+  border-radius: 7px;
+  background: #fff;
+  color: #536056;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badminton-edit-price {
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.badminton-extend-button {
+  min-height: 38px;
+  width: 100%;
+  color: #0f7a52;
+}
+
+.badminton-shuttle-box > label {
+  display: grid;
+  grid-template-columns: 1fr 90px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: #536056;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.badminton-shuttle-box > label input {
+  min-height: 38px;
+  text-align: center;
+}
+
+.badminton-other-expenses {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #e3eadf;
+}
+
+.badminton-other-expenses > strong {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 14px;
+}
+
+.badminton-settlement-card {
+  scroll-margin-top: 14px;
+}
+
+.badminton-settlement-hero {
+  display: grid;
+  justify-items: center;
+  margin-bottom: 14px;
+  padding: 18px;
+  border-radius: 11px;
+  background: #eaf7ee;
+  color: #0f7a52;
+}
+
+.badminton-settlement-hero strong {
+  margin: 2px 0;
+  font-size: clamp(34px, 5vw, 48px);
+  line-height: 1.1;
+}
+
+.badminton-settlement-hero small {
+  color: #536056;
+  font-weight: 800;
+}
+
+.badminton-expense-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.badminton-expense-list label {
+  display: grid;
+  gap: 6px;
+}
+
+.badminton-compact-create {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.badminton-saving {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  border-radius: 999px;
+  background: #172018;
+  color: #fff;
+  padding: 10px 15px;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
 @media (max-width: 760px) {
   .badminton-shell {
     padding: 14px;
@@ -322,8 +788,18 @@
   }
 
   .badminton-grid,
-  .badminton-costs {
+  .badminton-costs,
+  .badminton-admin-layout,
+  .badminton-event-form,
+  .badminton-inline-form,
+  .badminton-expense-list {
     grid-template-columns: 1fr;
+  }
+
+  .badminton-header-actions,
+  .badminton-event-main {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .badminton-attendance-row,
@@ -334,5 +810,27 @@
   .badminton-attendance-row > div,
   .badminton-pay-row > div {
     grid-column: 1 / -1;
+  }
+
+  .badminton-summary-cta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .badminton-participants-card .badminton-attendance-row {
+    grid-template-columns: 1fr 42px;
+  }
+
+  .badminton-participants-card .badminton-attendance-row > div,
+  .badminton-participants-card .badminton-attendance-row > select {
+    grid-column: 1 / -1;
+  }
+
+  .badminton-participants-card .badminton-inline-form {
+    grid-template-columns: 1fr;
+  }
+
+  .badminton-add-player {
+    width: 100%;
   }
 }
