@@ -76,6 +76,7 @@ export default function LiffSignupApp() {
 
   const closed = event.status !== "open";
   const locked = Boolean((savedStatus && !editing) || closed);
+  const savedLabel = STATUS_OPTIONS.find((option) => option.value === savedStatus)?.label;
 
   return (
     <SignupShell>
@@ -95,7 +96,7 @@ export default function LiffSignupApp() {
 
       <section className="liff-answer-card">
         <div className="liff-answer-heading">
-          <div><span>คำตอบของคุณ</span><strong>{closed ? "รอบนี้ปิดรับคำตอบแล้ว" : locked ? "บันทึกเรียบร้อยแล้ว" : "เลือกรายการด้านล่าง"}</strong></div>
+          <div><span>คำตอบของคุณ</span><strong>{closed ? "รอบนี้ปิดรับคำตอบแล้ว" : locked ? `คำตอบที่บันทึกไว้: ${savedLabel}` : "กรุณาเลือกคำตอบ"}</strong></div>
           {locked && savedStatus ? <Check className="liff-saved-check" size={24} /> : null}
         </div>
 
