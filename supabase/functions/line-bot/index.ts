@@ -18,7 +18,7 @@ Deno.serve(async (request) => {
   const payload = safeJson(rawBody);
   const authorization = request.headers.get("Authorization");
 
-  if (["get_liff_event", "submit_liff_signup"].includes(payload?.action)) {
+  if (["get_liff_event", "save_liff_nickname", "submit_liff_signup"].includes(payload?.action)) {
     return handleLiffRequest(payload);
   }
 
@@ -292,32 +292,24 @@ async function handleLiffRequest(payload: any) {
       });
     }
 
-    const status = String(payload.status || "");
-    if (!["coming", "maybe", "not_coming"].includes(status)) {
-      return json({ error: "คำตอบไม่ถูกต้อง" }, 400);
-    }
     const nickname = String(payload.nickname || "").trim();
     if (nickname.length < 1 || nickname.length > 40) {
       return json({ error: "กรุณากรอกชื่อเล่นไม่เกิน 40 ตัวอักษร" }, 400);
     }
-    if (event.status !== "open") return json({ error: "รอบนี้ปิดรับคำตอบแล้ว" }, 409);
-
     const displayName = String(identity.name || existingMember?.display_name || "สมาชิก LINE").slice(0, 80);
-    let memberId = existingMember?.id;
-    if (!memberId) {
-      const { data: newMember, error } = await admin.from("club_members").insert({
-        club_id: clubId,
-        display_name: displayName,
-        nickname,
-        line_user_id: identity.sub,
-        role: "member",
-      }).select("id").single();
-      if (error) throw error;
-      memberId = newMember.id;
-    } else if (existingMember.display_name !== displayName || existingMember.nickname !== nickname) {
-      await admin.from("club_members").update({ display_name: displayName, nickname }).eq("id", memberId);
+
+    if (payload.action === "save_liff_nickname") {
+      await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember);
+      return json({ ok: true, nickname });
     }
 
+    const status = String(payload.status || "");
+    if (!["coming", "maybe", "not_coming"].includes(status)) {
+      return json({ error: "คำตอบไม่ถูกต้อง" }, 400);
+    }
+    if (event.status !== "open") return json({ error: "รอบนี้ปิดรับคำตอบแล้ว" }, 409);
+
+    const memberId = await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember);
     const { error: signupError } = await admin.from("signups").upsert({
       club_id: clubId,
       event_id: event.id,
@@ -340,6 +332,35 @@ async function handleLiffRequest(payload: any) {
     const status = message.includes("LINE login") ? 401 : 500;
     return json({ error: message }, status);
   }
+}
+
+async function upsertLiffMember(
+  admin: any,
+  clubId: string,
+  lineUserId: string,
+  displayName: string,
+  nickname: string,
+  existingMember: any,
+) {
+  if (!existingMember?.id) {
+    const { data: newMember, error } = await admin.from("club_members").insert({
+      club_id: clubId,
+      display_name: displayName,
+      nickname,
+      line_user_id: lineUserId,
+      role: "member",
+    }).select("id").single();
+    if (error) throw error;
+    return newMember.id;
+  }
+
+  if (existingMember.display_name !== displayName || existingMember.nickname !== nickname) {
+    const { error } = await admin.from("club_members")
+      .update({ display_name: displayName, nickname })
+      .eq("id", existingMember.id);
+    if (error) throw error;
+  }
+  return existingMember.id;
 }
 
 async function getLiffRoster(admin: any, eventId: string) {
