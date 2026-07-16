@@ -173,6 +173,7 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
       action: `${displayName} ตอบ ${signupLabel(status!)}`,
       details: { line_user_id: event.source.userId },
     });
+    await pushPrivateConfirmation(event.source.userId, status!, lineToken);
   }
 
   return json({ ok: true });
@@ -201,6 +202,7 @@ function buildSignupMessage(event: any, clubName: string) {
           { type: "text", text: `สถานที่ : ${event.venue}`, wrap: true },
           { type: "text", text: courts || "ยังไม่ได้ระบุคอร์ท", wrap: true },
           { type: "text", text: "กดคำตอบด้านล่างได้เลย", size: "sm", color: "#637064" },
+          { type: "text", text: "เพิ่ม Headshot_Bot เป็นเพื่อน เพื่อรับข้อความยืนยันส่วนตัว", size: "xs", color: "#8a948b", wrap: true },
         ],
       },
       footer: {
@@ -248,6 +250,23 @@ async function replyLine(replyToken: string, text: string, token: string) {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ replyToken, messages: [{ type: "text", text }] }),
   });
+}
+
+async function pushPrivateConfirmation(userId: string, status: string, token: string) {
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      to: userId,
+      messages: [{
+        type: "text",
+        text: `✅ บันทึกคำตอบ “${signupLabel(status)}” แล้ว`,
+      }],
+    }),
+  });
+  if (!response.ok) {
+    console.error("Private confirmation failed", response.status, await response.text());
+  }
 }
 
 async function verifyLineSignature(body: string, signature: string, secret: string) {
