@@ -15,7 +15,7 @@ export default function LiffSignupApp() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const eventId = new URLSearchParams(window.location.search).get("event_id");
+  const eventId = getEventIdFromLocation();
 
   useEffect(() => {
     let active = true;
@@ -125,6 +125,15 @@ export default function LiffSignupApp() {
       </section>
     </SignupShell>
   );
+}
+
+function getEventIdFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  const directEventId = params.get("event_id");
+  if (directEventId) return directEventId;
+  const liffState = params.get("liff.state");
+  if (!liffState) return null;
+  return new URLSearchParams(liffState.replace(/^\?/, "")).get("event_id");
 }
 
 function SignupShell({ children }) {
