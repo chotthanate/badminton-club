@@ -207,8 +207,6 @@ function buildSignupMessage(event: any, clubName: string, liffId: string) {
           { type: "separator" },
           { type: "text", text: `สถานที่ : ${event.venue}`, wrap: true },
           { type: "text", text: courts || "ยังไม่ได้ระบุคอร์ท", wrap: true },
-          { type: "text", text: "กดปุ่มเพื่อลงชื่อหรือแก้ไขคำตอบ", size: "sm", color: "#637064" },
-          { type: "text", text: "บันทึกแล้วปุ่มจะเปลี่ยนเป็นสีเทาพร้อมเครื่องหมาย ✓", size: "xs", color: "#8a948b", wrap: true },
         ],
       },
       footer: {
@@ -222,7 +220,7 @@ function buildSignupMessage(event: any, clubName: string, liffId: string) {
             color: "#15966a",
             action: {
               type: "uri",
-              label: "ลงชื่อ / ดูคำตอบ",
+              label: "ลงชื่อ",
               uri: `https://liff.line.me/${liffId}?event_id=${event.id}`,
             },
           },
