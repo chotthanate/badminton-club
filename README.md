@@ -40,9 +40,11 @@ npm run build
 
 ## Next
 
-- ต่อ LINE Official Account webhook
-- เพิ่ม Supabase Edge Function เพื่อตรวจลายเซ็นและรับคำตอบจาก LINE
-- ส่งข้อความเปิดลงชื่อและสรุปยอดกลับกลุ่มอัตโนมัติ
+- ใส่ `LINE_CHANNEL_SECRET` และ `LINE_CHANNEL_ACCESS_TOKEN` ใน Supabase secrets
+- ตั้ง webhook ของ LINE ไปที่ Edge Function `line-bot`
+- เชิญ LINE Official Account เข้ากลุ่มและส่งข้อความหนึ่งครั้งเพื่อผูกกลุ่ม
+
+รายละเอียดการตั้งค่า LINE Developers อยู่ใน `supabase/README.md`
 
 ## Test
 

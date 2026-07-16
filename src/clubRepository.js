@@ -56,8 +56,9 @@ export async function loadDashboard(clubId) {
     return { event: null, members: members || [] };
   }
 
-  const [membersResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult] = await Promise.all([
+  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult] = await Promise.all([
     membersPromise,
+    client().from("event_courts").select("*").eq("event_id", event.id).order("position").order("created_at"),
     client().from("signups").select("*").eq("event_id", event.id),
     client().from("attendance").select("*").eq("event_id", event.id),
     client().from("expenses").select("*").eq("event_id", event.id).order("created_at"),
@@ -65,12 +66,13 @@ export async function loadDashboard(clubId) {
     client().from("audit_logs").select("*").eq("event_id", event.id).order("created_at", { ascending: false }).limit(20),
   ]);
 
-  [membersResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult]
+  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult]
     .forEach((result) => throwIfError(result.error));
 
   return {
     event,
     members: membersResult.data || [],
+    courts: courtsResult.data || [],
     signups: signupsResult.data || [],
     attendance: attendanceResult.data || [],
     expenses: expensesResult.data || [],
@@ -79,13 +81,14 @@ export async function loadDashboard(clubId) {
   };
 }
 
-export async function createEvent({ clubId, userId, title, eventDate, startsAt, endsAt }) {
+export async function createEvent({ clubId, clubName, userId, eventDate, venue, courtName, startsAt, endsAt }) {
   const { data, error } = await client()
     .from("events")
     .insert({
       club_id: clubId,
-      title: title.trim(),
+      title: `${clubName} ${eventDate}`,
       event_date: eventDate,
+      venue: venue.trim(),
       starts_at: startsAt,
       ends_at: endsAt,
       status: "draft",
@@ -94,12 +97,82 @@ export async function createEvent({ clubId, userId, title, eventDate, startsAt, 
     .select("*")
     .single();
   throwIfError(error);
+  await addCourt({
+    clubId,
+    eventId: data.id,
+    courtName,
+    startsAt,
+    endsAt,
+  });
   return data;
 }
 
 export async function updateEvent(eventId, patch) {
   const { error } = await client().from("events").update(patch).eq("id", eventId);
   throwIfError(error);
+}
+
+export async function addCourt({ clubId, eventId, courtName, startsAt, endsAt }) {
+  const { error } = await client().from("event_courts").insert({
+    club_id: clubId,
+    event_id: eventId,
+    court_name: courtName.trim(),
+    starts_at: startsAt,
+    ends_at: endsAt,
+  });
+  throwIfError(error);
+  await syncEventTimes(eventId);
+}
+
+export async function updateCourt(courtId, eventId, patch) {
+  const { error } = await client().from("event_courts").update(patch).eq("id", courtId);
+  throwIfError(error);
+  await syncEventTimes(eventId);
+}
+
+export async function removeCourt(courtId, eventId) {
+  const { error } = await client().from("event_courts").delete().eq("id", courtId);
+  throwIfError(error);
+  await syncEventTimes(eventId);
+}
+
+async function syncEventTimes(eventId) {
+  const { data, error } = await client().from("event_courts")
+    .select("starts_at, ends_at")
+    .eq("event_id", eventId);
+  throwIfError(error);
+  if (!data?.length) return;
+  const startsAt = data.map((row) => row.starts_at.slice(0, 5)).sort()[0];
+  const endMinutes = data.map((row) => timeOnEventTimeline(row.ends_at.slice(0, 5), startsAt));
+  const latest = Math.max(...endMinutes) % (24 * 60);
+  const endsAt = `${String(Math.floor(latest / 60)).padStart(2, "0")}:${String(latest % 60).padStart(2, "0")}`;
+  await updateEvent(eventId, { starts_at: startsAt, ends_at: endsAt });
+}
+
+function timeOnEventTimeline(time, eventStart) {
+  const [hour, minute] = time.split(":").map(Number);
+  const [startHour, startMinute] = eventStart.split(":").map(Number);
+  let total = hour * 60 + minute;
+  if (total <= startHour * 60 + startMinute) total += 24 * 60;
+  return total;
+}
+
+export async function publishEventToLine(eventId) {
+  const { data, error } = await client().functions.invoke("line-bot", {
+    body: { action: "publish_event", eventId },
+  });
+  if (error) {
+    let message = error.message;
+    try {
+      const details = await error.context?.json();
+      message = details?.error || message;
+    } catch {
+      // Keep the SDK error when the response body is unavailable.
+    }
+    throw new Error(message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
 }
 
 export async function addLineMember({ clubId, displayName, lineUserId = null }) {

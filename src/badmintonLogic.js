@@ -34,6 +34,13 @@ export function minutesBetween(startTime, endTime) {
   return diff;
 }
 
+export function totalCourtHours(courts = []) {
+  return courts.reduce(
+    (sum, court) => sum + minutesBetween(court.startsAt, court.endsAt) / 60,
+    0,
+  );
+}
+
 export function weightFromTimes(startTime, endTime, leftAt) {
   const total = minutesBetween(startTime, endTime);
   const played = minutesBetween(startTime, leftAt);
@@ -80,7 +87,9 @@ export function calculateSettlement(event) {
 export function buildLineSummary(event) {
   const settlement = calculateSettlement(event);
   const lines = [
-    `สรุปค่าแบด ${formatThaiDate(event.date)} ${event.startTime}-${event.endTime}`,
+    `สรุปค่าแบด ${formatThaiLongDate(event.date)}`,
+    event.venue ? `สถานที่ : ${event.venue}` : "",
+    ...(event.courts || []).map((court) => `${court.name} : ${court.startsAt}-${court.endsAt === "00:00" ? "24:00" : court.endsAt}`),
     `รวม ${baht(settlement.totalCost)} บาท / ${decimalBaht(settlement.totalUnits)} หน่วย`,
     "",
     ...settlement.rows.map((row) => {
@@ -136,6 +145,18 @@ export function formatThaiDate(isoDate) {
       day: "numeric",
       month: "short",
       year: "2-digit",
+    }).format(new Date(`${isoDate}T12:00:00`));
+  } catch {
+    return isoDate;
+  }
+}
+
+export function formatThaiLongDate(isoDate) {
+  try {
+    return new Intl.DateTimeFormat("th-TH", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
     }).format(new Date(`${isoDate}T12:00:00`));
   } catch {
     return isoDate;
