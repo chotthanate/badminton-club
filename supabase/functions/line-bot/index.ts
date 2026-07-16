@@ -92,6 +92,11 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
 }
 
 async function receiveLineWebhook(request: Request, rawBody: string) {
+  const payload = safeJson(rawBody);
+  if (Array.isArray(payload?.events) && payload.events.length === 0) {
+    return json({ ok: true });
+  }
+
   const channelSecret = Deno.env.get("LINE_CHANNEL_SECRET");
   const lineToken = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN");
   const clubId = Deno.env.get("LINE_CLUB_ID");
@@ -104,7 +109,6 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
     return json({ error: "Invalid signature" }, 401);
   }
 
-  const payload = safeJson(rawBody);
   const admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
