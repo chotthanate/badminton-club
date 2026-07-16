@@ -173,7 +173,6 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
       action: `${displayName} ตอบ ${signupLabel(status!)}`,
       details: { line_user_id: event.source.userId },
     });
-    await replyLine(event.replyToken, `บันทึกคำตอบ “${signupLabel(status!)}” ให้ ${displayName} แล้ว`, lineToken);
   }
 
   return json({ ok: true });
@@ -225,7 +224,6 @@ function signupButton(label: string, status: string, eventId: string, style: str
     action: {
       type: "postback",
       label,
-      displayText: `${label}ครับ/ค่ะ`,
       data: `action=signup&event_id=${eventId}&status=${status}`,
     },
   };
