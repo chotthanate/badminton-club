@@ -57,10 +57,12 @@ Never put either LINE secret in `.env.production` or frontend source code.
 
 5. Invite the Official Account into the badminton LINE group and send one
    message in the group. The webhook records the group ID automatically.
-6. Press **เปิดลงชื่อ** in the admin website. The function posts a Flex Message
-   with **ไป**, **อาจจะไป**, and **ไม่ไป** buttons.
-7. Each response is signature-verified, linked to the member's LINE user ID,
-   and saved in `signups`. The open admin dashboard refreshes every five seconds.
+6. Press **เปิดลงชื่อ** in the admin website. The function posts a compact Flex
+   Message with a **ลงชื่อ** button that opens the LIFF signup screen.
+7. Members confirm a nickname, choose **ไป**, **อาจจะไป**, or **ไม่ไป**, and can
+   see the nickname roster for the first two groups. Each response is verified
+   with a LINE ID token, linked to the member's LINE user ID, and saved in
+   `signups`. The open admin dashboard refreshes every five seconds.
 
 Official references:
 

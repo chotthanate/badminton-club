@@ -860,7 +860,8 @@
 
 .liff-profile,
 .liff-event-card,
-.liff-answer-card {
+.liff-answer-card,
+.liff-roster-card {
   border: 1px solid #d9e1d7;
   border-radius: 16px;
   background: #fff;
@@ -903,7 +904,8 @@
 }
 
 .liff-event-card,
-.liff-answer-card {
+.liff-answer-card,
+.liff-roster-card {
   padding: 18px;
 }
 
@@ -922,24 +924,59 @@
 }
 
 .liff-courts {
-  display: grid;
-  gap: 7px;
-  margin-top: 15px;
-}
-
-.liff-courts > div {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 11px 12px;
-  border-radius: 10px;
-  background: #f4f8f2;
+  flex-wrap: wrap;
+  gap: 3px 7px;
+  margin-top: 10px;
+  color: #536056;
+  font-size: 12px;
 }
 
-.liff-courts span {
+.liff-courts > span + span::before {
+  margin-right: 7px;
+  color: #a0a8a1;
+  content: "·";
+}
+
+.liff-courts strong {
   color: #0f7a52;
   font-weight: 900;
+}
+
+.liff-nickname-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.liff-nickname-field > span {
+  color: #536056;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.liff-nickname-field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px solid #b9cab8;
+  border-radius: 10px;
+  background: #fbfcf8;
+  color: #172018;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.liff-nickname-field input:disabled {
+  border-color: #e1e5df;
+  background: #f0f1ef;
+  color: #737a74;
+}
+
+.liff-nickname-field small {
+  color: #7b857d;
+  font-size: 11px;
 }
 
 .liff-answer-heading {
@@ -1074,6 +1111,65 @@
   justify-content: center;
   gap: 7px;
   color: #0f7a52;
+}
+
+.liff-roster-title,
+.liff-roster-group > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.liff-roster-title {
+  margin-bottom: 12px;
+}
+
+.liff-roster-title > strong {
+  font-size: 19px;
+}
+
+.liff-roster-title > span,
+.liff-roster-group > div span {
+  color: #637064;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.liff-roster-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.liff-roster-group {
+  min-width: 0;
+  padding: 11px;
+  border-radius: 10px;
+  background: #f4f8f2;
+}
+
+.liff-roster-group.is-maybe {
+  background: #fff7df;
+}
+
+.liff-roster-group ol {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 23px;
+}
+
+.liff-roster-group li {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.liff-roster-group p {
+  margin: 8px 0 0;
+  color: #8a948b;
+  font-size: 12px;
 }
 
 @media (max-width: 760px) {

@@ -203,8 +203,8 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
 function buildSignupMessage(event: any, clubName: string, liffId: string) {
   const courts = [...(event.event_courts || [])]
     .sort((a, b) => a.position - b.position)
-    .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`)
-    .join("\n");
+    .map((court) => `${court.court_name} ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`)
+    .join(" · ");
   const title = `${clubName} : วันที่ ${thaiLongDate(event.event_date)}`;
 
   return {
@@ -220,8 +220,8 @@ function buildSignupMessage(event: any, clubName: string, liffId: string) {
           { type: "text", text: clubName, weight: "bold", size: "xl", wrap: true },
           { type: "text", text: `วันที่ ${thaiLongDate(event.event_date)}`, color: "#15966a", weight: "bold" },
           { type: "separator" },
-          { type: "text", text: `สถานที่ : ${event.venue}`, wrap: true },
-          { type: "text", text: courts || "ยังไม่ได้ระบุคอร์ท", wrap: true },
+          { type: "text", text: `สถานที่ : ${event.venue}`, size: "sm", wrap: true },
+          { type: "text", text: courts || "ยังไม่ได้ระบุคอร์ท", size: "xs", color: "#637064", wrap: true },
         ],
       },
       footer: {
@@ -266,7 +266,7 @@ async function handleLiffRequest(payload: any) {
     if (!event) return json({ error: "ไม่พบรอบที่ต้องการลงชื่อ" }, 404);
 
     const { data: existingMember } = await admin.from("club_members")
-      .select("id, display_name")
+      .select("id, display_name, nickname")
       .eq("club_id", clubId)
       .eq("line_user_id", identity.sub)
       .maybeSingle();
@@ -284,15 +284,21 @@ async function handleLiffRequest(payload: any) {
         event: eventForLiff(event),
         profile: {
           name: String(identity.name || existingMember?.display_name || "สมาชิก LINE").slice(0, 80),
+          nickname: existingMember?.nickname || "",
           picture: identity.picture || null,
         },
         currentStatus: existingSignup?.status || null,
+        roster: await getLiffRoster(admin, event.id),
       });
     }
 
     const status = String(payload.status || "");
     if (!["coming", "maybe", "not_coming"].includes(status)) {
       return json({ error: "คำตอบไม่ถูกต้อง" }, 400);
+    }
+    const nickname = String(payload.nickname || "").trim();
+    if (nickname.length < 1 || nickname.length > 40) {
+      return json({ error: "กรุณากรอกชื่อเล่นไม่เกิน 40 ตัวอักษร" }, 400);
     }
     if (event.status !== "open") return json({ error: "รอบนี้ปิดรับคำตอบแล้ว" }, 409);
 
@@ -302,13 +308,14 @@ async function handleLiffRequest(payload: any) {
       const { data: newMember, error } = await admin.from("club_members").insert({
         club_id: clubId,
         display_name: displayName,
+        nickname,
         line_user_id: identity.sub,
         role: "member",
       }).select("id").single();
       if (error) throw error;
       memberId = newMember.id;
-    } else if (existingMember.display_name !== displayName) {
-      await admin.from("club_members").update({ display_name: displayName }).eq("id", memberId);
+    } else if (existingMember.display_name !== displayName || existingMember.nickname !== nickname) {
+      await admin.from("club_members").update({ display_name: displayName, nickname }).eq("id", memberId);
     }
 
     const { error: signupError } = await admin.from("signups").upsert({
@@ -323,16 +330,42 @@ async function handleLiffRequest(payload: any) {
       club_id: clubId,
       event_id: event.id,
       actor_id: null,
-      action: `${displayName} ตอบ ${signupLabel(status)}`,
-      details: { line_user_id: identity.sub, source: "liff" },
+      action: `${nickname} ตอบ ${signupLabel(status)}`,
+      details: { line_user_id: identity.sub, line_display_name: displayName, source: "liff" },
     });
-    return json({ ok: true, status });
+    return json({ ok: true, status, roster: await getLiffRoster(admin, event.id) });
   } catch (error) {
     console.error("LIFF request failed", error);
     const message = error instanceof Error ? error.message : "ยืนยันบัญชี LINE ไม่สำเร็จ";
     const status = message.includes("LINE login") ? 401 : 500;
     return json({ error: message }, status);
   }
+}
+
+async function getLiffRoster(admin: any, eventId: string) {
+  const { data: signups, error: signupError } = await admin.from("signups")
+    .select("member_id, status, created_at")
+    .eq("event_id", eventId)
+    .in("status", ["coming", "maybe"])
+    .order("created_at");
+  if (signupError) throw signupError;
+  const memberIds = [...new Set((signups || []).map((row) => row.member_id))];
+  if (!memberIds.length) return { coming: [], maybe: [] };
+
+  const { data: members, error: memberError } = await admin.from("club_members")
+    .select("id, nickname, display_name")
+    .in("id", memberIds);
+  if (memberError) throw memberError;
+  const names = new Map((members || []).map((member) => [
+    member.id,
+    String(member.nickname || member.display_name || "สมาชิก").slice(0, 40),
+  ]));
+  return (signups || []).reduce((roster, signup) => {
+    const name = names.get(signup.member_id);
+    if (name && signup.status === "coming") roster.coming.push(name);
+    if (name && signup.status === "maybe") roster.maybe.push(name);
+    return roster;
+  }, { coming: [] as string[], maybe: [] as string[] });
 }
 
 async function verifyLiffIdToken(idToken: string) {

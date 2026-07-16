@@ -438,22 +438,26 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         <span>{context.clubs.line_group_id ? "เชื่อม LINE แล้ว รายชื่อใหม่จะเข้ามาอัตโนมัติ" : "ตอนนี้เพิ่มรายชื่อจาก LINE ด้วยตัวเองได้"}</span>
       </div>
       <form className="badminton-inline-form" onSubmit={addMember}>
-        <input aria-label="ชื่อผู้เล่น" placeholder="พิมพ์ชื่อจาก LINE" required value={name} onChange={(e) => setName(e.target.value)} />
+        <input aria-label="ชื่อเล่นผู้เล่น" placeholder="พิมพ์ชื่อเล่น" required value={name} onChange={(e) => setName(e.target.value)} />
         <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> เพิ่มคน</button>
       </form>
       <div className="badminton-attendance-list">
         {participants.length ? participants.map(({ member, attendance: row, status }) => {
+          const participantName = memberName(member);
+          const memberDetail = member.nickname && member.nickname !== member.display_name
+            ? `LINE: ${member.display_name} · ${STATUS_LABELS[status]}`
+            : STATUS_LABELS[status];
           return (
             <article className="badminton-attendance-row" key={member.id}>
-              <div><strong>{member.display_name}</strong><span>{STATUS_LABELS[status]}</span></div>
-              <select aria-label={`สัดส่วน ${member.display_name}`} value={row?.weight ?? 1} onChange={(e) => mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, weight: Number(e.target.value) } }), "อัปเดตสัดส่วนแล้ว")}>
+              <div><strong>{participantName}</strong><span>{memberDetail}</span></div>
+              <select aria-label={`สัดส่วน ${participantName}`} value={row?.weight ?? 1} onChange={(e) => mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, weight: Number(e.target.value) } }), "อัปเดตสัดส่วนแล้ว")}>
                 {WEIGHT_PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
               </select>
-              <select aria-label={`เวลาออก ${member.display_name}`} value={row?.leftAt || ""} onChange={(e) => mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, left_at: e.target.value || null, weight: e.target.value ? weightFromTimes(event.startTime, event.endTime, e.target.value) : 1 } }), "อัปเดตเวลาออกแล้ว")}>
+              <select aria-label={`เวลาออก ${participantName}`} value={row?.leftAt || ""} onChange={(e) => mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, left_at: e.target.value || null, weight: e.target.value ? weightFromTimes(event.startTime, event.endTime, e.target.value) : 1 } }), "อัปเดตเวลาออกแล้ว")}>
                 <option value="">ยังไม่กลับ</option>
                 {leftTimeOptions.map((time) => <option key={time} value={time}>{time}</option>)}
               </select>
-              <button aria-label={`ลบ ${member.display_name}`} className="badminton-delete-button" onClick={() => mutate(() => removeParticipant({ eventId: event.id, memberId: member.id }), `ลบ ${member.display_name} ออกจากรอบแล้ว`)} type="button"><Trash2 size={17} /></button>
+              <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={() => mutate(() => removeParticipant({ eventId: event.id, memberId: member.id }), `ลบ ${participantName} ออกจากรอบแล้ว`)} type="button"><Trash2 size={17} /></button>
             </article>
           );
         }) : <div className="badminton-empty">ยังไม่มีรายชื่อ เพิ่มชื่อจาก LINE ด้านบนได้เลย</div>}
@@ -583,7 +587,7 @@ function mapDashboardToEvent(dashboard) {
     const row = attendanceByMember.get(signup.member_id);
     return {
       memberId: signup.member_id,
-      name: membersById.get(signup.member_id)?.display_name || "ไม่ทราบชื่อ",
+      name: memberName(membersById.get(signup.member_id)) || "ไม่ทราบชื่อ",
       arrived: true,
       weight: Number(row?.weight ?? 1),
       arrivedAt: row?.arrived_at?.slice(0, 5) || "",
@@ -605,7 +609,7 @@ function mapDashboardToEvent(dashboard) {
     courtHourlyRate,
     shuttlecockCount,
     shuttlecockUnitPrice,
-    members: dashboard.members.map((member) => ({ id: member.id, name: member.display_name, role: member.role, lineUserId: member.line_user_id, active: member.active })),
+    members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, role: member.role, lineUserId: member.line_user_id, active: member.active })),
     signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, note: row.note })),
     attendance,
     extraCosts,
@@ -621,6 +625,10 @@ function mapDashboardToEvent(dashboard) {
       at: new Date(row.created_at).toLocaleString("th-TH"),
     })),
   };
+}
+
+function memberName(member) {
+  return member?.nickname?.trim() || member?.display_name?.trim() || "";
 }
 
 function addMinutes(time, amount) {
