@@ -11,6 +11,8 @@ const STATUS_OPTIONS = [
 export default function LiffSignupApp() {
   const [event, setEvent] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [nickname, setNickname] = useState("");
+  const [roster, setRoster] = useState({ coming: [], maybe: [] });
   const [savedStatus, setSavedStatus] = useState(null);
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -39,6 +41,8 @@ export default function LiffSignupApp() {
         if (!active) return;
         setEvent(data.event);
         setProfile(data.profile);
+        setNickname(data.profile.nickname || "");
+        setRoster(data.roster || { coming: [], maybe: [] });
         setSavedStatus(data.currentStatus || null);
       } catch (nextError) {
         if (active) setError(nextError.message || "เปิดหน้าลงชื่อไม่สำเร็จ");
@@ -52,13 +56,19 @@ export default function LiffSignupApp() {
   }, [eventId]);
 
   async function choose(status) {
-    if (saving || (savedStatus && !editing)) return;
+    if (saving || (savedStatus && !editing && nickname.trim())) return;
+    if (!nickname.trim()) {
+      setError("กรุณากรอกชื่อเล่นก่อนเลือกคำตอบ");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       const idToken = window.liff.getIDToken();
-      const data = await callLiffApi("submit_liff_signup", { eventId, idToken, status });
+      const data = await callLiffApi("submit_liff_signup", { eventId, idToken, status, nickname: nickname.trim() });
       setSavedStatus(data.status);
+      setNickname(nickname.trim());
+      setRoster(data.roster || { coming: [], maybe: [] });
       setEditing(false);
     } catch (nextError) {
       setError(nextError.message || "บันทึกคำตอบไม่สำเร็จ");
@@ -76,7 +86,8 @@ export default function LiffSignupApp() {
   }
 
   const closed = event.status !== "open";
-  const locked = Boolean((savedStatus && !editing) || closed);
+  const needsNickname = !nickname.trim();
+  const locked = Boolean((savedStatus && !editing && !needsNickname) || closed);
   const savedLabel = STATUS_OPTIONS.find((option) => option.value === savedStatus)?.label;
 
   return (
@@ -91,11 +102,23 @@ export default function LiffSignupApp() {
         <h1>วันที่ {event.dateLabel}</h1>
         <div className="liff-venue"><MapPin size={18} /><span>{event.venue}</span></div>
         <div className="liff-courts">
-          {event.courts.map((court) => <div key={court.name}><strong>{court.name}</strong><span>{court.time}</span></div>)}
+          {event.courts.map((court) => <span key={court.name}><strong>{court.name}</strong> {court.time}</span>)}
         </div>
       </section>
 
       <section className="liff-answer-card">
+        <label className="liff-nickname-field" htmlFor="liff-nickname">
+          <span>ชื่อเล่นที่จะแสดงในรายชื่อ</span>
+          <input
+            disabled={locked}
+            id="liff-nickname"
+            maxLength="40"
+            onChange={(changeEvent) => setNickname(changeEvent.target.value)}
+            placeholder="เช่น บอย, หยก, แนน"
+            value={nickname}
+          />
+          <small>ชื่อ LINE ของคุณคือ {profile?.name || "สมาชิก LINE"}</small>
+        </label>
         <div className="liff-answer-heading">
           <div><span>คำตอบของคุณ</span><strong>{closed ? "รอบนี้ปิดรับคำตอบแล้ว" : locked ? `คำตอบที่บันทึกไว้: ${savedLabel}` : "กรุณาเลือกคำตอบ"}</strong></div>
           {locked && savedStatus ? <Check className="liff-saved-check" size={24} /> : null}
@@ -125,7 +148,24 @@ export default function LiffSignupApp() {
           <button className="liff-edit-answer" onClick={() => setEditing(true)} type="button"><Edit3 size={16} /> แก้ไขคำตอบ</button>
         ) : null}
       </section>
+
+      <section className="liff-roster-card">
+        <div className="liff-roster-title"><strong>รายชื่อผู้ลงชื่อ</strong><span>{roster.coming.length + roster.maybe.length} คน</span></div>
+        <div className="liff-roster-grid">
+          <RosterGroup label="ไป" names={roster.coming} tone="coming" />
+          <RosterGroup label="อาจจะไป" names={roster.maybe} tone="maybe" />
+        </div>
+      </section>
     </SignupShell>
+  );
+}
+
+function RosterGroup({ label, names, tone }) {
+  return (
+    <div className={`liff-roster-group is-${tone}`}>
+      <div><strong>{label}</strong><span>{names.length}</span></div>
+      {names.length ? <ol>{names.map((name, index) => <li key={`${name}-${index}`}>{name}</li>)}</ol> : <p>ยังไม่มี</p>}
+    </div>
   );
 }
 

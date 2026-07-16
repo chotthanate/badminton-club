@@ -12,7 +12,7 @@ function throwIfError(error) {
 export async function getAdminContext(userId) {
   const { data, error } = await client()
     .from("club_members")
-    .select("id, club_id, display_name, role, clubs!inner(id, name, line_group_id)")
+    .select("id, club_id, display_name, nickname, role, clubs!inner(id, name, line_group_id)")
     .eq("profile_id", userId)
     .eq("role", "admin")
     .eq("active", true)
@@ -45,7 +45,7 @@ export async function loadDashboard(clubId) {
 
   const membersPromise = client()
     .from("club_members")
-    .select("id, display_name, role, active, line_user_id")
+    .select("id, display_name, nickname, role, active, line_user_id")
     .eq("club_id", clubId)
     .eq("active", true)
     .order("created_at");
@@ -180,10 +180,11 @@ export async function addLineMember({ clubId, displayName, lineUserId = null }) 
     .insert({
       club_id: clubId,
       display_name: displayName.trim(),
+      nickname: displayName.trim(),
       line_user_id: lineUserId?.trim() || null,
       role: "member",
     })
-    .select("id, display_name, line_user_id")
+    .select("id, display_name, nickname, line_user_id")
     .single();
   throwIfError(error);
   return data;
