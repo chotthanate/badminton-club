@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Check, Edit3, LoaderCircle, MapPin } from "lucide-react";
+import { getEventIdFromSearch } from "./liffSignup.js";
 
 const STATUS_OPTIONS = [
   { value: "coming", label: "ไป", detail: "เจอกันที่คอร์ท" },
@@ -15,7 +16,7 @@ export default function LiffSignupApp() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const eventId = getEventIdFromLocation();
+  const eventId = getEventIdFromSearch(window.location.search);
 
   useEffect(() => {
     let active = true;
@@ -126,15 +127,6 @@ export default function LiffSignupApp() {
       </section>
     </SignupShell>
   );
-}
-
-function getEventIdFromLocation() {
-  const params = new URLSearchParams(window.location.search);
-  const directEventId = params.get("event_id");
-  if (directEventId) return directEventId;
-  const liffState = params.get("liff.state");
-  if (!liffState) return null;
-  return new URLSearchParams(liffState.replace(/^\?/, "")).get("event_id");
 }
 
 function SignupShell({ children }) {
