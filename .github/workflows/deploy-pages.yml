@@ -33,6 +33,11 @@ jobs:
 
       - name: Build static site
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL }}
+          VITE_LINE_LIFF_ID: ${{ vars.VITE_LINE_LIFF_ID }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
