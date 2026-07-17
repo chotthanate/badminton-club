@@ -19,7 +19,7 @@ migration.
 - `clubs` and `club_members`: club membership and admin roles
 - `events`: badminton sessions
 - `event_courts`: courts and independent booking times for each session
-- `signups` and `attendance`: member responses and actual attendance
+- `signups` and `attendance`: confirmed/not-coming responses, planned arrival times, and actual attendance
 - `expenses` and `payments`: event costs and payment records
 - `audit_logs`: security-relevant activity history
 
@@ -60,7 +60,7 @@ Never put either LINE secret in `.env.production` or frontend source code.
 6. Press **เปิดลงชื่อ** in the admin website. The function posts a compact Flex
    Message with a **ลงชื่อ** button that opens the LIFF signup screen.
 7. Members confirm a nickname, choose **ไป**, **อาจจะไป**, or **ไม่ไป**, and can
-   see the nickname roster for the first two groups. Each response is verified
+   see the confirmed-player roster with each player's planned arrival time. Each response is verified
    with a LINE ID token, linked to the member's LINE user ID, and saved in
    `signups`. The open admin dashboard refreshes every five seconds.
 

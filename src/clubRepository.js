@@ -201,12 +201,13 @@ export async function removeParticipant({ eventId, memberId }) {
   }
 }
 
-export async function updateSignup({ clubId, eventId, memberId, status }) {
+export async function updateSignup({ clubId, eventId, memberId, status, arrivalTime = null }) {
   const { error } = await client().from("signups").upsert({
     club_id: clubId,
     event_id: eventId,
     member_id: memberId,
     status,
+    arrival_time: status === "coming" ? arrivalTime : null,
   }, { onConflict: "event_id,member_id" });
   throwIfError(error);
 }

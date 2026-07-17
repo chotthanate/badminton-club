@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Check, Edit3, LoaderCircle, MapPin } from "lucide-react";
-import { getEventIdFromSearch } from "./liffSignup.js";
+import { buildArrivalTimeOptions, getEventIdFromSearch } from "./liffSignup.js";
 
 const STATUS_OPTIONS = [
-  { value: "coming", label: "ไป", detail: "เจอกันที่คอร์ท" },
-  { value: "maybe", label: "อาจจะไป", detail: "ยังไม่แน่ใจ" },
+  { value: "coming", label: "ไป", detail: "เลือกเวลาที่จะไป" },
   { value: "not_coming", label: "ไม่ไป", detail: "รอบนี้ไม่ได้ไป" },
 ];
 
@@ -14,8 +13,11 @@ export default function LiffSignupApp() {
   const [nickname, setNickname] = useState("");
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [showNicknameModal, setShowNicknameModal] = useState(false);
-  const [roster, setRoster] = useState({ coming: [], maybe: [] });
+  const [roster, setRoster] = useState({ coming: [] });
   const [savedStatus, setSavedStatus] = useState(null);
+  const [savedArrivalTime, setSavedArrivalTime] = useState("");
+  const [pendingStatus, setPendingStatus] = useState(null);
+  const [arrivalTime, setArrivalTime] = useState("");
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -47,8 +49,10 @@ export default function LiffSignupApp() {
         setNickname(storedNickname);
         setNicknameDraft(storedNickname);
         setShowNicknameModal(!storedNickname);
-        setRoster(data.roster || { coming: [], maybe: [] });
+        setRoster(data.roster || { coming: [] });
         setSavedStatus(data.currentStatus || null);
+        setSavedArrivalTime(data.currentArrivalTime || "");
+        setArrivalTime(data.currentArrivalTime || "");
       } catch (nextError) {
         if (active) setError(nextError.message || "เปิดหน้าลงชื่อไม่สำเร็จ");
       } finally {
@@ -89,14 +93,38 @@ export default function LiffSignupApp() {
       setShowNicknameModal(true);
       return;
     }
+    if (status === "coming") {
+      setPendingStatus("coming");
+      setArrivalTime(savedArrivalTime || "");
+      setError("");
+      return;
+    }
+    await submitAnswer("not_coming", "");
+  }
+
+  async function submitAnswer(status, selectedArrivalTime) {
+    if (saving) return;
+    if (status === "coming" && !selectedArrivalTime) {
+      setError("กรุณาเลือกเวลาที่จะไป");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       const idToken = window.liff.getIDToken();
-      const data = await callLiffApi("submit_liff_signup", { eventId, idToken, status, nickname: nickname.trim() });
+      const data = await callLiffApi("submit_liff_signup", {
+        eventId,
+        idToken,
+        status,
+        arrivalTime: status === "coming" ? selectedArrivalTime : null,
+        nickname: nickname.trim(),
+      });
       setSavedStatus(data.status);
+      setSavedArrivalTime(data.arrivalTime || "");
+      setArrivalTime(data.arrivalTime || "");
       setNickname(nickname.trim());
-      setRoster(data.roster || { coming: [], maybe: [] });
+      setRoster(data.roster || { coming: [] });
+      setPendingStatus(null);
       setEditing(false);
     } catch (nextError) {
       setError(nextError.message || "บันทึกคำตอบไม่สำเร็จ");
@@ -116,6 +144,12 @@ export default function LiffSignupApp() {
   const closed = event.status !== "open";
   const locked = Boolean((savedStatus && !editing) || closed);
   const savedLabel = STATUS_OPTIONS.find((option) => option.value === savedStatus)?.label;
+  const savedAnswer = savedStatus === "coming" && savedArrivalTime
+    ? `${savedLabel} เวลา ${savedArrivalTime}`
+    : savedLabel;
+  const arrivalTimes = event.arrivalTimes?.length
+    ? event.arrivalTimes
+    : buildArrivalTimeOptions(event.startTime, event.endTime);
 
   return (
     <SignupShell>
@@ -131,13 +165,13 @@ export default function LiffSignupApp() {
       <section className="liff-answer-card">
         <div className="liff-signup-as"><span>ลงชื่อเป็น</span><strong>{nickname}</strong><button onClick={() => { setNicknameDraft(nickname); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> แก้ชื่อเล่น</button></div>
         <div className="liff-answer-heading">
-          <div><span>คำตอบของคุณ</span><strong>{closed ? "รอบนี้ปิดรับคำตอบแล้ว" : locked ? `คำตอบที่บันทึกไว้: ${savedLabel}` : "กรุณาเลือกคำตอบ"}</strong></div>
+          <div><span>คำตอบของคุณ</span><strong>{closed ? "รอบนี้ปิดรับคำตอบแล้ว" : locked ? `คำตอบที่บันทึกไว้: ${savedAnswer}` : "กรุณาเลือกคำตอบ"}</strong></div>
           {locked && savedStatus ? <Check className="liff-saved-check" size={24} /> : null}
         </div>
 
         <div className="liff-answer-options">
           {STATUS_OPTIONS.map((option) => {
-            const selected = savedStatus === option.value;
+            const selected = locked ? savedStatus === option.value : pendingStatus === option.value;
             return (
               <button
                 className={`${selected ? "is-selected" : ""} ${locked ? "is-locked" : ""}`}
@@ -153,18 +187,28 @@ export default function LiffSignupApp() {
           })}
         </div>
 
+        {!locked && pendingStatus === "coming" ? (
+          <div className="liff-arrival-picker">
+            <label htmlFor="arrival-time">เวลาที่จะไป</label>
+            <select id="arrival-time" onChange={(changeEvent) => setArrivalTime(changeEvent.target.value)} value={arrivalTime}>
+              <option value="">เลือกเวลา</option>
+              {arrivalTimes.map((value) => <option key={value} value={value}>{value} น.</option>)}
+            </select>
+            <button className="liff-save-answer" disabled={saving || !arrivalTime} onClick={() => submitAnswer("coming", arrivalTime)} type="button">บันทึกคำตอบ</button>
+          </div>
+        ) : null}
+
         {saving ? <div className="liff-saving"><LoaderCircle size={18} /> กำลังบันทึก...</div> : null}
         {error ? <div className="liff-inline-error">{error}</div> : null}
         {locked && !closed ? (
-          <button className="liff-edit-answer" onClick={() => setEditing(true)} type="button"><Edit3 size={16} /> แก้ไขคำตอบ</button>
+          <button className="liff-edit-answer" onClick={() => { setPendingStatus(savedStatus); setArrivalTime(savedArrivalTime); setEditing(true); }} type="button"><Edit3 size={16} /> แก้ไขคำตอบ</button>
         ) : null}
       </section>
 
       <section className="liff-roster-card">
-        <div className="liff-roster-title"><strong>รายชื่อผู้ลงชื่อ</strong><span>{roster.coming.length + roster.maybe.length} คน</span></div>
+        <div className="liff-roster-title"><strong>คนที่จะไป</strong><span>{roster.coming.length} คน</span></div>
         <div className="liff-roster-grid">
-          <RosterGroup label="ไป" names={roster.coming} tone="coming" />
-          <RosterGroup label="อาจจะไป" names={roster.maybe} tone="maybe" />
+          <RosterGroup entries={roster.coming} />
         </div>
       </section>
 
@@ -186,11 +230,10 @@ export default function LiffSignupApp() {
   );
 }
 
-function RosterGroup({ label, names, tone }) {
+function RosterGroup({ entries }) {
   return (
-    <div className={`liff-roster-group is-${tone}`}>
-      <div><strong>{label}</strong><span>{names.length}</span></div>
-      {names.length ? <ol>{names.map((name, index) => <li key={`${name}-${index}`}>{name}</li>)}</ol> : <p>ยังไม่มี</p>}
+    <div className="liff-roster-group is-coming">
+      {entries.length ? <ol>{entries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><strong>{entry.name}</strong><span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงชื่อว่าจะไป</p>}
     </div>
   );
 }
