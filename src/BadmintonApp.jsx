@@ -38,7 +38,6 @@ import {
   updateSignup,
 } from "./clubRepository.js";
 import {
-  STATUS_LABELS,
   WEIGHT_PRESETS,
   baht,
   buildLineSummary,
@@ -403,10 +402,9 @@ function CourtEditor({ court, eventId, mutate }) {
 function ParticipantsPanel({ context, dashboard, event, mutate, session, settlement }) {
   const [name, setName] = useState("");
   const coming = event.signups.filter((row) => row.status === "coming").length;
-  const maybe = event.signups.filter((row) => row.status === "maybe").length;
   const notComing = event.signups.filter((row) => row.status === "not_coming").length;
   const participants = event.signups
-    .filter((signup) => signup.status === "coming" || signup.status === "maybe")
+    .filter((signup) => signup.status === "coming")
     .map((signup) => ({
       ...signup,
       member: dashboard.members.find((member) => member.id === signup.memberId),
@@ -419,7 +417,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     eventObject.preventDefault();
     await mutate(async () => {
       const member = await addLineMember({ clubId: context.club_id, displayName: name });
-      await updateSignup({ clubId: context.club_id, eventId: event.id, memberId: member.id, status: "coming" });
+      await updateSignup({ clubId: context.club_id, eventId: event.id, memberId: member.id, status: "coming", arrivalTime: event.startTime });
       await recordAudit({ clubId: context.club_id, eventId: event.id, userId: session.user.id, action: `เพิ่มผู้เล่น ${name}` });
       setName("");
     }, "เพิ่มผู้เล่นแล้ว");
@@ -430,7 +428,6 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       <div className="badminton-card-title"><Users size={20} /><div><h2>รายชื่อผู้เล่น</h2><p>รายชื่อที่ลงไว้ใน LINE · เพิ่มหรือลบได้ทันที</p></div></div>
       <div className="badminton-stats">
         <div><strong>{coming}</strong><span>มา</span></div>
-        <div><strong>{maybe}</strong><span>อาจมา</span></div>
         <div><strong>{notComing}</strong><span>ไม่มา</span></div>
       </div>
       <div className="badminton-line-state is-compact">
@@ -442,11 +439,11 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> เพิ่มคน</button>
       </form>
       <div className="badminton-attendance-list">
-        {participants.length ? participants.map(({ member, attendance: row, status }) => {
+        {participants.length ? participants.map(({ member, attendance: row, status, arrivalTime }) => {
           const participantName = memberName(member);
           const memberDetail = member.nickname && member.nickname !== member.display_name
-            ? `LINE: ${member.display_name} · ${STATUS_LABELS[status]}`
-            : STATUS_LABELS[status];
+            ? `LINE: ${member.display_name} · ไป ${arrivalTime || event.startTime} น.`
+            : `ไป ${arrivalTime || event.startTime} น.`;
           return (
             <article className="badminton-attendance-row" key={member.id}>
               <div><strong>{participantName}</strong><span>{memberDetail}</span></div>
@@ -582,7 +579,7 @@ function mapDashboardToEvent(dashboard) {
     endsAt: court.ends_at.slice(0, 5),
   }));
   const courtHours = totalCourtHours(courts);
-  const billableSignups = dashboard.signups.filter((row) => row.status === "coming" || row.status === "maybe");
+  const billableSignups = dashboard.signups.filter((row) => row.status === "coming");
   const attendance = billableSignups.map((signup) => {
     const row = attendanceByMember.get(signup.member_id);
     return {
@@ -610,7 +607,7 @@ function mapDashboardToEvent(dashboard) {
     shuttlecockCount,
     shuttlecockUnitPrice,
     members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, role: member.role, lineUserId: member.line_user_id, active: member.active })),
-    signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, note: row.note })),
+    signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note })),
     attendance,
     extraCosts,
     costs: [

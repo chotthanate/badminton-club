@@ -1,6 +1,5 @@
 export const STATUS_LABELS = {
   coming: "มา",
-  maybe: "อาจมา",
   not_coming: "ไม่มา",
 };
 
@@ -118,9 +117,9 @@ export function createInitialEvent() {
       { id: "m-5", name: "ตั้ม", role: "member", lineUserId: "demo-tum", active: true },
     ],
     signups: [
-      { memberId: "m-1", status: "coming", note: "" },
-      { memberId: "m-2", status: "coming", note: "" },
-      { memberId: "m-3", status: "maybe", note: "อาจมาเลท" },
+      { memberId: "m-1", status: "coming", arrivalTime: "21:00", note: "" },
+      { memberId: "m-2", status: "coming", arrivalTime: "21:00", note: "" },
+      { memberId: "m-3", status: "not_coming", arrivalTime: "", note: "" },
     ],
     attendance: [
       { memberId: "m-1", name: "แอดมิน", arrived: true, weight: 1, arrivedAt: "21:00", leftAt: "", note: "", paid: false },

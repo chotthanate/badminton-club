@@ -148,7 +148,12 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
 
     const eventId = data.get("event_id");
     const status = data.get("status");
-    if (!eventId || !["coming", "maybe", "not_coming"].includes(status || "")) continue;
+    if (!eventId || !["coming", "not_coming"].includes(status || "")) continue;
+
+    if (status === "coming") {
+      await replyLine(event.replyToken, "กรุณากดปุ่มลงชื่อในการ์ดล่าสุดเพื่อเลือกเวลาที่จะไป", lineToken);
+      continue;
+    }
 
     const { data: badmintonEvent } = await admin.from("events")
       .select("id, club_id, status")
@@ -186,6 +191,7 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
       event_id: eventId,
       member_id: memberId,
       status,
+      arrival_time: null,
     }, { onConflict: "event_id,member_id" });
 
     await admin.from("audit_logs").insert({
@@ -258,7 +264,7 @@ async function handleLiffRequest(payload: any) {
     );
 
     const { data: event, error: eventError } = await admin.from("events")
-      .select("id, club_id, event_date, venue, status, clubs!inner(name), event_courts(court_name, starts_at, ends_at, position)")
+      .select("id, club_id, event_date, venue, status, starts_at, ends_at, clubs!inner(name), event_courts(court_name, starts_at, ends_at, position)")
       .eq("id", payload.eventId)
       .eq("club_id", clubId)
       .maybeSingle();
@@ -273,7 +279,7 @@ async function handleLiffRequest(payload: any) {
 
     const { data: existingSignup } = existingMember
       ? await admin.from("signups")
-        .select("status")
+        .select("status, arrival_time")
         .eq("event_id", event.id)
         .eq("member_id", existingMember.id)
         .maybeSingle()
@@ -288,7 +294,8 @@ async function handleLiffRequest(payload: any) {
           picture: identity.picture || null,
         },
         currentStatus: existingSignup?.status || null,
-        roster: await getLiffRoster(admin, event.id),
+        currentArrivalTime: shortTime(existingSignup?.arrival_time),
+        roster: await getLiffRoster(admin, event),
       });
     }
 
@@ -304,10 +311,16 @@ async function handleLiffRequest(payload: any) {
     }
 
     const status = String(payload.status || "");
-    if (!["coming", "maybe", "not_coming"].includes(status)) {
+    if (!["coming", "not_coming"].includes(status)) {
       return json({ error: "คำตอบไม่ถูกต้อง" }, 400);
     }
     if (event.status !== "open") return json({ error: "รอบนี้ปิดรับคำตอบแล้ว" }, 409);
+
+    const arrivalTime = status === "coming" ? shortTime(payload.arrivalTime) : null;
+    const arrivalTimes = buildArrivalTimeOptions(event.starts_at, event.ends_at);
+    if (status === "coming" && (!arrivalTime || !arrivalTimes.includes(arrivalTime))) {
+      return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
+    }
 
     const memberId = await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember);
     const { error: signupError } = await admin.from("signups").upsert({
@@ -315,6 +328,7 @@ async function handleLiffRequest(payload: any) {
       event_id: event.id,
       member_id: memberId,
       status,
+      arrival_time: arrivalTime,
     }, { onConflict: "event_id,member_id" });
     if (signupError) throw signupError;
 
@@ -322,10 +336,10 @@ async function handleLiffRequest(payload: any) {
       club_id: clubId,
       event_id: event.id,
       actor_id: null,
-      action: `${nickname} ตอบ ${signupLabel(status)}`,
-      details: { line_user_id: identity.sub, line_display_name: displayName, source: "liff" },
+      action: `${nickname} ตอบ ${signupLabel(status)}${arrivalTime ? ` เวลา ${arrivalTime}` : ""}`,
+      details: { line_user_id: identity.sub, line_display_name: displayName, arrival_time: arrivalTime, source: "liff" },
     });
-    return json({ ok: true, status, roster: await getLiffRoster(admin, event.id) });
+    return json({ ok: true, status, arrivalTime, roster: await getLiffRoster(admin, event) });
   } catch (error) {
     console.error("LIFF request failed", error);
     const message = error instanceof Error ? error.message : "ยืนยันบัญชี LINE ไม่สำเร็จ";
@@ -363,15 +377,15 @@ async function upsertLiffMember(
   return existingMember.id;
 }
 
-async function getLiffRoster(admin: any, eventId: string) {
+async function getLiffRoster(admin: any, event: any) {
   const { data: signups, error: signupError } = await admin.from("signups")
-    .select("member_id, status, created_at")
-    .eq("event_id", eventId)
-    .in("status", ["coming", "maybe"])
+    .select("member_id, status, arrival_time, created_at")
+    .eq("event_id", event.id)
+    .eq("status", "coming")
     .order("created_at");
   if (signupError) throw signupError;
   const memberIds = [...new Set((signups || []).map((row) => row.member_id))];
-  if (!memberIds.length) return { coming: [], maybe: [] };
+  if (!memberIds.length) return { coming: [] };
 
   const { data: members, error: memberError } = await admin.from("club_members")
     .select("id, nickname, display_name")
@@ -381,12 +395,14 @@ async function getLiffRoster(admin: any, eventId: string) {
     member.id,
     String(member.nickname || member.display_name || "สมาชิก").slice(0, 40),
   ]));
-  return (signups || []).reduce((roster, signup) => {
+  const timeOrder = new Map(buildArrivalTimeOptions(event.starts_at, event.ends_at).map((value, index) => [value, index]));
+  const coming = (signups || []).reduce((rows, signup) => {
     const name = names.get(signup.member_id);
-    if (name && signup.status === "coming") roster.coming.push(name);
-    if (name && signup.status === "maybe") roster.maybe.push(name);
-    return roster;
-  }, { coming: [] as string[], maybe: [] as string[] });
+    if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time) });
+    return rows;
+  }, [] as Array<{ name: string; arrivalTime: string | null }>);
+  coming.sort((a, b) => (timeOrder.get(a.arrivalTime || "") ?? 999) - (timeOrder.get(b.arrivalTime || "") ?? 999));
+  return { coming };
 }
 
 async function verifyLiffIdToken(idToken: string) {
@@ -416,8 +432,43 @@ function eventForLiff(event: any) {
     dateLabel: thaiLongDate(event.event_date),
     venue: event.venue,
     status: event.status,
+    startTime: shortTime(event.starts_at),
+    endTime: shortTime(event.ends_at),
     courts,
+    arrivalTimes: buildArrivalTimeOptions(event.starts_at, event.ends_at),
   };
+}
+
+function buildArrivalTimeOptions(startValue: unknown, endValue: unknown) {
+  const start = timeMinutes(startValue);
+  let end = timeMinutes(endValue);
+  if (start === null || end === null) return [];
+  if (end <= start) end += 24 * 60;
+  const options = [];
+  for (let minute = start; minute < end; minute += 30) {
+    options.push(formatMinutes(minute));
+  }
+  return options;
+}
+
+function timeMinutes(value: unknown) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || ""));
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function formatMinutes(value: number) {
+  const minute = value % (24 * 60);
+  return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+}
+
+function shortTime(value: unknown) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || ""));
+  if (!match) return null;
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
 }
 
 async function getLineDisplayName(source: any, token: string) {
@@ -477,5 +528,5 @@ function displayEndTime(value: string) {
 }
 
 function signupLabel(status: string) {
-  return ({ coming: "ไป", maybe: "อาจจะไป", not_coming: "ไม่ไป" } as Record<string, string>)[status] || status;
+  return ({ coming: "ไป", not_coming: "ไม่ไป" } as Record<string, string>)[status] || status;
 }
