@@ -315,13 +315,22 @@ async function handleLiffRequest(payload: any) {
 
     if (payload.action === "cancel_liff_signup") {
       if (existingMember?.id) {
-        for (const table of ["member_extra_charges", "payments", "attendance", "signups"]) {
-          const { error } = await admin.from(table)
-            .delete()
-            .eq("event_id", event.id)
-            .eq("member_id", existingMember.id);
-          if (error) throw error;
+        const [chargesResult, paymentResult, attendanceResult] = await Promise.all([
+          admin.from("member_extra_charges").select("id", { count: "exact", head: true }).eq("event_id", event.id).eq("member_id", existingMember.id),
+          admin.from("payments").select("id", { count: "exact", head: true }).eq("event_id", event.id).eq("member_id", existingMember.id),
+          admin.from("attendance").select("id", { count: "exact", head: true }).eq("event_id", event.id).eq("member_id", existingMember.id),
+        ]);
+        if (chargesResult.error) throw chargesResult.error;
+        if (paymentResult.error) throw paymentResult.error;
+        if (attendanceResult.error) throw attendanceResult.error;
+        if ((chargesResult.count || 0) + (paymentResult.count || 0) + (attendanceResult.count || 0) > 0) {
+          return json({ error: "รายการนี้เริ่มมีค่าใช้จ่ายแล้ว กรุณาแจ้งแอดมินให้ยกเลิก" }, 409);
         }
+        const { error: deleteError } = await admin.from("signups")
+          .delete()
+          .eq("event_id", event.id)
+          .eq("member_id", existingMember.id);
+        if (deleteError) throw deleteError;
         await admin.from("audit_logs").insert({
           club_id: clubId,
           event_id: event.id,
