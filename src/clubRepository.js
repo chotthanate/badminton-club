@@ -187,6 +187,10 @@ export async function publishEventToLine(eventId) {
   return invokeLineBot({ action: "publish_event", eventId });
 }
 
+export async function changeAdminPassword(password) {
+  return invokeLineBot({ action: "change_admin_password", password });
+}
+
 async function notifyLineEventUpdate(eventId) {
   return invokeLineBot({ action: "update_event_message", eventId });
 }
@@ -333,13 +337,16 @@ async function seedDefaultExtraItems(clubId) {
   throwIfError(error);
 }
 
-export async function setPayment({ clubId, eventId, memberId, amount, paid, userId }) {
+export async function setPayment({ clubId, eventId, memberId, amount, sharedAmount, extrasAmount, shuttlecockCount, paid, userId }) {
   const { error } = await client().from("payments").upsert({
     club_id: clubId,
     event_id: eventId,
     member_id: memberId,
     amount,
     paid_at: paid ? new Date().toISOString() : null,
+    shared_amount: paid ? Math.max(0, Number(sharedAmount) || 0) : null,
+    extras_amount: paid ? Math.max(0, Number(extrasAmount) || 0) : null,
+    shuttlecock_count_snapshot: paid ? Math.max(0, Number(shuttlecockCount) || 0) : null,
     recorded_by: userId,
   }, { onConflict: "event_id,member_id" });
   throwIfError(error);

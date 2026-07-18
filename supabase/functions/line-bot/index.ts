@@ -30,13 +30,8 @@ Deno.serve(async (request) => {
 });
 
 async function publishFromAdmin(request: Request, rawBody: string, authorization: string) {
-  const lineToken = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN");
-  const liffId = Deno.env.get("LINE_LIFF_ID");
-  if (!lineToken) return json({ error: "ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN" }, 503);
-  if (!liffId) return json({ error: "ยังไม่ได้ตั้งค่า LINE_LIFF_ID" }, 503);
-
   const payload = safeJson(rawBody);
-  if (!["publish_event", "update_event_message"].includes(payload?.action) || !payload.eventId) {
+  if (!["publish_event", "update_event_message", "change_admin_password"].includes(payload?.action)) {
     return json({ error: "Invalid action" }, 400);
   }
 
@@ -47,6 +42,45 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
   );
   const { data: authData, error: authError } = await userClient.auth.getUser();
   if (authError || !authData.user) return json({ error: "Unauthorized" }, 401);
+
+  if (payload.action === "change_admin_password") {
+    const password = typeof payload.password === "string" ? payload.password : "";
+    if (password.length < 6 || password.length > 72) {
+      return json({ error: "รหัสต้องมี 6-72 ตัวอักษร" }, 400);
+    }
+    const { data: adminMember, error: adminError } = await userClient
+      .from("club_members")
+      .select("id, club_id")
+      .eq("profile_id", authData.user.id)
+      .eq("role", "admin")
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    if (adminError || !adminMember) return json({ error: "Admin only" }, 403);
+
+    const adminClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const { error: passwordError } = await adminClient.auth.admin.updateUserById(authData.user.id, { password });
+    if (passwordError) {
+      console.error("Admin password update failed", passwordError.message);
+      return json({ error: "เปลี่ยนรหัสไม่สำเร็จ" }, 500);
+    }
+    await adminClient.from("audit_logs").insert({
+      club_id: adminMember.club_id,
+      actor_id: authData.user.id,
+      action: "เปลี่ยนรหัสเข้าเว็บ",
+    });
+    return json({ ok: true });
+  }
+
+  if (!payload.eventId) return json({ error: "Invalid action" }, 400);
+
+  const lineToken = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN");
+  const liffId = Deno.env.get("LINE_LIFF_ID");
+  if (!lineToken) return json({ error: "ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN" }, 503);
+  if (!liffId) return json({ error: "ยังไม่ได้ตั้งค่า LINE_LIFF_ID" }, 503);
 
   const { data: event, error: eventError } = await userClient
     .from("events")

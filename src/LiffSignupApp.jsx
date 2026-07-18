@@ -9,6 +9,7 @@ export default function LiffSignupApp() {
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [roster, setRoster] = useState({ coming: [] });
+  const [rosterExpanded, setRosterExpanded] = useState(false);
   const [savedStatus, setSavedStatus] = useState(null);
   const [savedArrivalTime, setSavedArrivalTime] = useState("");
   const [loading, setLoading] = useState(true);
@@ -147,8 +148,9 @@ export default function LiffSignupApp() {
       </section>
 
       <section className="liff-roster-card">
-        <div className="liff-roster-title"><strong>รายชื่อผู้ร่วมเล่น</strong><span>{roster.coming.length} คน</span></div>
-        <RosterGroup entries={roster.coming} />
+        <div className="liff-roster-title"><strong>รายชื่อผู้เล่น</strong><span>{roster.coming.length} คน</span></div>
+        <RosterGroup entries={roster.coming} expanded={rosterExpanded} />
+        {roster.coming.length > 5 ? <button className="liff-roster-toggle" onClick={() => setRosterExpanded((value) => !value)} type="button">{rosterExpanded ? "ย่อรายชื่อ" : `ดูทั้งหมด ${roster.coming.length} คน`}</button> : null}
       </section>
 
       <section className="liff-answer-card">
@@ -192,10 +194,10 @@ export default function LiffSignupApp() {
   );
 }
 
-function RosterGroup({ entries }) {
+function RosterGroup({ entries, expanded }) {
   return (
-    <div className="liff-roster-group is-coming">
-      {entries.length ? <ol>{entries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><strong>{entry.name}</strong><span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
+    <div className={`liff-roster-group is-coming ${expanded ? "is-expanded" : ""}`}>
+      {entries.length ? <ol>{(expanded ? entries : entries.slice(0, 5)).map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><strong>{entry.name}</strong><span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
     </div>
   );
 }

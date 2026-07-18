@@ -100,6 +100,45 @@ test("calculateSettlement splits shared cost by hours and adds personal extras",
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [210, 130]);
 });
 
+test("calculateSettlement keeps an early payment locked when later costs increase", () => {
+  const result = calculateSettlement(makeEvent({
+    costs: [{ amount: 500 }],
+    attendance: [
+      {
+        memberId: "early",
+        name: "หยก",
+        arrived: true,
+        hours: 1,
+        extraCharges: [{ name: "น้ำขวดเล็ก", unitPrice: 10, quantity: 1 }],
+        paid: true,
+        paidAmount: 100,
+        lockedSharedAmount: 90,
+        lockedExtraAmount: 10,
+        shuttlecockCountSnapshot: 5,
+      },
+      { memberId: "staying", name: "บอย", arrived: true, hours: 3 },
+    ],
+  }));
+
+  assert.equal(result.rows[0].roundedDue, 100);
+  assert.equal(result.rows[0].paid, true);
+  assert.equal(result.rows[0].shuttlecockCountSnapshot, 5);
+  assert.equal(result.rows[1].roundedDue, 410);
+  assert.equal(result.rows.reduce((sum, row) => sum + row.roundedDue, 0), 510);
+});
+
+test("buildLineSummary lists personal items instead of a generic extras total", () => {
+  const summary = buildLineSummary(makeEvent({
+    costs: [{ amount: 100 }],
+    attendance: [
+      { memberId: "a", name: "Jack", arrived: true, hours: 1, extraCharges: [{ name: "น้ำขวดเล็ก", unitPrice: 10, quantity: 2 }] },
+    ],
+  }));
+
+  assert.match(summary, /น้ำขวดเล็ก×2 20 บาท/);
+  assert.doesNotMatch(summary, /รวมของเพิ่ม/);
+});
+
 test("buildLineSummary includes totals, durations, and payment status", () => {
   const summary = buildLineSummary(makeEvent({
     costs: [{ amount: 150 }],

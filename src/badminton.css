@@ -1912,3 +1912,410 @@
     font-size: 27px;
   }
 }
+
+/* Compact court, player, cost, and settlement workflow */
+.badminton-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.badminton-alert > span {
+  min-width: 0;
+}
+
+.badminton-alert > button {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.65);
+  color: currentColor;
+}
+
+.badminton-court-row select,
+.badminton-court-number-input {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #cad6c8;
+  border-radius: 8px;
+  background: #fbfcf8;
+  color: #172018;
+}
+
+.badminton-court-row select {
+  width: 100%;
+  padding: 0 7px;
+}
+
+.badminton-court-number-input {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  color: #536056;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badminton-court-number-input input {
+  min-height: 36px !important;
+  padding: 0 5px !important;
+  border: 0;
+  background: transparent;
+}
+
+.badminton-pricing-title > strong {
+  margin-left: auto;
+  color: #0f7a52;
+  font-size: 21px;
+}
+
+.badminton-court-summary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.badminton-court-summary-list > span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #edf5ec;
+  color: #536056;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.badminton-player-identity {
+  flex-wrap: nowrap;
+}
+
+.badminton-attendance-row > .badminton-player-identity,
+.badminton-attendance-row > .badminton-member-charges {
+  display: flex;
+}
+
+.badminton-player-identity strong {
+  flex: 0 0 auto;
+}
+
+.badminton-player-identity span {
+  min-width: 0;
+  max-width: none;
+  flex: 1;
+}
+
+.badminton-player-identity em {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.badminton-player-controls {
+  grid-template-columns: 100px minmax(140px, 1fr) minmax(118px, auto) 44px;
+}
+
+.badminton-player-controls select,
+.badminton-extra-select-wrap select {
+  min-height: 44px;
+}
+
+.badminton-extra-select-wrap select {
+  border-color: #b8d4bd;
+  background: #eef8f1;
+  color: #0f7a52;
+  font-weight: 900;
+}
+
+.badminton-extra-select-wrap select:disabled {
+  opacity: 0.62;
+}
+
+.badminton-player-controls .badminton-delete-button {
+  width: 44px;
+  height: 44px;
+}
+
+.badminton-member-charges {
+  align-content: flex-start;
+}
+
+.badminton-modal-backdrop {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(23, 32, 24, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.badminton-custom-charge-modal {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 13px;
+  padding: 20px;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+}
+
+.badminton-custom-charge-modal label {
+  display: grid;
+  gap: 5px;
+  color: #536056;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.badminton-password-modal input {
+  min-height: 46px;
+}
+
+.badminton-password-modal .badminton-form-message {
+  margin: 0;
+}
+
+.badminton-modal-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.badminton-modal-title h2 {
+  margin: 0;
+  font-size: 23px;
+}
+
+.badminton-modal-title > button {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #d9e1d7;
+  border-radius: 8px;
+  background: #fff;
+  color: #536056;
+}
+
+.badminton-pay-row {
+  grid-template-columns: minmax(0, 1fr) auto 92px;
+  min-height: 58px;
+  align-items: center;
+  padding: 7px 8px;
+}
+
+.badminton-pay-person {
+  min-width: 0;
+  display: flex !important;
+  align-items: center;
+  gap: 7px !important;
+  white-space: nowrap;
+}
+
+.badminton-pay-person > strong,
+.badminton-pay-person > span,
+.badminton-pay-person > small {
+  flex: 0 0 auto;
+}
+
+.badminton-pay-person > span,
+.badminton-pay-person > small {
+  color: #637064;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.badminton-pay-extras {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+}
+
+.badminton-pay-extras summary {
+  overflow: hidden;
+  color: #8a6512;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-pay-extras > div {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 7px);
+  left: 0;
+  min-width: 220px;
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid #e4d29d;
+  border-radius: 9px;
+  background: #fff9e9;
+  box-shadow: 0 10px 24px rgba(55, 43, 14, 0.18);
+  white-space: normal;
+}
+
+.badminton-pay-extras > div span {
+  color: #725a16;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-pay-amount {
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.badminton-pay-row > button {
+  min-height: 44px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.liff-roster-toggle {
+  min-height: 40px;
+  width: 100%;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: #eaf5eb;
+  color: #0f7a52;
+  font-weight: 900;
+}
+
+.liff-roster-group.is-expanded ol {
+  max-height: min(42dvh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 3px;
+}
+
+@media (max-width: 760px) {
+  .badminton-court-row,
+  .badminton-court-row.is-new {
+    grid-template-columns: minmax(76px, 1fr) 72px 72px 36px 36px;
+  }
+
+  .badminton-court-row.is-new {
+    grid-template-columns: minmax(76px, 1fr) 72px 72px 36px;
+  }
+
+  .badminton-court-row select,
+  .badminton-court-number-input {
+    min-height: 36px;
+    font-size: 12px;
+  }
+
+  .badminton-player-identity {
+    gap: 4px 6px;
+  }
+
+  .badminton-player-identity strong {
+    font-size: 15px;
+  }
+
+  .badminton-player-identity span,
+  .badminton-player-identity em {
+    font-size: 10px;
+  }
+
+  .badminton-player-controls {
+    grid-template-columns: 74px minmax(98px, 1fr) minmax(100px, 112px) 42px;
+    gap: 4px;
+  }
+
+  .badminton-player-controls select,
+  .badminton-extra-select-wrap select {
+    min-height: 44px;
+    padding: 0 5px;
+    font-size: 11px;
+  }
+
+  .badminton-player-controls .badminton-delete-button {
+    width: 42px;
+    height: 44px;
+  }
+
+  .badminton-member-charges > span {
+    padding: 3px 7px;
+  }
+
+  .badminton-pricing-title > strong {
+    font-size: 18px;
+  }
+
+  .badminton-court-summary-list {
+    gap: 5px;
+  }
+
+  .badminton-court-summary-list > span {
+    padding: 4px 7px;
+    font-size: 11px;
+  }
+
+  .badminton-settlement-hero {
+    margin-bottom: 9px;
+    padding: 10px;
+  }
+
+  .badminton-settlement-hero strong {
+    font-size: 29px;
+  }
+
+  .badminton-settlement-hero small {
+    font-size: 10px;
+    text-align: center;
+  }
+
+  .badminton-pay-list {
+    gap: 5px;
+  }
+
+  .badminton-pay-row {
+    grid-template-columns: minmax(0, 1fr) auto 78px;
+    min-height: 54px;
+    gap: 5px;
+    padding: 6px;
+  }
+
+  .badminton-pay-row > div,
+  .badminton-pay-row > button {
+    grid-column: auto;
+  }
+
+  .badminton-pay-person {
+    gap: 5px !important;
+  }
+
+  .badminton-pay-person > strong {
+    max-width: 74px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .badminton-pay-person > small {
+    display: none;
+  }
+
+  .badminton-pay-amount {
+    font-size: 14px;
+  }
+
+  .badminton-pay-row > button {
+    width: 78px;
+    min-height: 42px;
+    gap: 4px;
+    padding: 0 5px;
+  }
+}
