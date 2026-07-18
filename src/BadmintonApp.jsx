@@ -18,6 +18,7 @@ import {
   UserPlus,
   Users,
   WalletCards,
+  X,
 } from "lucide-react";
 import {
   addCourt,
@@ -25,6 +26,7 @@ import {
   addExtraCatalogItem,
   addLineMember,
   addMemberExtraCharge,
+  changeAdminPassword,
   createClub,
   createEvent,
   getAdminContext,
@@ -71,6 +73,12 @@ const ADMIN_TABS = [
   { id: "payments", label: "ชำระเงิน", icon: WalletCards },
   { id: "history", label: "ประวัติ", icon: History },
 ];
+
+const HALF_HOUR_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hour = Math.floor(index / 2);
+  const minute = index % 2 ? "30" : "00";
+  return `${String(hour).padStart(2, "0")}:${minute}`;
+});
 
 export default function BadmintonApp() {
   const [session, setSession] = useState(null);
@@ -152,6 +160,7 @@ function AdminDashboard({ session }) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("round");
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
   async function refresh(silent = false) {
     if (!silent) setLoading(true);
@@ -183,8 +192,10 @@ function AdminDashboard({ session }) {
       await action();
       setNotice(successMessage);
       await refresh();
+      return true;
     } catch (nextError) {
       setError(nextError.message);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -209,14 +220,17 @@ function AdminDashboard({ session }) {
             <button aria-label="รีเฟรชข้อมูล" className="badminton-icon-button" onClick={refresh} type="button">
               <RefreshCw size={18} />
             </button>
+            <button aria-label="เปลี่ยนรหัสเข้าเว็บ" className="badminton-icon-button" onClick={() => setPasswordModalOpen(true)} title="เปลี่ยนรหัสเข้าเว็บ" type="button">
+              <ShieldCheck size={18} />
+            </button>
             <button className="badminton-secondary" onClick={() => supabase.auth.signOut()} type="button">
               <LogOut size={17} /> ออกจากระบบ
             </button>
           </div>
         </header>
 
-        {notice ? <div className="badminton-alert is-success">{notice}</div> : null}
-        {error ? <div className="badminton-alert is-error">{error}</div> : null}
+        {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
+        {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
 
         {!dashboard.event ? (
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />
@@ -255,9 +269,48 @@ function AdminDashboard({ session }) {
             {activeTab === "history" ? <AuditPanel actions={appEvent.actions} /> : null}
           </>
         )}
+        {passwordModalOpen ? (
+          <AdminPasswordModal
+            onClose={() => setPasswordModalOpen(false)}
+            onSave={(password) => mutate(() => changeAdminPassword(password), "เปลี่ยนรหัสเข้าเว็บแล้ว")}
+            saving={saving}
+          />
+        ) : null}
         {saving ? <div className="badminton-saving">กำลังบันทึก...</div> : null}
       </section>
     </main>
+  );
+}
+
+function AdminPasswordModal({ onClose, onSave, saving }) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [localError, setLocalError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    setLocalError("");
+    if (password !== confirmation) {
+      setLocalError("รหัสทั้งสองช่องไม่ตรงกัน");
+      return;
+    }
+    const saved = await onSave(password);
+    if (saved) onClose();
+  }
+
+  return (
+    <div className="badminton-modal-backdrop" role="presentation">
+      <form className="badminton-custom-charge-modal badminton-password-modal" onSubmit={submit}>
+        <div className="badminton-modal-title">
+          <div><p className="badminton-kicker">ความปลอดภัย</p><h2>เปลี่ยนรหัสเข้าเว็บ</h2></div>
+          <button aria-label="ปิด" onClick={onClose} type="button"><X size={18} /></button>
+        </div>
+        <label>รหัสใหม่<input autoComplete="new-password" minLength="6" maxLength="72" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} /></label>
+        <label>ยืนยันรหัสใหม่<input autoComplete="new-password" minLength="6" maxLength="72" onChange={(event) => setConfirmation(event.target.value)} required type="password" value={confirmation} /></label>
+        {localError ? <p className="badminton-form-message is-error">{localError}</p> : null}
+        <button className="badminton-primary" disabled={saving} type="submit"><Save size={17} /> {saving ? "กำลังเปลี่ยน..." : "บันทึกรหัสใหม่"}</button>
+      </form>
+    </div>
   );
 }
 
@@ -303,7 +356,7 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
   const [form, setForm] = useState({
     eventDate: initial.date,
     venue: defaultVenue || venues[0]?.name || "คอร์ทแบดเขาน้อย (คอร์ทใหม่)",
-    courtName: "คอร์ท 7",
+    courtNumber: "7",
     startsAt: "21:00",
     endsAt: "00:00",
   });
@@ -318,6 +371,7 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
         clubName: context.clubs.name,
         userId: session.user.id,
         ...form,
+        courtName: `คอร์ท ${form.courtNumber.trim()}`,
       });
       await recordAudit({
         clubId: context.club_id,
@@ -338,9 +392,9 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
         <label>วันที่<input onChange={(event) => set("eventDate", event.target.value)} required type="date" value={form.eventDate} /></label>
         <label>สถานที่<input list="saved-venues" onChange={(event) => set("venue", event.target.value)} required value={form.venue} /></label>
         <datalist id="saved-venues">{venues.map((venue) => <option key={venue.id} value={venue.name} />)}</datalist>
-        <label>คอร์ท<input onChange={(event) => set("courtName", event.target.value)} required value={form.courtName} /></label>
-        <label>เริ่ม<input onChange={(event) => set("startsAt", event.target.value)} required type="time" value={form.startsAt} /></label>
-        <label>จบ<input onChange={(event) => set("endsAt", event.target.value)} required type="time" value={form.endsAt} /></label>
+        <label>เลขคอร์ท<input inputMode="numeric" onChange={(event) => set("courtNumber", event.target.value)} placeholder="7" required value={form.courtNumber} /></label>
+        <label>เริ่ม<HalfHourSelect ariaLabel="เวลาเริ่มรอบ" onChange={(value) => set("startsAt", value)} value={form.startsAt} /></label>
+        <label>จบ<HalfHourSelect ariaLabel="เวลาจบรอบ" onChange={(value) => set("endsAt", value)} value={form.endsAt} /></label>
         <button className="badminton-primary" type="submit"><Plus size={17} /> สร้างรอบ</button>
       </form>
     </section>
@@ -353,7 +407,7 @@ function EventControlCard({ clubName, courts, event, mutate, venues = [] }) {
     venue: event.venue,
   });
   const [editingDetails, setEditingDetails] = useState(event.status !== "open");
-  const [newCourt, setNewCourt] = useState({ courtName: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
+  const [newCourt, setNewCourt] = useState({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
   const nextStatus = event.status === "open" ? "closed" : "open";
 
   async function addNewCourt(submitEvent) {
@@ -362,8 +416,9 @@ function EventControlCard({ clubName, courts, event, mutate, venues = [] }) {
       clubId: event.club_id,
       eventId: event.id,
       ...newCourt,
+      courtName: `คอร์ท ${newCourt.courtNumber.trim()}`,
     }), "เพิ่มคอร์ทแล้ว");
-    setNewCourt({ courtName: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
+    setNewCourt({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
   }
 
   function toggleSignup() {
@@ -396,12 +451,12 @@ function EventControlCard({ clubName, courts, event, mutate, venues = [] }) {
         <button className="badminton-secondary" onClick={() => mutate(() => updateEventDetails({ clubId: event.club_id, eventId: event.id, patch: form }), "บันทึกรายละเอียดรอบแล้ว")} type="button"><Save size={17} /> บันทึก</button>
       </div> : null}
       <div className="badminton-courts-editor">
-        <div className="badminton-courts-heading"><strong>คอร์ทที่จอง</strong><span>แก้เวลาและเพิ่มคอร์ทที่นี่</span></div>
+        <div className="badminton-courts-heading"><strong>คอร์ทที่จอง</strong></div>
         {courts.map((court) => <CourtEditor key={court.id} court={court} eventId={event.id} mutate={mutate} />)}
         <form className="badminton-court-row is-new" onSubmit={addNewCourt}>
-          <input aria-label="ชื่อคอร์ทใหม่" placeholder="เช่น คอร์ท 8" required value={newCourt.courtName} onChange={(e) => setNewCourt({ ...newCourt, courtName: e.target.value })} />
-          <input aria-label="เวลาเริ่มคอร์ทใหม่" required type="time" value={newCourt.startsAt} onChange={(e) => setNewCourt({ ...newCourt, startsAt: e.target.value })} />
-          <input aria-label="เวลาจบคอร์ทใหม่" required type="time" value={newCourt.endsAt} onChange={(e) => setNewCourt({ ...newCourt, endsAt: e.target.value })} />
+          <div className="badminton-court-number-input"><span>คอร์ท</span><input aria-label="เลขคอร์ทใหม่" inputMode="numeric" placeholder="เลข" required value={newCourt.courtNumber} onChange={(e) => setNewCourt({ ...newCourt, courtNumber: e.target.value })} /></div>
+          <HalfHourSelect ariaLabel="เวลาเริ่มคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, startsAt: value })} value={newCourt.startsAt} />
+          <HalfHourSelect ariaLabel="เวลาจบคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, endsAt: value })} value={newCourt.endsAt} />
           <button aria-label="เพิ่มคอร์ท" className="badminton-secondary badminton-court-add" type="submit"><Plus size={16} /><span>เพิ่ม</span></button>
         </form>
       </div>
@@ -418,18 +473,23 @@ function CourtEditor({ court, eventId, mutate }) {
   return (
     <div className="badminton-court-row">
       <input aria-label={`ชื่อ ${court.court_name}`} value={form.court_name} onChange={(e) => setForm({ ...form, court_name: e.target.value })} />
-      <input aria-label={`เวลาเริ่ม ${court.court_name}`} type="time" value={form.starts_at} onChange={(e) => setForm({ ...form, starts_at: e.target.value })} />
-      <input aria-label={`เวลาจบ ${court.court_name}`} type="time" value={form.ends_at} onChange={(e) => setForm({ ...form, ends_at: e.target.value })} />
+      <HalfHourSelect ariaLabel={`เวลาเริ่ม ${court.court_name}`} onChange={(value) => setForm({ ...form, starts_at: value })} value={form.starts_at} />
+      <HalfHourSelect ariaLabel={`เวลาจบ ${court.court_name}`} onChange={(value) => setForm({ ...form, ends_at: value })} value={form.ends_at} />
       <button aria-label={`บันทึก ${court.court_name}`} className="badminton-icon-button" onClick={() => mutate(() => updateCourt(court.id, eventId, form), `บันทึก ${form.court_name} แล้ว`)} type="button"><Save size={16} /></button>
       <button aria-label={`ลบ ${court.court_name}`} className="badminton-delete-button" onClick={() => mutate(() => removeCourt(court.id, eventId), `ลบ ${court.court_name} แล้ว`)} type="button"><Trash2 size={16} /></button>
     </div>
   );
 }
 
+function HalfHourSelect({ ariaLabel, onChange, value }) {
+  return <select aria-label={ariaLabel} onChange={(event) => onChange(event.target.value)} value={value}>{HALF_HOUR_OPTIONS.map((time) => <option key={time} value={time}>{time}</option>)}</select>;
+}
+
 function ParticipantsPanel({ context, dashboard, event, mutate, session, settlement }) {
   const [name, setName] = useState("");
-  const [expandedExtras, setExpandedExtras] = useState(null);
   const [newItem, setNewItem] = useState({ name: "", price: "" });
+  const [customChargeFor, setCustomChargeFor] = useState(null);
+  const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
   const participants = event.signups
     .filter((signup) => signup.status === "coming")
     .map((signup) => ({
@@ -458,9 +518,42 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     setNewItem({ name: "", price: "" });
   }
 
+  async function addCustomCharge(submitEvent) {
+    submitEvent.preventDefault();
+    const target = customChargeFor;
+    if (!target) return;
+    await mutate(() => addMemberExtraCharge({
+      clubId: event.clubId,
+      eventId: event.id,
+      memberId: target.memberId,
+      item: { name: customCharge.name.trim(), price: Number(customCharge.price) },
+      userId: session.user.id,
+    }), `เพิ่ม ${customCharge.name.trim()} ให้ ${target.name} แล้ว`);
+    setCustomChargeFor(null);
+    setCustomCharge({ name: "", price: "" });
+  }
+
+  function chooseExtra(itemId, memberId, participantName) {
+    if (!itemId) return;
+    if (itemId === "custom") {
+      setCustomChargeFor({ memberId, name: participantName });
+      setCustomCharge({ name: "", price: "" });
+      return;
+    }
+    const item = (dashboard.extraItems || []).find((entry) => entry.id === itemId);
+    if (!item) return;
+    mutate(() => addMemberExtraCharge({
+      clubId: event.clubId,
+      eventId: event.id,
+      memberId,
+      item: { name: item.name, price: Number(item.price) },
+      userId: session.user.id,
+    }), `เพิ่ม ${item.name} ให้ ${participantName} แล้ว`);
+  }
+
   return (
     <section className="badminton-card badminton-participants-card">
-      <div className="badminton-card-title"><Users size={20} /><div><h2>ผู้ร่วมเล่น</h2><p>{participants.length} คน</p></div></div>
+      <div className="badminton-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div></div>
       <form className="badminton-inline-form" onSubmit={addMember}>
         <input aria-label="ชื่อเล่นผู้เล่น" placeholder="พิมพ์ชื่อเล่น" required value={name} onChange={(e) => setName(e.target.value)} />
         <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> เพิ่มคน</button>
@@ -488,7 +581,9 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const playedMinutes = playedMinutesWithinEvent(event.startTime, event.endTime, plannedArrival, leftAt);
           const charges = (dashboard.memberExtras || []).filter((charge) => charge.member_id === member.id);
           const extraTotal = charges.reduce((sum, charge) => sum + Number(charge.unit_price) * Number(charge.quantity), 0);
-          const due = settlementByMember.get(member.id)?.roundedDue || 0;
+          const settlementRow = settlementByMember.get(member.id);
+          const due = settlementRow?.roundedDue || 0;
+          const isPaid = Boolean(settlementRow?.paid);
           const lineName = member.nickname && member.nickname !== member.display_name ? member.display_name : "";
 
           function updateArrival(nextArrival) {
@@ -506,19 +601,19 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
           return (
             <article className="badminton-attendance-row" key={member.id}>
-              <div className="badminton-player-identity"><strong>{participantName}</strong>{lineName ? <span>LINE: {lineName}</span> : null}<em>{formatPlayedDuration(playedMinutes)} · ประมาณ {baht(due)} บาท</em></div>
+              <div className="badminton-player-identity"><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<em>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
-                <button className="badminton-extra-toggle" onClick={() => setExpandedExtras(expandedExtras === member.id ? null : member.id)} type="button"><Plus size={15} /> ของเพิ่ม{extraTotal ? ` ${baht(extraTotal)}` : ""}</button>
+                <label className="badminton-extra-select-wrap"><span>ของเพิ่ม</span><select aria-label={`เพิ่มค่าใช้จ่ายให้ ${participantName}`} disabled={isPaid} onChange={(changeEvent) => chooseExtra(changeEvent.target.value, member.id, participantName)} title={isPaid ? "ยกเลิกรับเงินก่อนแก้ของเพิ่ม" : "เลือกของเพิ่ม"} value=""><option value="">+ ของเพิ่ม{extraTotal ? ` ${baht(extraTotal)}` : ""}</option>{(dashboard.extraItems || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {baht(item.price)} บาท</option>)}<option value="custom">กรอกค่าใช้จ่ายเอง…</option></select></label>
                 <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={() => mutate(() => removeParticipant({ eventId: event.id, memberId: member.id }), `ลบ ${participantName} ออกจากรอบแล้ว`)} type="button"><Trash2 size={17} /></button>
               </div>
-              {charges.length ? <div className="badminton-member-charges">{charges.map((charge) => <span key={charge.id}>{charge.item_name} {baht(Number(charge.unit_price) * Number(charge.quantity))}<button aria-label={`ลบ ${charge.item_name}`} onClick={() => mutate(() => removeMemberExtraCharge(charge.id), `ลบ ${charge.item_name} แล้ว`)} type="button">×</button></span>)}</div> : null}
-              {expandedExtras === member.id ? <div className="badminton-extra-menu">{(dashboard.extraItems || []).map((item) => <button key={item.id} onClick={() => mutate(() => addMemberExtraCharge({ clubId: event.clubId, eventId: event.id, memberId: member.id, item: { name: item.name, price: Number(item.price) }, userId: session.user.id }), `เพิ่ม ${item.name} ให้ ${participantName} แล้ว`)} type="button"><strong>{item.name}</strong><span>{baht(item.price)} บาท</span></button>)}</div> : null}
+              {charges.length ? <div className="badminton-member-charges">{charges.map((charge) => <span key={charge.id}>{charge.item_name} {baht(Number(charge.unit_price) * Number(charge.quantity))}{!isPaid ? <button aria-label={`ลบ ${charge.item_name}`} onClick={() => mutate(() => removeMemberExtraCharge(charge.id), `ลบ ${charge.item_name} แล้ว`)} type="button">×</button> : null}</span>)}</div> : null}
             </article>
           );
-        }) : <div className="badminton-empty">ยังไม่มีผู้ร่วมเล่น</div>}
+        }) : <div className="badminton-empty">ยังไม่มีผู้เล่น</div>}
       </div>
+      {customChargeFor ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal" onSubmit={addCustomCharge}><div className="badminton-modal-title"><div><p className="badminton-kicker">ค่าใช้จ่ายเฉพาะคน</p><h2>เพิ่มรายการให้ {customChargeFor.name}</h2></div><button aria-label="ปิดหน้าต่าง" onClick={() => setCustomChargeFor(null)} type="button"><X size={19} /></button></div><label>ชื่อรายการ<input autoFocus maxLength="80" onChange={(changeEvent) => setCustomCharge({ ...customCharge, name: changeEvent.target.value })} placeholder="เช่น ค่าเอ็นไม้" required value={customCharge.name} /></label><label>ราคา (บาท)<input min="0" onChange={(changeEvent) => setCustomCharge({ ...customCharge, price: changeEvent.target.value })} placeholder="0" required type="number" value={customCharge.price} /></label><button className="badminton-primary" type="submit"><Plus size={17} /> เพิ่มค่าใช้จ่าย</button></form></div> : null}
     </section>
   );
 }
@@ -531,17 +626,16 @@ function PricingPanel({ event, mutate, session }) {
   const courtHours = totalCourtHours(event.courts);
   const courtCost = courtHours * event.courtHourlyRate;
   const shuttleCost = event.shuttlecockCount * event.shuttlecockUnitPrice;
+  const otherCost = event.extraCosts.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const sharedCost = courtCost + shuttleCost + otherCost;
 
   return (
     <section className="badminton-card badminton-pricing-card">
-      <div className="badminton-card-title"><Calculator size={20} /><div><h2>ค่าใช้จ่ายรอบนี้</h2><p>เวลาคอร์ทอ้างอิงจากแท็บ “รอบ” โดยอัตโนมัติ</p></div></div>
+      <div className="badminton-card-title badminton-pricing-title"><Calculator size={20} /><div><h2>ค่าใช้จ่ายรวม</h2></div><strong>{baht(sharedCost)} บาท</strong></div>
       <div className="badminton-pricing-grid">
-        <article className="badminton-price-box">
-          <div className="badminton-price-head"><span>เวลาคอร์ทรวม</span><strong>{courtHours.toFixed(courtHours % 1 ? 1 : 0)} ชม.</strong></div>
-          <p>{event.courts.length} คอร์ท · หากเพิ่มเวลาให้แก้เวลาจบที่แท็บ “รอบ”</p>
-        </article>
-        <article className="badminton-price-box">
-          <div className="badminton-price-head"><span>ค่าคอร์ด</span><strong>{baht(courtCost)} บาท</strong></div>
+        <article className="badminton-price-box badminton-court-summary-box">
+          <div className="badminton-price-head"><span>สรุปคอร์ท</span><strong>{baht(courtCost)} บาท</strong></div>
+          <div className="badminton-court-summary-list">{event.courts.map((court) => <span key={court.id}><strong>{court.name}</strong> {court.startsAt}–{court.endsAt === "00:00" ? "24:00" : court.endsAt} · {formatPlayedDuration(minutesBetween(court.startsAt, court.endsAt))}</span>)}</div>
           <div className="badminton-price-setting">
             {editingCourt ? <input autoFocus min="0" type="number" defaultValue={event.courtHourlyRate} onBlur={(e) => { setEditingCourt(false); mutate(() => updateEvent(event.id, { court_hourly_rate: Number(e.target.value) }), "แก้ราคาคอร์ดแล้ว"); }} /> : <span>{baht(event.courtHourlyRate)} บาท/ชม.</span>}
             <button className="badminton-edit-price" onClick={() => setEditingCourt(true)} type="button">แก้ราคา</button>
@@ -583,16 +677,17 @@ function SettlementPanel({ event, mutate, session, settlement }) {
   }
   return (
     <section className="badminton-card badminton-settlement-card" id="settlement">
-      <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>ยอดที่ต้องจ่าย</h2><p>หารค่าใช้จ่ายส่วนกลางตามเวลาที่อยู่จริง</p></div></div>
+      <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
       <div className="badminton-settlement-hero"><span>ยอดรวมรอบนี้</span><strong>{baht(settlement.totalCost)} บาท</strong><small>ส่วนกลาง {baht(settlement.sharedTotalCost)} · ของเพิ่มรายคน {baht(settlement.personalExtrasTotal)} · {settlement.totalHours.toFixed(1)} ชั่วโมงผู้เล่น</small></div>
       <div className="badminton-pay-list">
-        {settlement.rows.map((row) => (
-          <article className={`badminton-pay-row ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
-            <div><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}{row.extraAmount ? ` · ของเพิ่ม ${baht(row.extraAmount)} บาท` : ""}</span></div>
-            <strong>{baht(row.roundedDue)} บาท</strong>
-            <button className={row.paid ? "is-paid" : ""} onClick={() => mutate(() => setPayment({ clubId: event.clubId, eventId: event.id, memberId: row.memberId, amount: row.roundedDue, paid: !row.paid, userId: session.user.id }), "อัปเดตสถานะรับเงินแล้ว")} type="button"><Check size={16} /> {row.paid ? "จ่ายแล้ว" : "รับเงิน"}</button>
-          </article>
-        ))}
+        {settlement.rows.map((row) => {
+          const extraLabel = formatExtraItems(row.extraCharges);
+          return <article className={`badminton-pay-row ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
+            <div className="badminton-pay-person"><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paid && row.shuttlecockCountSnapshot !== null && row.shuttlecockCountSnapshot !== undefined ? <small>ปิดยอดตอนใช้ลูกแบด {row.shuttlecockCountSnapshot} ลูก</small> : null}</div>
+            <strong className="badminton-pay-amount">{baht(row.roundedDue)} บาท</strong>
+            <button className={row.paid ? "is-paid" : ""} onClick={() => mutate(() => setPayment({ clubId: event.clubId, eventId: event.id, memberId: row.memberId, amount: row.roundedDue, sharedAmount: row.sharedDue, extrasAmount: row.extraAmount, shuttlecockCount: event.shuttlecockCount, paid: !row.paid, userId: session.user.id }), row.paid ? "ยกเลิกสถานะรับเงินแล้ว" : `รับเงิน ${row.name} และล็อกยอดแล้ว`)} type="button"><Check size={16} /> {row.paid ? "จ่ายแล้ว" : "รับเงิน"}</button>
+          </article>;
+        })}
       </div>
       <textarea readOnly value={lineSummary} />
       <button className="badminton-primary" onClick={copySummary} type="button"><Copy size={18} /> {copied ? "คัดลอกแล้ว" : "คัดลอกสรุปส่ง LINE"}</button>
@@ -648,7 +743,10 @@ function mapDashboardToEvent(dashboard) {
       note: row?.note || "",
       extraCharges,
       paid: Boolean(payment?.paid_at),
-      paidAmount: Number(payment?.amount || 0),
+      paidAmount: payment?.paid_at ? Number(payment.amount || 0) : null,
+      lockedSharedAmount: payment?.paid_at && payment.shared_amount !== null && payment.shared_amount !== undefined ? Number(payment.shared_amount) : null,
+      lockedExtraAmount: payment?.paid_at && payment.extras_amount !== null && payment.extras_amount !== undefined ? Number(payment.extras_amount) : null,
+      shuttlecockCountSnapshot: payment?.paid_at ? payment.shuttlecock_count_snapshot : null,
     };
   });
   return {
@@ -684,6 +782,18 @@ function mapDashboardToEvent(dashboard) {
 
 function memberName(member) {
   return member?.nickname?.trim() || member?.display_name?.trim() || "";
+}
+
+function formatExtraItems(charges = []) {
+  const grouped = new Map();
+  charges.forEach((charge) => {
+    const name = charge.name || "รายการอื่น";
+    const current = grouped.get(name) || { quantity: 0, amount: 0 };
+    current.quantity += Number(charge.quantity || 1);
+    current.amount += Number(charge.unitPrice || 0) * Number(charge.quantity || 1);
+    grouped.set(name, current);
+  });
+  return [...grouped.entries()].map(([name, value]) => `${name}${value.quantity > 1 ? `×${value.quantity}` : ""} ${baht(value.amount)}`).join(", ");
 }
 
 function buildTimeOptions(startTime, endTime) {
