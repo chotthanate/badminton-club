@@ -20,6 +20,9 @@ migration.
 - `events`: badminton sessions
 - `event_courts`: courts and independent booking times for each session
 - `signups` and `attendance`: confirmed/not-coming responses, planned arrival times, and actual attendance
+- `club_venues`: remembered venue choices for the next round
+- `extra_item_catalog`: reusable counter items such as water and sports drinks
+- `member_extra_charges`: drinks or other personal charges added to each player
 - `expenses` and `payments`: event costs and payment records
 - `audit_logs`: security-relevant activity history
 

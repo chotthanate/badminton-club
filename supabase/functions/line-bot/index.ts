@@ -18,7 +18,7 @@ Deno.serve(async (request) => {
   const payload = safeJson(rawBody);
   const authorization = request.headers.get("Authorization");
 
-  if (["get_liff_event", "save_liff_nickname", "submit_liff_signup"].includes(payload?.action)) {
+  if (["get_liff_event", "save_liff_nickname", "submit_liff_signup", "cancel_liff_signup"].includes(payload?.action)) {
     return handleLiffRequest(payload);
   }
 
@@ -36,7 +36,7 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
   if (!liffId) return json({ error: "ยังไม่ได้ตั้งค่า LINE_LIFF_ID" }, 503);
 
   const payload = safeJson(rawBody);
-  if (payload?.action !== "publish_event" || !payload.eventId) {
+  if (!["publish_event", "update_event_message"].includes(payload?.action) || !payload.eventId) {
     return json({ error: "Invalid action" }, 400);
   }
 
@@ -65,6 +65,10 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
     .maybeSingle();
   if (!adminMember) return json({ error: "Admin only" }, 403);
 
+  if (payload.action === "update_event_message" && event.status !== "open") {
+    return json({ ok: true, skipped: true });
+  }
+
   const club = Array.isArray(event.clubs) ? event.clubs[0] : event.clubs;
   if (!club?.line_group_id) {
     return json({ error: "ยังไม่พบกลุ่ม LINE กรุณาเชิญบอทเข้ากลุ่มและพิมพ์ข้อความ 1 ครั้ง" }, 409);
@@ -86,6 +90,16 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
     const details = await response.text();
     console.error("LINE push failed", response.status, details);
     return json({ error: "ส่งข้อความเข้า LINE ไม่สำเร็จ" }, 502);
+  }
+
+  if (payload.action === "update_event_message") {
+    await userClient.from("audit_logs").insert({
+      club_id: event.club_id,
+      event_id: event.id,
+      actor_id: authData.user.id,
+      action: "แก้ข้อมูลรอบและส่งการ์ดอัปเดตเข้า LINE",
+    });
+    return json({ ok: true, updatedCardSent: true });
   }
 
   const reopeningClosedEvent = event.status === "closed";
@@ -241,7 +255,7 @@ function buildSignupMessage(event: any, clubName: string, liffId: string) {
             color: "#15966a",
             action: {
               type: "uri",
-              label: "ลงชื่อ",
+              label: "ลงเวลา",
               uri: `https://liff.line.me/${liffId}?event_id=${event.id}`,
             },
           },
@@ -293,10 +307,30 @@ async function handleLiffRequest(payload: any) {
           nickname: existingMember?.nickname || "",
           picture: identity.picture || null,
         },
-        currentStatus: existingSignup?.status || null,
-        currentArrivalTime: shortTime(existingSignup?.arrival_time),
+        currentStatus: existingSignup?.status === "coming" ? "coming" : null,
+        currentArrivalTime: existingSignup?.status === "coming" ? shortTime(existingSignup?.arrival_time) : null,
         roster: await getLiffRoster(admin, event),
       });
+    }
+
+    if (payload.action === "cancel_liff_signup") {
+      if (existingMember?.id) {
+        for (const table of ["member_extra_charges", "payments", "attendance", "signups"]) {
+          const { error } = await admin.from(table)
+            .delete()
+            .eq("event_id", event.id)
+            .eq("member_id", existingMember.id);
+          if (error) throw error;
+        }
+        await admin.from("audit_logs").insert({
+          club_id: clubId,
+          event_id: event.id,
+          actor_id: null,
+          action: `${existingMember.nickname || existingMember.display_name || "สมาชิก"} ยกเลิกการลงชื่อ`,
+          details: { line_user_id: identity.sub, source: "liff" },
+        });
+      }
+      return json({ ok: true, roster: await getLiffRoster(admin, event) });
     }
 
     const nickname = String(payload.nickname || "").trim();
@@ -311,14 +345,14 @@ async function handleLiffRequest(payload: any) {
     }
 
     const status = String(payload.status || "");
-    if (!["coming", "not_coming"].includes(status)) {
+    if (status !== "coming") {
       return json({ error: "คำตอบไม่ถูกต้อง" }, 400);
     }
     if (event.status !== "open") return json({ error: "รอบนี้ปิดรับคำตอบแล้ว" }, 409);
 
-    const arrivalTime = status === "coming" ? shortTime(payload.arrivalTime) : null;
+    const arrivalTime = shortTime(payload.arrivalTime);
     const arrivalTimes = buildArrivalTimeOptions(event.starts_at, event.ends_at);
-    if (status === "coming" && (!arrivalTime || !arrivalTimes.includes(arrivalTime))) {
+    if (!arrivalTime || !arrivalTimes.includes(arrivalTime)) {
       return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
     }
 
