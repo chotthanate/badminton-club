@@ -29,6 +29,7 @@ export async function createClub({ name, ownerId }) {
     .select("id, name, line_group_id")
     .single();
   throwIfError(error);
+  await seedDefaultExtraItems(data.id);
   return data;
 }
 
@@ -50,13 +51,21 @@ export async function loadDashboard(clubId) {
     .eq("active", true)
     .order("created_at");
 
+  const venuesPromise = client().from("club_venues").select("id, name").eq("club_id", clubId).order("created_at", { ascending: false });
+  const extraItemsPromise = client().from("extra_item_catalog").select("*").eq("club_id", clubId).eq("active", true).order("created_at");
+
   if (!event) {
-    const { data: members, error } = await membersPromise;
-    throwIfError(error);
-    return { event: null, members: members || [] };
+    const [membersResult, venuesResult, extraItemsResult] = await Promise.all([membersPromise, venuesPromise, extraItemsPromise]);
+    [membersResult, venuesResult, extraItemsResult].forEach((result) => throwIfError(result.error));
+    return {
+      event: null,
+      members: membersResult.data || [],
+      venues: venuesResult.data || [],
+      extraItems: extraItemsResult.data || [],
+    };
   }
 
-  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult] = await Promise.all([
+  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult] = await Promise.all([
     membersPromise,
     client().from("event_courts").select("*").eq("event_id", event.id).order("position").order("created_at"),
     client().from("signups").select("*").eq("event_id", event.id),
@@ -64,9 +73,12 @@ export async function loadDashboard(clubId) {
     client().from("expenses").select("*").eq("event_id", event.id).order("created_at"),
     client().from("payments").select("*").eq("event_id", event.id),
     client().from("audit_logs").select("*").eq("event_id", event.id).order("created_at", { ascending: false }).limit(20),
+    venuesPromise,
+    extraItemsPromise,
+    client().from("member_extra_charges").select("*").eq("event_id", event.id).order("created_at"),
   ]);
 
-  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult]
+  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult]
     .forEach((result) => throwIfError(result.error));
 
   return {
@@ -78,6 +90,9 @@ export async function loadDashboard(clubId) {
     expenses: expensesResult.data || [],
     payments: paymentsResult.data || [],
     auditLogs: auditResult.data || [],
+    venues: venuesResult.data || [],
+    extraItems: extraItemsResult.data || [],
+    memberExtras: memberExtrasResult.data || [],
   };
 }
 
@@ -97,12 +112,14 @@ export async function createEvent({ clubId, clubName, userId, eventDate, venue, 
     .select("*")
     .single();
   throwIfError(error);
+  await rememberVenue(clubId, venue);
   await addCourt({
     clubId,
     eventId: data.id,
     courtName,
     startsAt,
     endsAt,
+    notifyLine: false,
   });
   return data;
 }
@@ -112,7 +129,13 @@ export async function updateEvent(eventId, patch) {
   throwIfError(error);
 }
 
-export async function addCourt({ clubId, eventId, courtName, startsAt, endsAt }) {
+export async function updateEventDetails({ clubId, eventId, patch }) {
+  await updateEvent(eventId, patch);
+  if (patch.venue) await rememberVenue(clubId, patch.venue);
+  await notifyLineEventUpdate(eventId);
+}
+
+export async function addCourt({ clubId, eventId, courtName, startsAt, endsAt, notifyLine = true }) {
   const { error } = await client().from("event_courts").insert({
     club_id: clubId,
     event_id: eventId,
@@ -122,18 +145,21 @@ export async function addCourt({ clubId, eventId, courtName, startsAt, endsAt })
   });
   throwIfError(error);
   await syncEventTimes(eventId);
+  if (notifyLine) await notifyLineEventUpdate(eventId);
 }
 
 export async function updateCourt(courtId, eventId, patch) {
   const { error } = await client().from("event_courts").update(patch).eq("id", courtId);
   throwIfError(error);
   await syncEventTimes(eventId);
+  await notifyLineEventUpdate(eventId);
 }
 
 export async function removeCourt(courtId, eventId) {
   const { error } = await client().from("event_courts").delete().eq("id", courtId);
   throwIfError(error);
   await syncEventTimes(eventId);
+  await notifyLineEventUpdate(eventId);
 }
 
 async function syncEventTimes(eventId) {
@@ -158,9 +184,15 @@ function timeOnEventTimeline(time, eventStart) {
 }
 
 export async function publishEventToLine(eventId) {
-  const { data, error } = await client().functions.invoke("line-bot", {
-    body: { action: "publish_event", eventId },
-  });
+  return invokeLineBot({ action: "publish_event", eventId });
+}
+
+async function notifyLineEventUpdate(eventId) {
+  return invokeLineBot({ action: "update_event_message", eventId });
+}
+
+async function invokeLineBot(body) {
+  const { data, error } = await client().functions.invoke("line-bot", { body });
   if (error) {
     let message = error.message;
     try {
@@ -191,7 +223,7 @@ export async function addLineMember({ clubId, displayName, lineUserId = null }) 
 }
 
 export async function removeParticipant({ eventId, memberId }) {
-  const tables = ["payments", "attendance", "signups"];
+  const tables = ["member_extra_charges", "payments", "attendance", "signups"];
   for (const table of tables) {
     const { error } = await client().from(table)
       .delete()
@@ -199,6 +231,15 @@ export async function removeParticipant({ eventId, memberId }) {
       .eq("member_id", memberId);
     throwIfError(error);
   }
+}
+
+export async function updateSignupArrival({ eventId, memberId, arrivalTime }) {
+  const { error } = await client().from("signups")
+    .update({ arrival_time: arrivalTime })
+    .eq("event_id", eventId)
+    .eq("member_id", memberId)
+    .eq("status", "coming");
+  throwIfError(error);
 }
 
 export async function updateSignup({ clubId, eventId, memberId, status, arrivalTime = null }) {
@@ -238,6 +279,57 @@ export async function updateExpense(expenseId, amount) {
   const { error } = await client().from("expenses")
     .update({ amount: Math.max(0, Number(amount) || 0) })
     .eq("id", expenseId);
+  throwIfError(error);
+}
+
+export async function addExtraCatalogItem({ clubId, name, price }) {
+  const { error } = await client().from("extra_item_catalog").insert({
+    club_id: clubId,
+    name: name.trim(),
+    price: Math.max(0, Number(price) || 0),
+  });
+  throwIfError(error);
+}
+
+export async function updateExtraCatalogItem(itemId, price) {
+  const { error } = await client().from("extra_item_catalog")
+    .update({ price: Math.max(0, Number(price) || 0) })
+    .eq("id", itemId);
+  throwIfError(error);
+}
+
+export async function addMemberExtraCharge({ clubId, eventId, memberId, item, userId }) {
+  const { error } = await client().from("member_extra_charges").insert({
+    club_id: clubId,
+    event_id: eventId,
+    member_id: memberId,
+    item_name: item.name,
+    unit_price: item.price,
+    quantity: 1,
+    created_by: userId,
+  });
+  throwIfError(error);
+}
+
+export async function removeMemberExtraCharge(chargeId) {
+  const { error } = await client().from("member_extra_charges").delete().eq("id", chargeId);
+  throwIfError(error);
+}
+
+async function rememberVenue(clubId, venue) {
+  const name = venue.trim();
+  if (!name) return;
+  const { error } = await client().from("club_venues").upsert({ club_id: clubId, name }, { onConflict: "club_id,name" });
+  throwIfError(error);
+}
+
+async function seedDefaultExtraItems(clubId) {
+  const defaults = [
+    { club_id: clubId, name: "น้ำขวดเล็ก", price: 10 },
+    { club_id: clubId, name: "น้ำขวดใหญ่", price: 20 },
+    { club_id: clubId, name: "สปอนเซอร์", price: 15 },
+  ];
+  const { error } = await client().from("extra_item_catalog").upsert(defaults, { onConflict: "club_id,name" });
   throwIfError(error);
 }
 

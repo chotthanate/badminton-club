@@ -1,11 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Check, Edit3, LoaderCircle, MapPin } from "lucide-react";
+import { Check, Clock3, Edit3, LoaderCircle, MapPin, X } from "lucide-react";
 import { buildArrivalTimeOptions, getEventIdFromSearch } from "./liffSignup.js";
-
-const STATUS_OPTIONS = [
-  { value: "coming", label: "ไป", detail: "เลือกเวลาที่จะไป" },
-  { value: "not_coming", label: "ไม่ไป", detail: "รอบนี้ไม่ได้ไป" },
-];
 
 export default function LiffSignupApp() {
   const [event, setEvent] = useState(null);
@@ -16,9 +11,6 @@ export default function LiffSignupApp() {
   const [roster, setRoster] = useState({ coming: [] });
   const [savedStatus, setSavedStatus] = useState(null);
   const [savedArrivalTime, setSavedArrivalTime] = useState("");
-  const [pendingStatus, setPendingStatus] = useState(null);
-  const [arrivalTime, setArrivalTime] = useState("");
-  const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -52,7 +44,6 @@ export default function LiffSignupApp() {
         setRoster(data.roster || { coming: [] });
         setSavedStatus(data.currentStatus || null);
         setSavedArrivalTime(data.currentArrivalTime || "");
-        setArrivalTime(data.currentArrivalTime || "");
       } catch (nextError) {
         if (active) setError(nextError.message || "เปิดหน้าลงชื่อไม่สำเร็จ");
       } finally {
@@ -86,26 +77,11 @@ export default function LiffSignupApp() {
     }
   }
 
-  async function choose(status) {
-    if (saving || (savedStatus && !editing)) return;
+  async function chooseTime(arrivalTime) {
+    if (saving || savedStatus === "coming") return;
     if (!nickname.trim()) {
       setNicknameDraft("");
       setShowNicknameModal(true);
-      return;
-    }
-    if (status === "coming") {
-      setPendingStatus("coming");
-      setArrivalTime(savedArrivalTime || "");
-      setError("");
-      return;
-    }
-    await submitAnswer("not_coming", "");
-  }
-
-  async function submitAnswer(status, selectedArrivalTime) {
-    if (saving) return;
-    if (status === "coming" && !selectedArrivalTime) {
-      setError("กรุณาเลือกเวลาที่จะไป");
       return;
     }
     setSaving(true);
@@ -115,19 +91,32 @@ export default function LiffSignupApp() {
       const data = await callLiffApi("submit_liff_signup", {
         eventId,
         idToken,
-        status,
-        arrivalTime: status === "coming" ? selectedArrivalTime : null,
+        status: "coming",
+        arrivalTime,
         nickname: nickname.trim(),
       });
-      setSavedStatus(data.status);
-      setSavedArrivalTime(data.arrivalTime || "");
-      setArrivalTime(data.arrivalTime || "");
-      setNickname(nickname.trim());
+      setSavedStatus("coming");
+      setSavedArrivalTime(data.arrivalTime || arrivalTime);
       setRoster(data.roster || { coming: [] });
-      setPendingStatus(null);
-      setEditing(false);
     } catch (nextError) {
-      setError(nextError.message || "บันทึกคำตอบไม่สำเร็จ");
+      setError(nextError.message || "ลงเวลาไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelSignup() {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const idToken = window.liff.getIDToken();
+      const data = await callLiffApi("cancel_liff_signup", { eventId, idToken });
+      setSavedStatus(null);
+      setSavedArrivalTime("");
+      setRoster(data.roster || { coming: [] });
+    } catch (nextError) {
+      setError(nextError.message || "ยกเลิกการลงชื่อไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
@@ -142,11 +131,6 @@ export default function LiffSignupApp() {
   }
 
   const closed = event.status !== "open";
-  const locked = Boolean((savedStatus && !editing) || closed);
-  const savedLabel = STATUS_OPTIONS.find((option) => option.value === savedStatus)?.label;
-  const savedAnswer = savedStatus === "coming" && savedArrivalTime
-    ? `${savedLabel} เวลา ${savedArrivalTime}`
-    : savedLabel;
   const arrivalTimes = event.arrivalTimes?.length
     ? event.arrivalTimes
     : buildArrivalTimeOptions(event.startTime, event.endTime);
@@ -162,54 +146,32 @@ export default function LiffSignupApp() {
         </div>
       </section>
 
+      <section className="liff-roster-card">
+        <div className="liff-roster-title"><strong>รายชื่อผู้ร่วมเล่น</strong><span>{roster.coming.length} คน</span></div>
+        <RosterGroup entries={roster.coming} />
+      </section>
+
       <section className="liff-answer-card">
         <div className="liff-signup-as"><span>ลงชื่อเป็น</span><strong>{nickname}</strong><button onClick={() => { setNicknameDraft(nickname); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> แก้ชื่อเล่น</button></div>
         <div className="liff-answer-heading">
-          <div><span>คำตอบของคุณ</span><strong>{closed ? "รอบนี้ปิดรับคำตอบแล้ว" : locked ? `คำตอบที่บันทึกไว้: ${savedAnswer}` : "กรุณาเลือกคำตอบ"}</strong></div>
-          {locked && savedStatus ? <Check className="liff-saved-check" size={24} /> : null}
+          <div><span>เวลาของคุณ</span><strong>{closed ? "รอบนี้ปิดรับลงเวลาแล้ว" : savedStatus === "coming" ? "ลงเวลาเรียบร้อยแล้ว" : "เลือกเวลาที่จะไป"}</strong></div>
+          {savedStatus === "coming" ? <Check className="liff-saved-check" size={24} /> : <Clock3 size={22} />}
         </div>
 
-        <div className="liff-answer-options">
-          {STATUS_OPTIONS.map((option) => {
-            const selected = locked ? savedStatus === option.value : pendingStatus === option.value;
-            return (
-              <button
-                className={`${selected ? "is-selected" : ""} ${locked ? "is-locked" : ""}`}
-                disabled={saving || locked}
-                key={option.value}
-                onClick={() => choose(option.value)}
-                type="button"
-              >
-                <span><strong>{option.label}</strong><small>{option.detail}</small></span>
-                {selected && locked ? <Check size={21} /> : null}
-              </button>
-            );
-          })}
-        </div>
-
-        {!locked && pendingStatus === "coming" ? (
-          <div className="liff-arrival-picker">
-            <label htmlFor="arrival-time">เวลาที่จะไป</label>
-            <select id="arrival-time" onChange={(changeEvent) => setArrivalTime(changeEvent.target.value)} value={arrivalTime}>
-              <option value="">เลือกเวลา</option>
-              {arrivalTimes.map((value) => <option key={value} value={value}>{value} น.</option>)}
-            </select>
-            <button className="liff-save-answer" disabled={saving || !arrivalTime} onClick={() => submitAnswer("coming", arrivalTime)} type="button">บันทึกคำตอบ</button>
+        {savedStatus === "coming" ? (
+          <div className="liff-saved-time-card">
+            <span>เวลาที่ลงไว้</span>
+            <strong>{savedArrivalTime} น.</strong>
           </div>
-        ) : null}
+        ) : closed ? null : (
+          <div className="liff-time-options">
+            {arrivalTimes.map((value) => <button disabled={saving} key={value} onClick={() => chooseTime(value)} type="button">{value} น.</button>)}
+          </div>
+        )}
 
         {saving ? <div className="liff-saving"><LoaderCircle size={18} /> กำลังบันทึก...</div> : null}
         {error ? <div className="liff-inline-error">{error}</div> : null}
-        {locked && !closed ? (
-          <button className="liff-edit-answer" onClick={() => { setPendingStatus(savedStatus); setArrivalTime(savedArrivalTime); setEditing(true); }} type="button"><Edit3 size={16} /> แก้ไขคำตอบ</button>
-        ) : null}
-      </section>
-
-      <section className="liff-roster-card">
-        <div className="liff-roster-title"><strong>คนที่จะไป</strong><span>{roster.coming.length} คน</span></div>
-        <div className="liff-roster-grid">
-          <RosterGroup entries={roster.coming} />
-        </div>
+        {savedStatus === "coming" && !closed ? <button className="liff-cancel-signup" disabled={saving} onClick={cancelSignup} type="button"><X size={16} /> ยกเลิกการลงชื่อ</button> : null}
       </section>
 
       {showNicknameModal ? (
@@ -233,7 +195,7 @@ export default function LiffSignupApp() {
 function RosterGroup({ entries }) {
   return (
     <div className="liff-roster-group is-coming">
-      {entries.length ? <ol>{entries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><strong>{entry.name}</strong><span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงชื่อว่าจะไป</p>}
+      {entries.length ? <ol>{entries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><strong>{entry.name}</strong><span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
     </div>
   );
 }

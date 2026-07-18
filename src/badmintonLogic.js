@@ -3,13 +3,6 @@ export const STATUS_LABELS = {
   not_coming: "ไม่มา",
 };
 
-export const WEIGHT_PRESETS = [
-  { label: "เต็ม", value: 1 },
-  { label: "75%", value: 0.75 },
-  { label: "ครึ่ง", value: 0.5 },
-  { label: "25%", value: 0.25 },
-];
-
 export function baht(value) {
   return new Intl.NumberFormat("th-TH", {
     maximumFractionDigits: 0,
@@ -47,37 +40,83 @@ export function weightFromTimes(startTime, endTime, leftAt) {
   return clamp(roundToStep(played / total, 0.01), 0.05, 1);
 }
 
+export function playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt = "") {
+  const eventStart = parseTime(startTime);
+  const duration = minutesBetween(startTime, endTime);
+  const arrival = parseTime(arrivalTime || startTime);
+  const departure = parseTime(leftAt || endTime);
+  if (eventStart === null || arrival === null || departure === null || !duration) return 0;
+
+  const eventEnd = eventStart + duration;
+  let arrivalPoint = arrival < eventStart ? arrival + 24 * 60 : arrival;
+  let departurePoint = departure < eventStart ? departure + 24 * 60 : departure;
+  if (departurePoint <= arrivalPoint && leftAt) departurePoint += 24 * 60;
+  arrivalPoint = clamp(arrivalPoint, eventStart, eventEnd);
+  departurePoint = clamp(departurePoint, arrivalPoint, eventEnd);
+  return departurePoint - arrivalPoint;
+}
+
+export function formatPlayedDuration(minutes) {
+  const value = Math.max(0, Number(minutes) || 0);
+  const hours = Math.floor(value / 60);
+  const remainder = value % 60;
+  if (!remainder) return `${hours} ชม.`;
+  if (!hours) return `${remainder} นาที`;
+  return `${hours} ชม. ${remainder} นาที`;
+}
+
 export function calculateSettlement(event) {
-  const totalCost = event.costs.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const billableRows = event.attendance.filter((row) => row.arrived && Number(row.weight) > 0);
-  const totalUnits = billableRows.reduce((sum, row) => sum + Number(row.weight || 0), 0);
-  const unitPrice = totalUnits > 0 ? totalCost / totalUnits : 0;
-  let roundedTotal = 0;
+  const sharedTotalCost = event.costs.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const billableRows = event.attendance.filter((row) => row.arrived && billingUnits(row) > 0);
+  const totalHours = billableRows.reduce((sum, row) => sum + billingUnits(row), 0);
+  const unitPrice = totalHours > 0 ? sharedTotalCost / totalHours : 0;
+  let roundedSharedTotal = 0;
 
   const rows = billableRows.map((row) => {
-    const rawDue = unitPrice * Number(row.weight || 0);
-    const roundedDue = Math.round(rawDue);
-    roundedTotal += roundedDue;
+    const hours = billingUnits(row);
+    const rawSharedDue = unitPrice * hours;
+    const sharedDue = Math.round(rawSharedDue);
+    const extraAmount = (row.extraCharges || []).reduce(
+      (sum, charge) => sum + Number(charge.unitPrice || 0) * Number(charge.quantity || 1),
+      Number(row.extraAmount || 0),
+    );
+    roundedSharedTotal += sharedDue;
     return {
       ...row,
-      rawDue,
-      roundedDue,
-      paid: Boolean(row.paid),
+      hours,
+      rawDue: rawSharedDue + extraAmount,
+      sharedDue,
+      extraAmount,
+      roundedDue: sharedDue + Math.round(extraAmount),
+      paymentRecorded: Boolean(row.paid),
+      paidAmount: row.paidAmount === undefined ? null : Number(row.paidAmount || 0),
+      paid: false,
     };
   });
 
-  const delta = Math.round(totalCost) - roundedTotal;
+  const delta = Math.round(sharedTotalCost) - roundedSharedTotal;
   if (rows.length && delta !== 0) {
     rows[rows.length - 1] = {
       ...rows[rows.length - 1],
+      sharedDue: rows[rows.length - 1].sharedDue + delta,
       roundedDue: rows[rows.length - 1].roundedDue + delta,
       roundingDelta: delta,
     };
   }
 
+  rows.forEach((row) => {
+    row.paid = row.paymentRecorded && (row.paidAmount === null || Math.round(row.paidAmount) === row.roundedDue);
+  });
+
+  const personalExtrasTotal = rows.reduce((sum, row) => sum + Math.round(row.extraAmount), 0);
+  const totalCost = sharedTotalCost + personalExtrasTotal;
+
   return {
     totalCost,
-    totalUnits,
+    sharedTotalCost,
+    personalExtrasTotal,
+    totalHours,
+    totalUnits: totalHours,
     unitPrice,
     rows,
   };
@@ -89,12 +128,13 @@ export function buildLineSummary(event) {
     `สรุปค่าแบด ${formatThaiLongDate(event.date)}`,
     event.venue ? `สถานที่ : ${event.venue}` : "",
     ...(event.courts || []).map((court) => `${court.name} : ${court.startsAt}-${court.endsAt === "00:00" ? "24:00" : court.endsAt}`),
-    `รวม ${baht(settlement.totalCost)} บาท / ${decimalBaht(settlement.totalUnits)} หน่วย`,
+    `รวม ${baht(settlement.totalCost)} บาท / ${decimalBaht(settlement.totalHours)} ชั่วโมงผู้เล่น`,
     "",
     ...settlement.rows.map((row) => {
-      const weight = `${Math.round(Number(row.weight || 0) * 100)}%`;
+      const duration = formatPlayedDuration(Number(row.hours || 0) * 60);
+      const extras = row.extraAmount ? ` รวมของเพิ่ม ${baht(row.extraAmount)} บาท` : "";
       const paid = row.paid ? " จ่ายแล้ว" : "";
-      return `${row.name} (${weight}) ${baht(row.roundedDue)} บาท${paid}`;
+      return `${row.name} (${duration}) ${baht(row.roundedDue)} บาท${extras}${paid}`;
     }),
   ];
 
@@ -185,4 +225,9 @@ function roundToStep(value, step) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function billingUnits(row) {
+  if (Number.isFinite(Number(row.hours)) && Number(row.hours) > 0) return Number(row.hours);
+  return Number(row.weight || 0);
 }
