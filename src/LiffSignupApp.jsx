@@ -9,7 +9,6 @@ export default function LiffSignupApp() {
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [roster, setRoster] = useState({ coming: [] });
-  const [rosterExpanded, setRosterExpanded] = useState(false);
   const [savedStatus, setSavedStatus] = useState(null);
   const [savedArrivalTime, setSavedArrivalTime] = useState("");
   const [loading, setLoading] = useState(true);
@@ -55,6 +54,31 @@ export default function LiffSignupApp() {
     start();
     return () => { active = false; };
   }, [eventId]);
+
+  useEffect(() => {
+    if (!event?.id || !window.liff?.isLoggedIn()) return undefined;
+    let active = true;
+    const refresh = async () => {
+      if (document.hidden) return;
+      try {
+        const idToken = window.liff.getIDToken();
+        if (!idToken) return;
+        const data = await callLiffApi("get_liff_event", { eventId, idToken });
+        if (!active) return;
+        setEvent(data.event);
+        setRoster(data.roster || { coming: [] });
+        setSavedStatus(data.currentStatus || null);
+        setSavedArrivalTime(data.currentArrivalTime || "");
+      } catch {
+        // Keep the current screen usable during a temporary refresh failure.
+      }
+    };
+    const timer = window.setInterval(refresh, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [event?.id, eventId]);
 
   async function saveNickname(submitEvent) {
     submitEvent.preventDefault();
@@ -139,18 +163,11 @@ export default function LiffSignupApp() {
   return (
     <SignupShell>
       <section className="liff-event-card">
-        <p className="badminton-kicker">HEADSHOT BADMINTON</p>
-        <h1>วันที่ {event.dateLabel}</h1>
+        <h1>{event.dateLabel}</h1>
         <div className="liff-venue"><MapPin size={18} /><span>{event.venue}</span></div>
         <div className="liff-courts">
           {event.courts.map((court) => <span key={court.name}><strong>{court.name}</strong> {court.time}</span>)}
         </div>
-      </section>
-
-      <section className="liff-roster-card">
-        <div className="liff-roster-title"><strong>รายชื่อผู้เล่น</strong><span>{roster.coming.length} คน</span></div>
-        <RosterGroup entries={roster.coming} expanded={rosterExpanded} />
-        {roster.coming.length > 5 ? <button className="liff-roster-toggle" onClick={() => setRosterExpanded((value) => !value)} type="button">{rosterExpanded ? "ย่อรายชื่อ" : `ดูทั้งหมด ${roster.coming.length} คน`}</button> : null}
       </section>
 
       <section className="liff-answer-card">
@@ -176,6 +193,11 @@ export default function LiffSignupApp() {
         {savedStatus === "coming" && !closed ? <button className="liff-cancel-signup" disabled={saving} onClick={cancelSignup} type="button"><X size={16} /> ยกเลิกการลงชื่อ</button> : null}
       </section>
 
+      <section className="liff-roster-card">
+        <div className="liff-roster-title"><strong>รายชื่อผู้เล่น</strong><span>{roster.coming.length} คน</span></div>
+        <RosterGroup entries={roster.coming} />
+      </section>
+
       {showNicknameModal ? (
         <div className="liff-modal-backdrop" role="presentation">
           <form className="liff-nickname-modal" onSubmit={saveNickname}>
@@ -194,10 +216,10 @@ export default function LiffSignupApp() {
   );
 }
 
-function RosterGroup({ entries, expanded }) {
+function RosterGroup({ entries }) {
   return (
-    <div className={`liff-roster-group is-coming ${expanded ? "is-expanded" : ""}`}>
-      {entries.length ? <ol>{(expanded ? entries : entries.slice(0, 5)).map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><strong>{entry.name}</strong><span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
+    <div className="liff-roster-group is-coming">
+      {entries.length ? <ol>{entries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><b>{index + 1}.</b><strong>{entry.name}</strong><span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
     </div>
   );
 }

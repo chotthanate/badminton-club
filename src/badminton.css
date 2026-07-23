@@ -2183,24 +2183,6 @@
   font-size: 12px;
 }
 
-.liff-roster-toggle {
-  min-height: 40px;
-  width: 100%;
-  margin-top: 8px;
-  border: 0;
-  border-radius: 8px;
-  background: #eaf5eb;
-  color: #0f7a52;
-  font-weight: 900;
-}
-
-.liff-roster-group.is-expanded ol {
-  max-height: min(42dvh, 360px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 3px;
-}
-
 @media (max-width: 760px) {
   .badminton-court-row,
   .badminton-court-row.is-new {
@@ -2317,5 +2299,155 @@
     min-height: 42px;
     gap: 4px;
     padding: 0 5px;
+  }
+}
+
+/* Signup order, compact sorting, and larger mobile controls */
+.liff-event-card h1 {
+  margin: 0 0 9px;
+  font-size: clamp(23px, 4.5vw, 29px);
+  line-height: 1.2;
+}
+
+.liff-venue {
+  font-size: 15px;
+}
+
+.liff-roster-group li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+}
+
+.liff-roster-group li > b {
+  color: #637064;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: right;
+}
+
+.badminton-event-form.badminton-event-main-form {
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto;
+}
+
+.badminton-player-card-title {
+  align-items: center;
+}
+
+.badminton-player-sort {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: #637064;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.badminton-player-sort select {
+  width: auto;
+  min-height: 36px;
+  padding: 0 28px 0 9px;
+  font-size: 12px;
+}
+
+.badminton-catalog-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px auto 36px;
+  align-items: center;
+  gap: 6px;
+  color: #536056;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-catalog-item input {
+  min-height: 38px;
+}
+
+.badminton-catalog-item em {
+  font-style: normal;
+}
+
+.badminton-catalog-delete {
+  width: 36px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #efc6c1;
+  border-radius: 8px;
+  background: #fff7f6;
+  color: #b42318;
+}
+
+.badminton-player-identity {
+  align-items: baseline;
+  column-gap: 8px;
+  line-height: 1.25;
+}
+
+.badminton-attendance-row > .badminton-player-identity {
+  align-items: baseline;
+  column-gap: 8px;
+}
+
+.badminton-player-index {
+  flex: 0 0 auto;
+  margin-right: 2px;
+  color: #637064;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.badminton-player-identity strong,
+.badminton-player-identity span {
+  line-height: 1.25;
+}
+
+.badminton-player-identity span {
+  margin-left: 3px;
+}
+
+.badminton-player-controls select,
+.badminton-extra-select-wrap select {
+  min-height: 52px;
+}
+
+.badminton-player-controls .badminton-delete-button {
+  height: 52px;
+}
+
+@media (max-width: 760px) {
+  .liff-event-card h1 {
+    font-size: 24px;
+  }
+
+  .liff-venue {
+    font-size: 14px;
+  }
+
+  .badminton-event-form.badminton-event-main-form {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 42px;
+  }
+
+  .badminton-player-sort {
+    gap: 4px;
+  }
+
+  .badminton-player-sort > span {
+    display: none;
+  }
+
+  .badminton-player-sort select {
+    max-width: 142px;
+    min-height: 38px;
+    font-size: 11px;
+  }
+
+  .badminton-player-controls select,
+  .badminton-extra-select-wrap select,
+  .badminton-player-controls .badminton-delete-button {
+    min-height: 52px;
+    height: 52px;
   }
 }

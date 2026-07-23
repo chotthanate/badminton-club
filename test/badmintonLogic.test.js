@@ -135,11 +135,11 @@ test("buildLineSummary lists personal items instead of a generic extras total", 
     ],
   }));
 
-  assert.match(summary, /น้ำขวดเล็ก×2 20 บาท/);
+  assert.match(summary, /1\.Jack = 120 บาท \(น้ำขวดเล็ก×2 20 บาท\)/);
   assert.doesNotMatch(summary, /รวมของเพิ่ม/);
 });
 
-test("buildLineSummary includes totals, durations, and payment status", () => {
+test("buildLineSummary uses the compact transfer format", () => {
   const summary = buildLineSummary(makeEvent({
     costs: [{ amount: 150 }],
     attendance: [
@@ -148,7 +148,9 @@ test("buildLineSummary includes totals, durations, and payment status", () => {
     ],
   }));
 
-  assert.match(summary, /รวม 150 บาท \/ 1\.50 ชั่วโมงผู้เล่น/);
-  assert.match(summary, /แอดมิน \(1 ชม\.\) 100 บาท จ่ายแล้ว/);
-  assert.match(summary, /บอย \(30 นาที\) 50 บาท/);
+  assert.match(summary, /^ค่าตีแบต 17 ก\.ค\. 69/m);
+  assert.match(summary, /1\.แอดมิน = 100 บาท/);
+  assert.match(summary, /2\.บอย = 50 บาท/);
+  assert.doesNotMatch(summary, /ชั่วโมงผู้เล่น|ชม\.|จ่ายแล้ว|รวม 150/);
+  assert.match(summary, /โอนเงิน : ธนาคารกสิกร\n389-2-36746-8\nณฐกฤต อินนะใจ$/);
 });
