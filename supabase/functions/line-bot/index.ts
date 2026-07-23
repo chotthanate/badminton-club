@@ -251,8 +251,7 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
       return;
     }
     await replyLineMessages(event.replyToken, [
-      buildSignupMessage(currentEvent, club.name, liffId),
-      permanentSignupText(liffId),
+      buildSignupMessage(currentEvent, liffId),
     ], lineToken);
     return;
   }
@@ -261,7 +260,7 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
   if (!readyEvent) {
     const currentEvent = await latestEvent(admin, club.id, eventFields, "open");
     const message = currentEvent
-      ? `รอบล่าสุดเปิดลงชื่ออยู่แล้ว\n${permanentSignupUrl(liffId)}`
+      ? "รอบล่าสุดเปิดลงชื่ออยู่แล้ว"
       : "ยังไม่มีรอบที่แอดมินกดเตรียมเปิดลงชื่อจากเว็บไซต์";
     await replyLine(event.replyToken, message, lineToken);
     return;
@@ -285,8 +284,7 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
 
   try {
     await replyLineMessages(event.replyToken, [
-      buildSignupMessage(readyEvent, club.name, liffId),
-      permanentSignupText(liffId),
+      buildSignupMessage(readyEvent, liffId),
     ], lineToken);
     await admin.from("audit_logs").insert({
       club_id: club.id,
@@ -323,23 +321,13 @@ function normalizeLineCommand(value: unknown) {
   return String(value || "").trim().replace(/\s+/g, "");
 }
 
-function permanentSignupUrl(liffId: string) {
-  return `https://liff.line.me/${liffId}?latest=1`;
-}
-
-function permanentSignupText(liffId: string) {
-  return {
-    type: "text",
-    text: `🏸 ลงชื่อเล่นแบดรอบล่าสุด\n${permanentSignupUrl(liffId)}\n\nกดค้างข้อความนี้แล้วเลือก “ประกาศ” เพื่อให้ลิงก์อยู่ด้านบนของกลุ่ม`,
-  };
-}
-
-function buildSignupMessage(event: any, clubName: string, liffId: string) {
+function buildSignupMessage(event: any, liffId: string) {
   const courts = [...(event.event_courts || [])]
     .sort((a, b) => a.position - b.position)
     .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`)
     .join(" · ");
-  const title = `${clubName} : วันที่ ${thaiLongDate(event.event_date)}`;
+  const cardDate = thaiLongDate(event.event_date).replace("ที่ ", " ที่ ");
+  const title = `🏸 ลงชื่อเล่นแบดมินตัน : ${cardDate}`;
 
   return {
     type: "flex",
@@ -351,12 +339,12 @@ function buildSignupMessage(event: any, clubName: string, liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          { type: "text", text: clubName, weight: "bold", size: "xl", wrap: true },
-          { type: "text", text: `วันที่ ${thaiLongDate(event.event_date)}`, color: "#15966a", weight: "bold" },
+          { type: "text", text: "🏸 ลงชื่อเล่นแบดมินตัน", weight: "bold", size: "xl", wrap: true },
+          { type: "text", text: cardDate, color: "#15966a", weight: "bold" },
           { type: "separator" },
           { type: "text", text: `สถานที่ : ${event.venue}`, size: "sm", wrap: true },
           { type: "text", text: courts || "ยังไม่ได้ระบุคอร์ท", size: "xs", color: "#637064", wrap: true },
-          { type: "text", text: "🏸สนใจออกกำลังกาย เบาๆ ลงชื่อได้เลยนะครับ🏸", size: "sm", color: "#15966a", wrap: true },
+          { type: "text", text: "🏸สนใจออกกำลังกาย เบาๆ ลงชื่อได้เลย🏸", size: "sm", color: "#15966a", wrap: true },
         ],
       },
       footer: {
