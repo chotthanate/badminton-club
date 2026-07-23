@@ -34,6 +34,7 @@ import {
   recordAudit,
   publishEventToLine,
   removeCourt,
+  removeExtraCatalogItem,
   removeMemberExtraCharge,
   removeParticipant,
   setPayment,
@@ -490,6 +491,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [newItem, setNewItem] = useState({ name: "", price: "" });
   const [customChargeFor, setCustomChargeFor] = useState(null);
   const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
+  const [sortMode, setSortMode] = useState("signup");
   const participants = event.signups
     .filter((signup) => signup.status === "coming")
     .map((signup) => ({
@@ -497,8 +499,11 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       member: dashboard.members.find((member) => member.id === signup.memberId),
       attendance: event.attendance.find((row) => row.memberId === signup.memberId),
     }))
-    .filter((row) => row.member)
-    .sort((a, b) => timePosition(a.arrivalTime, event.startTime) - timePosition(b.arrivalTime, event.startTime));
+    .filter((row) => row.member);
+  const sortedParticipants = [...participants].sort((a, b) => {
+    if (sortMode === "alphabetical") return memberName(a.member).localeCompare(memberName(b.member), "th");
+    return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+  });
   const timeOptions = useMemo(() => buildTimeOptions(event.startTime, event.endTime), [event.startTime, event.endTime]);
   const settlementByMember = new Map(settlement.rows.map((row) => [row.memberId, row]));
 
@@ -514,7 +519,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
   async function addCatalogItem(submitEvent) {
     submitEvent.preventDefault();
-    await mutate(() => addExtraCatalogItem({ clubId: context.club_id, name: newItem.name, price: newItem.price }), "เพิ่มรายการหน้าคอร์ทแล้ว");
+    await mutate(() => addExtraCatalogItem({ clubId: context.club_id, name: newItem.name, price: newItem.price }), "เพิ่มสินค้าแล้ว");
     setNewItem({ name: "", price: "" });
   }
 
@@ -553,17 +558,17 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
   return (
     <section className="badminton-card badminton-participants-card">
-      <div className="badminton-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div></div>
+      <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><label className="badminton-player-sort"><span>เรียงลำดับ</span><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => setSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label></div>
       <form className="badminton-inline-form" onSubmit={addMember}>
         <input aria-label="ชื่อเล่นผู้เล่น" placeholder="พิมพ์ชื่อเล่น" required value={name} onChange={(e) => setName(e.target.value)} />
         <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> เพิ่มคน</button>
       </form>
 
       <details className="badminton-catalog-settings">
-        <summary><PackagePlus size={17} /> รายการหน้าคอร์ท</summary>
+        <summary><PackagePlus size={17} /> รายการสินค้า น้ำ-ขนม</summary>
         <div className="badminton-catalog-list">
           {(dashboard.extraItems || []).map((item) => (
-            <label key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em></label>
+            <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>
           ))}
         </div>
         <form className="badminton-catalog-add" onSubmit={addCatalogItem}>
@@ -574,7 +579,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       </details>
 
       <div className="badminton-attendance-list">
-        {participants.length ? participants.map(({ member, attendance: row, arrivalTime }) => {
+        {sortedParticipants.length ? sortedParticipants.map(({ member, attendance: row, arrivalTime }, playerIndex) => {
           const participantName = memberName(member);
           const plannedArrival = arrivalTime || event.startTime;
           const leftAt = row?.leftAt || "";
@@ -601,11 +606,11 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
           return (
             <article className="badminton-attendance-row" key={member.id}>
-              <div className="badminton-player-identity"><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<em>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
+              <div className="badminton-player-identity"><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<em>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
-                <label className="badminton-extra-select-wrap"><span>ของเพิ่ม</span><select aria-label={`เพิ่มค่าใช้จ่ายให้ ${participantName}`} disabled={isPaid} onChange={(changeEvent) => chooseExtra(changeEvent.target.value, member.id, participantName)} title={isPaid ? "ยกเลิกรับเงินก่อนแก้ของเพิ่ม" : "เลือกของเพิ่ม"} value=""><option value="">+ ของเพิ่ม{extraTotal ? ` ${baht(extraTotal)}` : ""}</option>{(dashboard.extraItems || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {baht(item.price)} บาท</option>)}<option value="custom">กรอกค่าใช้จ่ายเอง…</option></select></label>
+                <label className="badminton-extra-select-wrap"><span>น้ำ/ขนม</span><select aria-label={`เพิ่มน้ำหรือขนมให้ ${participantName}`} disabled={isPaid} onChange={(changeEvent) => chooseExtra(changeEvent.target.value, member.id, participantName)} title={isPaid ? "ยกเลิกรับเงินก่อนแก้สินค้า" : "เลือกน้ำหรือขนม"} value=""><option value="">+ น้ำ/ขนม{extraTotal ? ` ${baht(extraTotal)}` : ""}</option>{(dashboard.extraItems || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {baht(item.price)} บาท</option>)}<option value="custom">กรอกค่าใช้จ่ายเอง…</option></select></label>
                 <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={() => mutate(() => removeParticipant({ eventId: event.id, memberId: member.id }), `ลบ ${participantName} ออกจากรอบแล้ว`)} type="button"><Trash2 size={17} /></button>
               </div>
               {charges.length ? <div className="badminton-member-charges">{charges.map((charge) => <span key={charge.id}>{charge.item_name} {baht(Number(charge.unit_price) * Number(charge.quantity))}{!isPaid ? <button aria-label={`ลบ ${charge.item_name}`} onClick={() => mutate(() => removeMemberExtraCharge(charge.id), `ลบ ${charge.item_name} แล้ว`)} type="button">×</button> : null}</span>)}</div> : null}
@@ -763,7 +768,7 @@ function mapDashboardToEvent(dashboard) {
     shuttlecockCount,
     shuttlecockUnitPrice,
     members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, role: member.role, lineUserId: member.line_user_id, active: member.active })),
-    signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note })),
+    signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note, createdAt: row.created_at })),
     attendance,
     extraCosts,
     costs: [

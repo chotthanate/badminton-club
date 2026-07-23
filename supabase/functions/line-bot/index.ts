@@ -31,7 +31,7 @@ Deno.serve(async (request) => {
 
 async function publishFromAdmin(request: Request, rawBody: string, authorization: string) {
   const payload = safeJson(rawBody);
-  if (!["publish_event", "update_event_message", "change_admin_password"].includes(payload?.action)) {
+  if (!["publish_event", "change_admin_password"].includes(payload?.action)) {
     return json({ error: "Invalid action" }, 400);
   }
 
@@ -99,10 +99,6 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
     .maybeSingle();
   if (!adminMember) return json({ error: "Admin only" }, 403);
 
-  if (payload.action === "update_event_message" && event.status !== "open") {
-    return json({ ok: true, skipped: true });
-  }
-
   const club = Array.isArray(event.clubs) ? event.clubs[0] : event.clubs;
   if (!club?.line_group_id) {
     return json({ error: "ยังไม่พบกลุ่ม LINE กรุณาเชิญบอทเข้ากลุ่มและพิมพ์ข้อความ 1 ครั้ง" }, 409);
@@ -124,16 +120,6 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
     const details = await response.text();
     console.error("LINE push failed", response.status, details);
     return json({ error: "ส่งข้อความเข้า LINE ไม่สำเร็จ" }, 502);
-  }
-
-  if (payload.action === "update_event_message") {
-    await userClient.from("audit_logs").insert({
-      club_id: event.club_id,
-      event_id: event.id,
-      actor_id: authData.user.id,
-      action: "แก้ข้อมูลรอบและส่งการ์ดอัปเดตเข้า LINE",
-    });
-    return json({ ok: true, updatedCardSent: true });
   }
 
   const reopeningClosedEvent = event.status === "closed";
@@ -472,13 +458,11 @@ async function getLiffRoster(admin: any, event: any) {
     member.id,
     String(member.nickname || member.display_name || "สมาชิก").slice(0, 40),
   ]));
-  const timeOrder = new Map(buildArrivalTimeOptions(event.starts_at, event.ends_at).map((value, index) => [value, index]));
   const coming = (signups || []).reduce((rows, signup) => {
     const name = names.get(signup.member_id);
     if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time) });
     return rows;
   }, [] as Array<{ name: string; arrivalTime: string | null }>);
-  coming.sort((a, b) => (timeOrder.get(a.arrivalTime || "") ?? 999) - (timeOrder.get(b.arrivalTime || "") ?? 999));
   return { coming };
 }
 
@@ -591,7 +575,7 @@ function safeJson(value: string) {
 }
 
 function thaiLongDate(isoDate: string) {
-  return new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "long", year: "numeric" })
+  return new Intl.DateTimeFormat("th-TH", { weekday: "long", day: "numeric", month: "long" })
     .format(new Date(`${isoDate}T12:00:00+07:00`));
 }
 

@@ -157,18 +157,19 @@ export function calculateSettlement(event) {
 export function buildLineSummary(event) {
   const settlement = calculateSettlement(event);
   const lines = [
-    `สรุปค่าแบด ${formatThaiLongDate(event.date)}`,
-    event.venue ? `สถานที่ : ${event.venue}` : "",
+    `ค่าตีแบต ${formatThaiDate(event.date)}`,
+    event.venue || "",
     ...(event.courts || []).map((court) => `${court.name} : ${court.startsAt}-${court.endsAt === "00:00" ? "24:00" : court.endsAt}`),
-    `รวม ${baht(settlement.totalCost)} บาท / ${decimalBaht(settlement.totalHours)} ชั่วโมงผู้เล่น`,
     "",
-    ...settlement.rows.map((row) => {
-      const duration = formatPlayedDuration(Number(row.hours || 0) * 60);
+    ...settlement.rows.map((row, index) => {
       const extraItems = summarizeExtraCharges(row.extraCharges || []);
-      const extras = extraItems ? ` • ${extraItems}` : "";
-      const paid = row.paid ? " จ่ายแล้ว" : "";
-      return `${row.name} (${duration}) ${baht(row.roundedDue)} บาท${extras}${paid}`;
+      const extras = extraItems ? ` (${extraItems})` : "";
+      return `${index + 1}.${row.name} = ${baht(row.roundedDue)} บาท${extras}`;
     }),
+    "",
+    "โอนเงิน : ธนาคารกสิกร",
+    "389-2-36746-8",
+    "ณฐกฤต อินนะใจ",
   ];
 
   return lines.join("\n");

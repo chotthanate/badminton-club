@@ -68,7 +68,7 @@ export async function loadDashboard(clubId) {
   const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult] = await Promise.all([
     membersPromise,
     client().from("event_courts").select("*").eq("event_id", event.id).order("position").order("created_at"),
-    client().from("signups").select("*").eq("event_id", event.id),
+    client().from("signups").select("*").eq("event_id", event.id).order("created_at"),
     client().from("attendance").select("*").eq("event_id", event.id),
     client().from("expenses").select("*").eq("event_id", event.id).order("created_at"),
     client().from("payments").select("*").eq("event_id", event.id),
@@ -119,7 +119,6 @@ export async function createEvent({ clubId, clubName, userId, eventDate, venue, 
     courtName,
     startsAt,
     endsAt,
-    notifyLine: false,
   });
   return data;
 }
@@ -132,10 +131,9 @@ export async function updateEvent(eventId, patch) {
 export async function updateEventDetails({ clubId, eventId, patch }) {
   await updateEvent(eventId, patch);
   if (patch.venue) await rememberVenue(clubId, patch.venue);
-  await notifyLineEventUpdate(eventId);
 }
 
-export async function addCourt({ clubId, eventId, courtName, startsAt, endsAt, notifyLine = true }) {
+export async function addCourt({ clubId, eventId, courtName, startsAt, endsAt }) {
   const { error } = await client().from("event_courts").insert({
     club_id: clubId,
     event_id: eventId,
@@ -145,21 +143,18 @@ export async function addCourt({ clubId, eventId, courtName, startsAt, endsAt, n
   });
   throwIfError(error);
   await syncEventTimes(eventId);
-  if (notifyLine) await notifyLineEventUpdate(eventId);
 }
 
 export async function updateCourt(courtId, eventId, patch) {
   const { error } = await client().from("event_courts").update(patch).eq("id", courtId);
   throwIfError(error);
   await syncEventTimes(eventId);
-  await notifyLineEventUpdate(eventId);
 }
 
 export async function removeCourt(courtId, eventId) {
   const { error } = await client().from("event_courts").delete().eq("id", courtId);
   throwIfError(error);
   await syncEventTimes(eventId);
-  await notifyLineEventUpdate(eventId);
 }
 
 async function syncEventTimes(eventId) {
@@ -189,10 +184,6 @@ export async function publishEventToLine(eventId) {
 
 export async function changeAdminPassword(password) {
   return invokeLineBot({ action: "change_admin_password", password });
-}
-
-async function notifyLineEventUpdate(eventId) {
-  return invokeLineBot({ action: "update_event_message", eventId });
 }
 
 async function invokeLineBot(body) {
@@ -299,6 +290,11 @@ export async function updateExtraCatalogItem(itemId, price) {
   const { error } = await client().from("extra_item_catalog")
     .update({ price: Math.max(0, Number(price) || 0) })
     .eq("id", itemId);
+  throwIfError(error);
+}
+
+export async function removeExtraCatalogItem(itemId) {
+  const { error } = await client().from("extra_item_catalog").delete().eq("id", itemId);
   throwIfError(error);
 }
 
