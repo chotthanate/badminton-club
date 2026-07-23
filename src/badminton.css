@@ -2756,22 +2756,79 @@
   align-items: center;
 }
 
-.badminton-player-sort {
-  min-width: 0;
+.badminton-player-title-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   margin-left: auto;
-  color: #637064;
+}
+
+.badminton-player-sort-icon,
+.badminton-player-settings-button {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #cad6c8;
+  border-radius: 9px;
+  background: #fff;
+  color: #536056;
+}
+
+.badminton-player-sort-icon select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.badminton-player-settings-button {
+  color: #0f7a52;
+}
+
+.badminton-player-settings-modal {
+  width: min(560px, 100%);
+  max-height: min(86vh, 720px);
+  overflow-y: auto;
+}
+
+.badminton-settings-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #dfe8dc;
+  border-radius: 10px;
+  background: #fbfcf8;
+}
+
+.badminton-settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #536056;
+  font-size: 13px;
+}
+
+.badminton-settings-section-title em {
+  margin-left: auto;
+  color: #0f7a52;
   font-size: 11px;
+  font-style: normal;
   font-weight: 900;
 }
 
-.badminton-player-sort select {
-  width: auto;
-  min-height: 36px;
-  padding: 0 28px 0 9px;
-  font-size: 12px;
+.badminton-player-settings-modal .badminton-member-directory-list,
+.badminton-player-settings-modal .badminton-catalog-list {
+  padding: 0;
+}
+
+.badminton-player-settings-modal .badminton-catalog-add {
+  padding: 8px 0 0;
 }
 
 .badminton-catalog-item {
@@ -2853,18 +2910,10 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 42px;
   }
 
-  .badminton-player-sort {
-    gap: 4px;
-  }
-
-  .badminton-player-sort > span {
-    display: none;
-  }
-
-  .badminton-player-sort select {
-    max-width: 142px;
-    min-height: 38px;
-    font-size: 11px;
+  .badminton-player-sort-icon,
+  .badminton-player-settings-button {
+    width: 40px;
+    height: 40px;
   }
 
   .badminton-player-controls select,

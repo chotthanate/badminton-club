@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUpDown,
   BadgeCheck,
   CalendarDays,
   Check,
@@ -15,6 +16,7 @@ import {
   ReceiptText,
   RefreshCw,
   Save,
+  Settings,
   ShieldCheck,
   Trash2,
   UserPlus,
@@ -663,6 +665,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
   const [editingMember, setEditingMember] = useState(null);
   const [memberEdit, setMemberEdit] = useState({ nickname: "", displayName: "" });
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [sortMode, setSortMode] = useState("signup");
   const participants = event.signups
     .filter((signup) => signup.status === "coming")
@@ -780,7 +783,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
   return (
     <section className="badminton-card badminton-participants-card">
-      <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><label className="badminton-player-sort"><span>เรียงลำดับ</span><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => setSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label></div>
+      <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><div className="badminton-player-title-actions"><label className="badminton-player-sort-icon" title={sortMode === "signup" ? "เรียงตามลำดับการลงชื่อ" : "เรียงตามตัวอักษร"}><ArrowUpDown size={18} /><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => setSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label><button aria-label="ตั้งค่ารายชื่อและสินค้า" className="badminton-player-settings-button" onClick={() => setSettingsOpen(true)} title="ตั้งค่ารายชื่อและสินค้า" type="button"><Settings size={18} /></button></div></div>
       <form className="badminton-inline-form" onSubmit={addMember}>
         <div className="badminton-member-search">
           <input
@@ -833,36 +836,6 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> {selectedMemberId ? "เพิ่มคนเดิม" : "เพิ่มคน"}</button>
       </form>
 
-      <details className="badminton-member-directory">
-        <summary><Users size={17} /><span>รายชื่อผู้เล่นเดิม</span><em>{savedMembers.length} คน</em></summary>
-        <div className="badminton-member-directory-list">
-          {[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => {
-            const nickname = memberName(member);
-            const lineName = member.display_name && member.display_name !== nickname ? member.display_name : "";
-            return (
-              <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button">
-                <span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span>
-                <Pencil size={15} />
-              </button>
-            );
-          })}
-        </div>
-      </details>
-
-      <details className="badminton-catalog-settings">
-        <summary><PackagePlus size={17} /> รายการสินค้า น้ำ-ขนม</summary>
-        <div className="badminton-catalog-list">
-          {(dashboard.extraItems || []).map((item) => (
-            <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>
-          ))}
-        </div>
-        <form className="badminton-catalog-add" onSubmit={addCatalogItem}>
-          <input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} />
-          <input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} />
-          <button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button>
-        </form>
-      </details>
-
       <div className="badminton-attendance-list">
         {sortedParticipants.length ? sortedParticipants.map(({ member, attendance: row, arrivalTime }, playerIndex) => {
           const participantName = memberName(member);
@@ -903,6 +876,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           );
         }) : <div className="badminton-empty">ยังไม่มีผู้เล่น</div>}
       </div>
+      {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
       {editingMember ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}><div className="badminton-modal-title"><div><p className="badminton-kicker">ข้อมูลสมาชิกเดิม</p><h2>แก้ไขรายชื่อ</h2></div><button aria-label="ปิดหน้าต่างแก้ไขชื่อ" onClick={() => setEditingMember(null)} type="button"><X size={19} /></button></div><label>ชื่อเล่น<input autoFocus maxLength="40" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, nickname: changeEvent.target.value })} required value={memberEdit.nickname} /></label><label>ชื่อ LINE<input maxLength="80" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, displayName: changeEvent.target.value })} required value={memberEdit.displayName} /></label>{editingMember.line_user_id ? <p className="badminton-member-sync-note">คนนี้เชื่อมกับ LINE แล้ว หากเปลี่ยนชื่อ LINE ระบบจะอัปเดตชื่อใหม่อัตโนมัติเมื่อสมาชิกเข้าหน้าลงชื่อครั้งถัดไป โดยประวัติและยอดค้างยังเป็นคนเดิม</p> : <p className="badminton-member-sync-note">สมาชิกที่เพิ่มเองยังไม่เชื่อมกับบัญชี LINE การแก้ชื่อตรงนี้จะไม่กระทบประวัติและยอดค้างเดิม</p>}<button className="badminton-primary" type="submit"><Save size={17} /> บันทึกชื่อ</button></form></div> : null}
       {customChargeFor ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal" onSubmit={addCustomCharge}><div className="badminton-modal-title"><div><p className="badminton-kicker">ค่าใช้จ่ายเฉพาะคน</p><h2>เพิ่มรายการให้ {customChargeFor.name}</h2></div><button aria-label="ปิดหน้าต่าง" onClick={() => setCustomChargeFor(null)} type="button"><X size={19} /></button></div><label>ชื่อรายการ<input autoFocus maxLength="80" onChange={(changeEvent) => setCustomCharge({ ...customCharge, name: changeEvent.target.value })} placeholder="เช่น ค่าเอ็นไม้" required value={customCharge.name} /></label><label>ราคา (บาท)<input min="0" onChange={(changeEvent) => setCustomCharge({ ...customCharge, price: changeEvent.target.value })} placeholder="0" required type="number" value={customCharge.price} /></label><button className="badminton-primary" type="submit"><Plus size={17} /> เพิ่มค่าใช้จ่าย</button></form></div> : null}
     </section>
