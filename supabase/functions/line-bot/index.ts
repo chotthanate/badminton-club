@@ -356,6 +356,7 @@ function buildSignupMessage(event: any, clubName: string, liffId: string) {
           { type: "separator" },
           { type: "text", text: `สถานที่ : ${event.venue}`, size: "sm", wrap: true },
           { type: "text", text: courts || "ยังไม่ได้ระบุคอร์ท", size: "xs", color: "#637064", wrap: true },
+          { type: "text", text: "🏸สนใจออกกำลังกาย เบาๆ ลงชื่อได้เลยนะครับ🏸", size: "sm", color: "#15966a", wrap: true },
         ],
       },
       footer: {
