@@ -10,6 +10,7 @@ import {
   LogIn,
   LogOut,
   PackagePlus,
+  Pencil,
   Plus,
   ReceiptText,
   RefreshCw,
@@ -44,6 +45,7 @@ import {
   removeParticipant,
   setPayment,
   updateAttendance,
+  updateClubMember,
   updateCourt,
   updateEvent,
   updateEventDetails,
@@ -659,6 +661,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [newItem, setNewItem] = useState({ name: "", price: "" });
   const [customChargeFor, setCustomChargeFor] = useState(null);
   const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
+  const [editingMember, setEditingMember] = useState(null);
+  const [memberEdit, setMemberEdit] = useState({ nickname: "", displayName: "" });
   const [sortMode, setSortMode] = useState("signup");
   const participants = event.signups
     .filter((signup) => signup.status === "coming")
@@ -712,6 +716,33 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     submitEvent.preventDefault();
     await mutate(() => addExtraCatalogItem({ clubId: context.club_id, name: newItem.name, price: newItem.price }), "เพิ่มสินค้าแล้ว");
     setNewItem({ name: "", price: "" });
+  }
+
+  function openMemberEditor(member) {
+    setEditingMember(member);
+    setMemberEdit({
+      nickname: member.nickname || member.display_name || "",
+      displayName: member.display_name || member.nickname || "",
+    });
+  }
+
+  async function saveMember(submitEvent) {
+    submitEvent.preventDefault();
+    const nickname = memberEdit.nickname.trim();
+    const displayName = memberEdit.displayName.trim();
+    const saved = await mutate(async () => {
+      if (!nickname) throw new Error("กรุณากรอกชื่อเล่น");
+      if (!displayName) throw new Error("กรุณากรอกชื่อ LINE");
+      await updateClubMember(editingMember.id, { nickname, displayName });
+      await recordAudit({
+        clubId: context.club_id,
+        eventId: event.id,
+        userId: session.user.id,
+        action: `แก้ไขชื่อผู้เล่น ${nickname}`,
+        details: { member_id: editingMember.id },
+      });
+    }, `บันทึกชื่อ ${nickname} แล้ว`);
+    if (saved) setEditingMember(null);
   }
 
   async function addCustomCharge(submitEvent) {
@@ -802,6 +833,22 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> {selectedMemberId ? "เพิ่มคนเดิม" : "เพิ่มคน"}</button>
       </form>
 
+      <details className="badminton-member-directory">
+        <summary><Users size={17} /><span>รายชื่อผู้เล่นเดิม</span><em>{savedMembers.length} คน</em></summary>
+        <div className="badminton-member-directory-list">
+          {[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => {
+            const nickname = memberName(member);
+            const lineName = member.display_name && member.display_name !== nickname ? member.display_name : "";
+            return (
+              <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button">
+                <span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span>
+                <Pencil size={15} />
+              </button>
+            );
+          })}
+        </div>
+      </details>
+
       <details className="badminton-catalog-settings">
         <summary><PackagePlus size={17} /> รายการสินค้า น้ำ-ขนม</summary>
         <div className="badminton-catalog-list">
@@ -844,7 +891,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
           return (
             <article className="badminton-attendance-row" key={member.id}>
-              <div className="badminton-player-identity"><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<em>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
+              <div className="badminton-player-identity"><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><em>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
@@ -856,6 +903,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           );
         }) : <div className="badminton-empty">ยังไม่มีผู้เล่น</div>}
       </div>
+      {editingMember ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}><div className="badminton-modal-title"><div><p className="badminton-kicker">ข้อมูลสมาชิกเดิม</p><h2>แก้ไขรายชื่อ</h2></div><button aria-label="ปิดหน้าต่างแก้ไขชื่อ" onClick={() => setEditingMember(null)} type="button"><X size={19} /></button></div><label>ชื่อเล่น<input autoFocus maxLength="40" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, nickname: changeEvent.target.value })} required value={memberEdit.nickname} /></label><label>ชื่อ LINE<input maxLength="80" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, displayName: changeEvent.target.value })} required value={memberEdit.displayName} /></label>{editingMember.line_user_id ? <p className="badminton-member-sync-note">คนนี้เชื่อมกับ LINE แล้ว หากเปลี่ยนชื่อ LINE ระบบจะอัปเดตชื่อใหม่อัตโนมัติเมื่อสมาชิกเข้าหน้าลงชื่อครั้งถัดไป โดยประวัติและยอดค้างยังเป็นคนเดิม</p> : <p className="badminton-member-sync-note">สมาชิกที่เพิ่มเองยังไม่เชื่อมกับบัญชี LINE การแก้ชื่อตรงนี้จะไม่กระทบประวัติและยอดค้างเดิม</p>}<button className="badminton-primary" type="submit"><Save size={17} /> บันทึกชื่อ</button></form></div> : null}
       {customChargeFor ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal" onSubmit={addCustomCharge}><div className="badminton-modal-title"><div><p className="badminton-kicker">ค่าใช้จ่ายเฉพาะคน</p><h2>เพิ่มรายการให้ {customChargeFor.name}</h2></div><button aria-label="ปิดหน้าต่าง" onClick={() => setCustomChargeFor(null)} type="button"><X size={19} /></button></div><label>ชื่อรายการ<input autoFocus maxLength="80" onChange={(changeEvent) => setCustomCharge({ ...customCharge, name: changeEvent.target.value })} placeholder="เช่น ค่าเอ็นไม้" required value={customCharge.name} /></label><label>ราคา (บาท)<input min="0" onChange={(changeEvent) => setCustomCharge({ ...customCharge, price: changeEvent.target.value })} placeholder="0" required type="number" value={customCharge.price} /></label><button className="badminton-primary" type="submit"><Plus size={17} /> เพิ่มค่าใช้จ่าย</button></form></div> : null}
     </section>
   );

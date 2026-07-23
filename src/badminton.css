@@ -771,6 +771,101 @@
   font-weight: 800;
 }
 
+.badminton-member-directory {
+  margin-top: 10px;
+  border: 1px solid #dfe8dc;
+  border-radius: 10px;
+  background: #fbfcf8;
+}
+
+.badminton-member-directory summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  color: #536056;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.badminton-member-directory summary em {
+  margin-left: auto;
+  color: #0f7a52;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.badminton-member-directory-list {
+  max-height: 260px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 9px 9px;
+}
+
+.badminton-member-directory-list > button {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid #dfe8dc;
+  border-radius: 8px;
+  background: #fff;
+  color: #172018;
+  text-align: left;
+}
+
+.badminton-member-directory-list > button > span {
+  min-width: 0;
+  display: grid;
+}
+
+.badminton-member-directory-list strong,
+.badminton-member-directory-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-member-directory-list small {
+  color: #637064;
+  font-size: 10px;
+}
+
+.badminton-member-directory-list svg {
+  flex: 0 0 auto;
+  color: #0f7a52;
+}
+
+.badminton-member-edit-button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #d5e3d4;
+  border-radius: 7px;
+  background: #f4faf5;
+  color: #0f7a52;
+}
+
+.badminton-member-sync-note {
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #f1f7f1;
+  color: #536056;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
 .badminton-participants-card .badminton-attendance-list {
   margin-top: 13px;
 }
@@ -2059,6 +2154,10 @@
 
   .badminton-test-banner button {
     width: 100%;
+  }
+
+  .badminton-member-directory-list {
+    grid-template-columns: 1fr;
   }
 
   .badminton-tabs {

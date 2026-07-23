@@ -270,6 +270,16 @@ export async function addLineMember({ clubId, displayName, lineUserId = null }) 
   return data;
 }
 
+export async function updateClubMember(memberId, { nickname, displayName }) {
+  const { error } = await client().from("club_members")
+    .update({
+      nickname: nickname.trim(),
+      display_name: displayName.trim(),
+    })
+    .eq("id", memberId);
+  throwIfError(error);
+}
+
 export async function removeParticipant({ eventId, memberId }) {
   const tables = ["member_extra_charges", "payments", "attendance", "signups"];
   for (const table of tables) {
