@@ -243,7 +243,7 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
 function buildSignupMessage(event: any, clubName: string, liffId: string) {
   const courts = [...(event.event_courts || [])]
     .sort((a, b) => a.position - b.position)
-    .map((court) => `${court.court_name} ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`)
+    .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`)
     .join(" · ");
   const title = `${clubName} : วันที่ ${thaiLongDate(event.event_date)}`;
 
@@ -335,16 +335,16 @@ async function handleLiffRequest(payload: any) {
 
     if (payload.action === "cancel_liff_signup") {
       if (existingMember?.id) {
-        const [chargesResult, paymentResult, attendanceResult] = await Promise.all([
-          admin.from("member_extra_charges").select("id", { count: "exact", head: true }).eq("event_id", event.id).eq("member_id", existingMember.id),
-          admin.from("payments").select("id", { count: "exact", head: true }).eq("event_id", event.id).eq("member_id", existingMember.id),
-          admin.from("attendance").select("id", { count: "exact", head: true }).eq("event_id", event.id).eq("member_id", existingMember.id),
-        ]);
+        if (hasBadmintonStarted(event)) {
+          return json({ error: "ถึงเวลาเริ่มตีแบดแล้ว กรุณาแจ้งแอดมินให้ยกเลิก" }, 409);
+        }
+        const chargesResult = await admin.from("member_extra_charges")
+          .select("id", { count: "exact", head: true })
+          .eq("event_id", event.id)
+          .eq("member_id", existingMember.id);
         if (chargesResult.error) throw chargesResult.error;
-        if (paymentResult.error) throw paymentResult.error;
-        if (attendanceResult.error) throw attendanceResult.error;
-        if ((chargesResult.count || 0) + (paymentResult.count || 0) + (attendanceResult.count || 0) > 0) {
-          return json({ error: "รายการนี้เริ่มมีค่าใช้จ่ายแล้ว กรุณาแจ้งแอดมินให้ยกเลิก" }, 409);
+        if ((chargesResult.count || 0) > 0) {
+          return json({ error: "มีรายการน้ำ/ขนมแล้ว กรุณาแจ้งแอดมินให้ยกเลิก" }, 409);
         }
         const { error: deleteError } = await admin.from("signups")
           .delete()
@@ -498,6 +498,13 @@ function eventForLiff(event: any) {
     courts,
     arrivalTimes: buildArrivalTimeOptions(event.starts_at, event.ends_at),
   };
+}
+
+function hasBadmintonStarted(event: any, now = new Date()) {
+  const startTime = shortTime(event?.starts_at);
+  if (!event?.event_date || !startTime) return false;
+  const startsAt = new Date(`${event.event_date}T${startTime}:00+07:00`);
+  return !Number.isNaN(startsAt.getTime()) && now.getTime() >= startsAt.getTime();
 }
 
 function buildArrivalTimeOptions(startValue: unknown, endValue: unknown) {

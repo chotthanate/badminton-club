@@ -166,7 +166,7 @@ export default function LiffSignupApp() {
         <h1>{event.dateLabel}</h1>
         <div className="liff-venue"><MapPin size={18} /><span>{event.venue}</span></div>
         <div className="liff-courts">
-          {event.courts.map((court) => <span key={court.name}><strong>{court.name}</strong> {court.time}</span>)}
+          {event.courts.map((court) => <span key={court.name}><strong>{court.name} :</strong> {court.time}</span>)}
         </div>
       </section>
 

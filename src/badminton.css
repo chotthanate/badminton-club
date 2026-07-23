@@ -2329,6 +2329,12 @@
   grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto;
 }
 
+.badminton-event-main-form input {
+  min-height: 52px;
+  height: 52px;
+  line-height: normal;
+}
+
 .badminton-player-card-title {
   align-items: center;
 }
