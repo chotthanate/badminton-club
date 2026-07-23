@@ -173,20 +173,24 @@ export async function updateEventDetails({ clubId, eventId, patch }) {
   if (patch.venue) await rememberVenue(clubId, patch.venue);
 }
 
-export async function deleteUnusedEvent(eventId) {
+export async function deleteCompletedEvent(eventId) {
   const { data: event, error: eventError } = await client().from("events")
     .select("id, status")
     .eq("id", eventId)
     .single();
   throwIfError(eventError);
-  if (event.status === "open") throw new Error("รอบที่กำลังเปิดลงชื่ออยู่ยังลบไม่ได้ กรุณาจบรอบก่อน");
+  if (event.status !== "closed") throw new Error("ลบได้เฉพาะรอบที่จบรอบแล้ว");
 
-  const protectedTables = ["signups", "payments", "member_extra_charges", "expenses"];
-  const results = await Promise.all(protectedTables.map((table) =>
-    client().from(table).select("id", { count: "exact", head: true }).eq("event_id", eventId)));
-  results.forEach((result) => throwIfError(result.error));
-  if (results.some((result) => Number(result.count || 0) > 0)) {
-    throw new Error("รอบนี้มีข้อมูลผู้เล่น ค่าใช้จ่าย หรือการชำระเงิน จึงไม่สามารถลบได้");
+  const [signupsResult, paymentsResult] = await Promise.all([
+    client().from("signups").select("member_id").eq("event_id", eventId).eq("status", "coming"),
+    client().from("payments").select("member_id, paid_at").eq("event_id", eventId),
+  ]);
+  throwIfError(signupsResult.error);
+  throwIfError(paymentsResult.error);
+  const paidMemberIds = new Set((paymentsResult.data || []).filter((payment) => payment.paid_at).map((payment) => payment.member_id));
+  const unpaidPlayers = (signupsResult.data || []).filter((signup) => !paidMemberIds.has(signup.member_id));
+  if (unpaidPlayers.length) {
+    throw new Error(`รอบนี้ยังเก็บเงินไม่ครบ ${unpaidPlayers.length} คน จึงยังลบไม่ได้`);
   }
 
   const { error } = await client().from("events").delete().eq("id", eventId);

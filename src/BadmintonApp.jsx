@@ -34,7 +34,7 @@ import {
   createClub,
   createEvent,
   createTestClub,
-  deleteUnusedEvent,
+  deleteCompletedEvent,
   getAdminContexts,
   finishEvent,
   listClubEvents,
@@ -333,8 +333,8 @@ function AdminDashboard({ session }) {
               events={eventSummaries}
               onChange={(eventId) => refresh(false, { eventId })}
               onDelete={(round) => mutate(
-                () => deleteUnusedEvent(round.id),
-                "ลบรอบที่ไม่ได้ใช้งานแล้ว",
+                () => deleteCompletedEvent(round.id),
+                "ลบรอบที่ชำระเงินครบแล้ว",
                 { selectLatest: true },
               )}
               selectedEventId={selectedEventId}
@@ -429,7 +429,7 @@ function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
 
   function confirmDelete() {
     if (!selectedRound) return;
-    const confirmed = window.confirm(`ลบรอบ ${formatRoundOption(selectedRound.event_date)} ใช่ไหม?\n\nลบได้เฉพาะรอบที่ไม่มีข้อมูลผู้เล่น ค่าใช้จ่าย หรือการชำระเงิน`);
+    const confirmed = window.confirm(`ลบรอบ ${formatRoundOption(selectedRound.event_date)} ใช่ไหม?\n\nรายชื่อ ค่าใช้จ่าย การชำระเงิน และประวัติของรอบนี้จะถูกลบถาวร`);
     if (confirmed) onDelete(selectedRound);
   }
 
@@ -445,10 +445,10 @@ function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
               </option>
             ))}
           </select>
-          <button aria-label="ลบรอบที่เลือก" disabled={!selectedRound || selectedRound.status === "open"} onClick={confirmDelete} title={selectedRound?.status === "open" ? "จบรอบก่อนจึงจะลบได้" : "ลบรอบที่ไม่ได้ใช้งาน"} type="button"><Trash2 size={17} /></button>
+          <button aria-label="ลบรอบที่เลือก" disabled={!selectedRound || selectedRound.status !== "closed"} onClick={confirmDelete} title={selectedRound?.status !== "closed" ? "จบรอบก่อนจึงจะลบได้" : "ลบรอบที่ชำระเงินครบแล้ว"} type="button"><Trash2 size={17} /></button>
         </div>
       </label>
-      <small>เปลี่ยนรอบเพื่อดูข้อมูลย้อนหลัง หรือลบรอบเปล่าที่ไม่ได้ใช้งาน</small>
+      <small>ลบรอบได้เมื่อจบรอบและเก็บเงินครบทุกคนแล้ว</small>
     </section>
   );
 }
