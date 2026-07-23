@@ -9,17 +9,16 @@ function throwIfError(error) {
   if (error) throw error;
 }
 
-export async function getAdminContext(userId) {
+export async function getAdminContexts(userId) {
   const { data, error } = await client()
     .from("club_members")
-    .select("id, club_id, display_name, nickname, role, clubs!inner(id, name, line_group_id)")
+    .select("id, club_id, display_name, nickname, role, clubs!inner(id, name, line_group_id, is_test)")
     .eq("profile_id", userId)
     .eq("role", "admin")
     .eq("active", true)
-    .limit(1)
-    .maybeSingle();
+    .order("created_at");
   throwIfError(error);
-  return data;
+  return data || [];
 }
 
 export async function createClub({ name, ownerId }) {
@@ -31,6 +30,38 @@ export async function createClub({ name, ownerId }) {
   throwIfError(error);
   await seedDefaultExtraItems(data.id);
   return data;
+}
+
+export async function createTestClub({ ownerId }) {
+  const { data, error } = await client()
+    .from("clubs")
+    .insert({
+      name: "Headshot Badminton · ทดลอง",
+      owner_id: ownerId,
+      is_test: true,
+    })
+    .select("id, name, line_group_id, is_test")
+    .single();
+  throwIfError(error);
+  await seedDefaultExtraItems(data.id);
+  await seedTestMembers(data.id);
+  return data;
+}
+
+export async function resetTestClub(clubId) {
+  const { error: eventError } = await client().from("events").delete().eq("club_id", clubId);
+  throwIfError(eventError);
+  const { error: memberError } = await client().from("club_members")
+    .delete()
+    .eq("club_id", clubId)
+    .neq("role", "admin");
+  throwIfError(memberError);
+  const { error: venueError } = await client().from("club_venues").delete().eq("club_id", clubId);
+  throwIfError(venueError);
+  const { error: itemError } = await client().from("extra_item_catalog").delete().eq("club_id", clubId);
+  throwIfError(itemError);
+  await seedDefaultExtraItems(clubId);
+  await seedTestMembers(clubId);
 }
 
 export async function listClubEvents(clubId) {
@@ -129,14 +160,19 @@ export async function createEvent({ clubId, clubName, userId, eventDate, venue, 
     .select("*")
     .single();
   throwIfError(error);
-  await rememberVenue(clubId, venue);
-  await addCourt({
-    clubId,
-    eventId: data.id,
-    courtName,
-    startsAt,
-    endsAt,
-  });
+  try {
+    await rememberVenue(clubId, venue);
+    await addCourt({
+      clubId,
+      eventId: data.id,
+      courtName,
+      startsAt,
+      endsAt,
+    });
+  } catch (nextError) {
+    await client().from("events").delete().eq("id", data.id).eq("club_id", clubId);
+    throw nextError;
+  }
   return data;
 }
 
@@ -347,6 +383,16 @@ async function seedDefaultExtraItems(clubId) {
     { club_id: clubId, name: "สปอนเซอร์", price: 15 },
   ];
   const { error } = await client().from("extra_item_catalog").upsert(defaults, { onConflict: "club_id,name" });
+  throwIfError(error);
+}
+
+async function seedTestMembers(clubId) {
+  const members = [
+    { club_id: clubId, display_name: "LINE Demo One", nickname: "เมย์ทดลอง", role: "member" },
+    { club_id: clubId, display_name: "LINE Demo Two", nickname: "แจ็คทดลอง", role: "member" },
+    { club_id: clubId, display_name: "LINE Demo Three", nickname: "บอยทดลอง", role: "member" },
+  ];
+  const { error } = await client().from("club_members").insert(members);
   throwIfError(error);
 }
 

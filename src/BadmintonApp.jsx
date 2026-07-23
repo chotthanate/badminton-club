@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
   CalendarDays,
   Check,
   Copy,
   Calculator,
+  FlaskConical,
   History,
   LogIn,
   LogOut,
@@ -29,11 +30,13 @@ import {
   changeAdminPassword,
   createClub,
   createEvent,
-  getAdminContext,
+  createTestClub,
+  getAdminContexts,
   finishEvent,
   listClubEvents,
   loadDashboard,
   recordAudit,
+  resetTestClub,
   publishEventToLine,
   removeCourt,
   removeExtraCatalogItem,
@@ -60,6 +63,7 @@ import {
   playedMinutesWithinEvent,
   totalCourtHours,
 } from "./badmintonLogic.js";
+import { normalizeMemberSearch, rankMemberSuggestions } from "./memberSearch.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
 
 const EVENT_STATUS_LABELS = {
@@ -167,22 +171,33 @@ function AdminDashboard({ session }) {
   const [eventSummaries, setEventSummaries] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [previousOutstanding, setPreviousOutstanding] = useState({ count: 0, total: 0 });
+  const [adminContexts, setAdminContexts] = useState([]);
+  const selectedClubIdRef = useRef(null);
+  const selectedEventIdRef = useRef(null);
 
   async function refresh(silent = false, options = {}) {
     if (!silent) setLoading(true);
     setError("");
     try {
-      const nextContext = await getAdminContext(session.user.id);
+      const nextContexts = await getAdminContexts(session.user.id);
+      const requestedClubId = options.clubId || selectedClubIdRef.current;
+      const nextContext = nextContexts.find((entry) => entry.club_id === requestedClubId)
+        || nextContexts.find((entry) => !entry.clubs.is_test)
+        || nextContexts[0]
+        || null;
+      setAdminContexts(nextContexts);
+      selectedClubIdRef.current = nextContext?.club_id || null;
       setContext(nextContext);
       if (!nextContext) {
         setDashboard(null);
         setEventSummaries([]);
         setSelectedEventId(null);
+        selectedEventIdRef.current = null;
         setPreviousOutstanding({ count: 0, total: 0 });
         return;
       }
       const nextEvents = await listClubEvents(nextContext.club_id);
-      const requestedEventId = options.preferLatest ? null : (options.eventId || selectedEventId);
+      const requestedEventId = options.preferLatest ? null : (options.eventId || selectedEventIdRef.current);
       const targetEventId = nextEvents.some((event) => event.id === requestedEventId)
         ? requestedEventId
         : nextEvents[0]?.id || null;
@@ -196,6 +211,7 @@ function AdminDashboard({ session }) {
         : await calculatePreviousOutstanding(nextContext.club_id, previousEventIds);
       setEventSummaries(nextEvents);
       setSelectedEventId(targetEventId);
+      selectedEventIdRef.current = targetEventId;
       setDashboard(nextDashboard);
       setPreviousOutstanding(nextOutstanding);
     } catch (nextError) {
@@ -230,6 +246,44 @@ function AdminDashboard({ session }) {
     }
   }
 
+  async function switchTestMode() {
+    const productionContext = adminContexts.find((entry) => !entry.clubs.is_test);
+    if (context?.clubs.is_test) {
+      if (productionContext) {
+        setActiveTab("round");
+        await refresh(false, { clubId: productionContext.club_id });
+        setNotice("กลับสู่ข้อมูลจริงแล้ว");
+      }
+      return;
+    }
+    const existingTestContext = adminContexts.find((entry) => entry.clubs.is_test);
+    if (existingTestContext) {
+      setActiveTab("round");
+      await refresh(false, { clubId: existingTestContext.club_id });
+      setNotice("เข้าสู่โหมดทดลองแล้ว ข้อมูลในนี้ไม่กระทบรอบจริง");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const testClub = await createTestClub({ ownerId: session.user.id });
+      setActiveTab("round");
+      await refresh(false, { clubId: testClub.id });
+      setNotice("สร้างโหมดทดลองแล้ว ข้อมูลในนี้ไม่กระทบรอบจริง");
+    } catch (nextError) {
+      setError(nextError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetDemo() {
+    if (!context?.clubs.is_test) return;
+    if (!window.confirm("ล้างรอบ ผู้เล่น และค่าใช้จ่ายทั้งหมดในโหมดทดลอง? ข้อมูลจริงจะไม่ถูกแตะต้อง")) return;
+    await mutate(() => resetTestClub(context.club_id), "รีเซ็ตข้อมูลทดลองแล้ว");
+    setActiveTab("round");
+  }
+
   if (loading && !dashboard) return <LoadingScreen label="กำลังโหลดหลังบ้าน" />;
   if (!context) return <ClubSetup session={session} onCreated={refresh} error={error} />;
 
@@ -252,6 +306,9 @@ function AdminDashboard({ session }) {
             <button aria-label="เปลี่ยนรหัสเข้าเว็บ" className="badminton-icon-button" onClick={() => setPasswordModalOpen(true)} title="เปลี่ยนรหัสเข้าเว็บ" type="button">
               <ShieldCheck size={18} />
             </button>
+            <button aria-label={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} className={`badminton-icon-button ${context.clubs.is_test ? "is-test-mode" : ""}`} onClick={switchTestMode} title={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} type="button">
+              <FlaskConical size={18} />
+            </button>
             <button className="badminton-secondary" onClick={() => supabase.auth.signOut()} type="button">
               <LogOut size={17} /> ออกจากระบบ
             </button>
@@ -260,6 +317,7 @@ function AdminDashboard({ session }) {
 
         {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
         {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
+        {context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><button onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div> : null}
 
         {!dashboard.event ? (
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />
@@ -281,6 +339,7 @@ function AdminDashboard({ session }) {
                 clubName={context.clubs.name}
                 courts={dashboard.courts}
                 event={dashboard.event}
+                isTestMode={context.clubs.is_test}
                 key={dashboard.event.id}
                 mappedEvent={appEvent}
                 mutate={mutate}
@@ -469,7 +528,7 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
   );
 }
 
-function EventControlCard({ clubName, courts, event, mappedEvent, mutate, session, settlement, venues = [] }) {
+function EventControlCard({ clubName, courts, event, isTestMode, mappedEvent, mutate, session, settlement, venues = [] }) {
   const [form, setForm] = useState({
     event_date: event.event_date,
     venue: event.venue,
@@ -490,6 +549,22 @@ function EventControlCard({ clubName, courts, event, mappedEvent, mutate, sessio
 
   function advanceRound() {
     if (event.status === "draft") {
+      if (!courts.length) {
+        return mutate(async () => {
+          throw new Error("กรุณาเพิ่มคอร์ทอย่างน้อย 1 คอร์ทก่อนเปิดลงชื่อ");
+        }, "");
+      }
+      if (isTestMode) {
+        return mutate(async () => {
+          await updateEvent(event.id, { status: "open" });
+          await recordAudit({
+            clubId: mappedEvent.clubId,
+            eventId: event.id,
+            userId: session.user.id,
+            action: "เปิดลงชื่อในโหมดทดลอง",
+          });
+        }, "เปิดลงชื่อทดลองแล้ว โดยไม่ได้ส่งเข้า LINE");
+      }
       return mutate(() => publishEventToLine(event.id), "ส่งรอบเข้า LINE และเปิดลงชื่อแล้ว");
     }
     if (event.status === "open") {
@@ -579,6 +654,8 @@ function HalfHourSelect({ ariaLabel, onChange, value }) {
 
 function ParticipantsPanel({ context, dashboard, event, mutate, session, settlement }) {
   const [name, setName] = useState("");
+  const [selectedMemberId, setSelectedMemberId] = useState(null);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [newItem, setNewItem] = useState({ name: "", price: "" });
   const [customChargeFor, setCustomChargeFor] = useState(null);
   const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
@@ -597,15 +674,37 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   });
   const timeOptions = useMemo(() => buildTimeOptions(event.startTime, event.endTime), [event.startTime, event.endTime]);
   const settlementByMember = new Map(settlement.rows.map((row) => [row.memberId, row]));
+  const participantIds = new Set(participants.map((participant) => participant.member.id));
+  const memberSuggestions = rankMemberSuggestions(
+    dashboard.members.filter((member) => member.role !== "admin"),
+    name,
+  ).slice(0, 8);
 
   async function addMember(eventObject) {
     eventObject.preventDefault();
-    await mutate(async () => {
-      const member = await addLineMember({ clubId: context.club_id, displayName: name });
+    const trimmedName = name.trim();
+    const normalizedName = normalizeMemberSearch(trimmedName);
+    const exactMember = dashboard.members.find((member) =>
+      member.role !== "admin"
+      && normalizedName
+      && [member.nickname, member.display_name].some((value) => normalizeMemberSearch(value) === normalizedName));
+    const existingMember = dashboard.members.find((member) => member.id === selectedMemberId) || exactMember;
+    const saved = await mutate(async () => {
+      if (!trimmedName) throw new Error("กรุณาพิมพ์ชื่อเล่นหรือชื่อ LINE");
+      const member = existingMember || await addLineMember({ clubId: context.club_id, displayName: trimmedName });
       await updateSignup({ clubId: context.club_id, eventId: event.id, memberId: member.id, status: "coming", arrivalTime: event.startTime });
-      await recordAudit({ clubId: context.club_id, eventId: event.id, userId: session.user.id, action: `เพิ่มผู้เล่น ${name}` });
+      await recordAudit({
+        clubId: context.club_id,
+        eventId: event.id,
+        userId: session.user.id,
+        action: `${existingMember ? "เพิ่มผู้เล่นเดิม" : "สร้างและเพิ่มผู้เล่น"} ${memberName(member) || trimmedName}`,
+      });
+    }, existingMember ? `เพิ่ม ${memberName(existingMember)} จากประวัติเดิมแล้ว` : "สร้างผู้เล่นใหม่และเพิ่มเข้ารอบแล้ว");
+    if (saved) {
       setName("");
-    }, "เพิ่มผู้เล่นแล้ว");
+      setSelectedMemberId(null);
+      setSuggestionsOpen(false);
+    }
   }
 
   async function addCatalogItem(submitEvent) {
@@ -651,8 +750,54 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     <section className="badminton-card badminton-participants-card">
       <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><label className="badminton-player-sort"><span>เรียงลำดับ</span><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => setSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label></div>
       <form className="badminton-inline-form" onSubmit={addMember}>
-        <input aria-label="ชื่อเล่นผู้เล่น" placeholder="พิมพ์ชื่อเล่น" required value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> เพิ่มคน</button>
+        <div className="badminton-member-search">
+          <input
+            aria-autocomplete="list"
+            aria-controls="member-suggestions"
+            aria-expanded={suggestionsOpen}
+            aria-label="ค้นหาชื่อเล่นหรือชื่อ LINE"
+            autoComplete="off"
+            onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
+            onChange={(changeEvent) => {
+              setName(changeEvent.target.value);
+              setSelectedMemberId(null);
+              setSuggestionsOpen(true);
+            }}
+            onFocus={() => setSuggestionsOpen(true)}
+            placeholder="ค้นหาชื่อเล่นหรือชื่อ LINE"
+            required
+            value={name}
+          />
+          {suggestionsOpen && memberSuggestions.length ? (
+            <div className="badminton-member-suggestions" id="member-suggestions" role="listbox">
+              {memberSuggestions.map((member) => {
+                const displayName = memberName(member);
+                const lineName = member.display_name && member.display_name !== displayName ? member.display_name : "";
+                const inRound = participantIds.has(member.id);
+                return (
+                  <button
+                    aria-selected={selectedMemberId === member.id}
+                    className={selectedMemberId === member.id ? "is-selected" : ""}
+                    key={member.id}
+                    onMouseDown={(mouseEvent) => mouseEvent.preventDefault()}
+                    onClick={() => {
+                      setName(displayName);
+                      setSelectedMemberId(member.id);
+                      setSuggestionsOpen(false);
+                    }}
+                    role="option"
+                    type="button"
+                  >
+                    <span><strong>{displayName}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span>
+                    <em>{inRound ? "อยู่ในรอบแล้ว" : "ใช้ประวัติเดิม"}</em>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {selectedMemberId ? <small className="badminton-selected-member-note">เลือกคนเดิมแล้ว ประวัติและยอดค้างจะต่อเนื่อง</small> : null}
+        </div>
+        <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> {selectedMemberId ? "เพิ่มคนเดิม" : "เพิ่มคน"}</button>
       </form>
 
       <details className="badminton-catalog-settings">

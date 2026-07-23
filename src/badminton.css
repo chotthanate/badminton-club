@@ -421,6 +421,44 @@
   padding: 0;
 }
 
+.badminton-icon-button.is-test-mode {
+  border-color: #d9a441;
+  background: #fff7df;
+  color: #8a5a00;
+}
+
+.badminton-test-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e1b35a;
+  border-radius: 10px;
+  background: #fff7df;
+  color: #684900;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-test-banner > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.badminton-test-banner button {
+  min-height: 36px;
+  flex: 0 0 auto;
+  border: 1px solid #d9a441;
+  border-radius: 8px;
+  background: #fff;
+  color: #7a5300;
+  padding: 0 11px;
+  font-weight: 900;
+}
+
 .badminton-alert {
   margin-bottom: 14px;
   border: 1px solid;
@@ -643,6 +681,86 @@
 .badminton-add-player {
   width: auto;
   padding: 0 16px;
+}
+
+.badminton-member-search {
+  position: relative;
+  min-width: 0;
+}
+
+.badminton-member-search > input {
+  width: 100%;
+}
+
+.badminton-member-suggestions {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  max-height: 286px;
+  overflow-y: auto;
+  display: grid;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid #cbd8c9;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(23, 32, 24, 0.18);
+}
+
+.badminton-member-suggestions button {
+  min-width: 0;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+  color: #172018;
+  text-align: left;
+}
+
+.badminton-member-suggestions button:hover,
+.badminton-member-suggestions button.is-selected {
+  background: #eaf7ee;
+}
+
+.badminton-member-suggestions button > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.badminton-member-suggestions strong,
+.badminton-member-suggestions small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-member-suggestions small {
+  color: #637064;
+  font-size: 11px;
+}
+
+.badminton-member-suggestions em {
+  flex: 0 0 auto;
+  color: #0f7a52;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.badminton-selected-member-note {
+  display: block;
+  margin-top: 4px;
+  color: #0f7a52;
+  font-size: 10px;
+  font-weight: 900;
 }
 
 .badminton-participants-card .badminton-attendance-list {
@@ -1924,6 +2042,15 @@
     width: 42px;
     padding: 0;
     font-size: 0;
+  }
+
+  .badminton-test-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .badminton-test-banner button {
+    width: 100%;
   }
 
   .badminton-tabs {
