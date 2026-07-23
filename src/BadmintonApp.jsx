@@ -675,8 +675,9 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const timeOptions = useMemo(() => buildTimeOptions(event.startTime, event.endTime), [event.startTime, event.endTime]);
   const settlementByMember = new Map(settlement.rows.map((row) => [row.memberId, row]));
   const participantIds = new Set(participants.map((participant) => participant.member.id));
+  const savedMembers = dashboard.members.filter((member) => member.role !== "admin");
   const memberSuggestions = rankMemberSuggestions(
-    dashboard.members.filter((member) => member.role !== "admin"),
+    savedMembers,
     name,
   ).slice(0, 8);
 
@@ -796,6 +797,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             </div>
           ) : null}
           {selectedMemberId ? <small className="badminton-selected-member-note">เลือกคนเดิมแล้ว ประวัติและยอดค้างจะต่อเนื่อง</small> : null}
+          {!selectedMemberId ? <small className="badminton-member-search-hint">{context.clubs.is_test ? "รายชื่อทดลอง" : "ผู้เล่นเดิมที่บันทึกไว้"} {savedMembers.length} คน · แตะช่องหรือพิมพ์เพื่อค้นหา</small> : null}
         </div>
         <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> {selectedMemberId ? "เพิ่มคนเดิม" : "เพิ่มคน"}</button>
       </form>
