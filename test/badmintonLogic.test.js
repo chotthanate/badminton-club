@@ -7,6 +7,7 @@ import {
   formatPlayedDuration,
   minutesBetween,
   playedMinutesWithinEvent,
+  suggestArrivalTimeOnCheck,
   totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
@@ -153,4 +154,34 @@ test("buildLineSummary uses the compact transfer format", () => {
   assert.match(summary, /2\.บอย = 50 บาท/);
   assert.doesNotMatch(summary, /ชั่วโมงผู้เล่น|ชม\.|จ่ายแล้ว|รวม 150/);
   assert.match(summary, /โอนเงิน : ธนาคารกสิกร\n389-2-36746-8\nณฐกฤต อินนะใจ$/);
+});
+
+test("suggestArrivalTimeOnCheck offers the current half-hour when check-in is late", () => {
+  assert.equal(suggestArrivalTimeOnCheck({
+    now: new Date(2026, 6, 24, 21, 20),
+    eventDate: "2026-07-24",
+    startTime: "21:00",
+    endTime: "00:00",
+    plannedArrival: "21:00",
+  }), "21:30");
+});
+
+test("suggestArrivalTimeOnCheck keeps the signed-up time when check-in is not late", () => {
+  assert.equal(suggestArrivalTimeOnCheck({
+    now: new Date(2026, 6, 24, 21, 10),
+    eventDate: "2026-07-24",
+    startTime: "21:00",
+    endTime: "00:00",
+    plannedArrival: "21:00",
+  }), null);
+});
+
+test("suggestArrivalTimeOnCheck supports a session after midnight", () => {
+  assert.equal(suggestArrivalTimeOnCheck({
+    now: new Date(2026, 6, 25, 0, 12),
+    eventDate: "2026-07-24",
+    startTime: "21:00",
+    endTime: "01:00",
+    plannedArrival: "23:30",
+  }), "00:00");
 });

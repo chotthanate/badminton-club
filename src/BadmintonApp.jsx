@@ -34,6 +34,7 @@ import {
   createClub,
   createEvent,
   createTestClub,
+  deleteUnusedEvent,
   getAdminContexts,
   finishEvent,
   listClubEvents,
@@ -65,6 +66,7 @@ import {
   formatThaiLongDate,
   minutesBetween,
   playedMinutesWithinEvent,
+  suggestArrivalTimeOnCheck,
   totalCourtHours,
 } from "./badmintonLogic.js";
 import { normalizeMemberSearch, rankMemberSuggestions } from "./memberSearch.js";
@@ -330,6 +332,11 @@ function AdminDashboard({ session }) {
             <RoundSwitcher
               events={eventSummaries}
               onChange={(eventId) => refresh(false, { eventId })}
+              onDelete={(round) => mutate(
+                () => deleteUnusedEvent(round.id),
+                "ลบรอบที่ไม่ได้ใช้งานแล้ว",
+                { selectLatest: true },
+              )}
               selectedEventId={selectedEventId}
             />
             <nav aria-label="เมนูหลังบ้าน" className="badminton-tabs">
@@ -417,20 +424,31 @@ function AdminPasswordModal({ onClose, onSave, saving }) {
   );
 }
 
-function RoundSwitcher({ events, onChange, selectedEventId }) {
+function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
+  const selectedRound = events.find((event) => event.id === selectedEventId);
+
+  function confirmDelete() {
+    if (!selectedRound) return;
+    const confirmed = window.confirm(`ลบรอบ ${formatRoundOption(selectedRound.event_date)} ใช่ไหม?\n\nลบได้เฉพาะรอบที่ไม่มีข้อมูลผู้เล่น ค่าใช้จ่าย หรือการชำระเงิน`);
+    if (confirmed) onDelete(selectedRound);
+  }
+
   return (
     <section className="badminton-round-switcher">
       <label>
-        <span>กำลังดูรอบ</span>
-        <select onChange={(event) => onChange(event.target.value)} value={selectedEventId || ""}>
-          {events.map((event, index) => (
-            <option key={event.id} value={event.id}>
-              {index === 0 ? "รอบล่าสุด · " : ""}{formatRoundOption(event.event_date)} · {EVENT_STATUS_LABELS[event.status] || event.status}
-            </option>
-          ))}
-        </select>
+        <span>รอบทั้งหมด</span>
+        <div className="badminton-round-switcher-controls">
+          <select onChange={(event) => onChange(event.target.value)} value={selectedEventId || ""}>
+            {events.map((event, index) => (
+              <option key={event.id} value={event.id}>
+                {index === 0 ? "รอบล่าสุด · " : ""}{formatRoundOption(event.event_date)} · {EVENT_STATUS_LABELS[event.status] || event.status}
+              </option>
+            ))}
+          </select>
+          <button aria-label="ลบรอบที่เลือก" disabled={!selectedRound || selectedRound.status === "open"} onClick={confirmDelete} title={selectedRound?.status === "open" ? "จบรอบก่อนจึงจะลบได้" : "ลบรอบที่ไม่ได้ใช้งาน"} type="button"><Trash2 size={17} /></button>
+        </div>
       </label>
-      <small>เปลี่ยนรอบเพื่อดูรายชื่อ ค่าใช้จ่าย และรับเงินของรอบเก่า</small>
+      <small>เปลี่ยนรอบเพื่อดูข้อมูลย้อนหลัง หรือลบรอบเปล่าที่ไม่ได้ใช้งาน</small>
     </section>
   );
 }
@@ -824,12 +842,13 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const due = settlementRow?.roundedDue || 0;
           const isPaid = Boolean(settlementRow?.paid);
           const lineName = member.nickname && member.nickname !== member.display_name ? member.display_name : "";
+          const checkedIn = Boolean(row?.checkedIn);
 
           function updateArrival(nextArrival) {
             const weight = attendanceWeight(event.startTime, event.endTime, nextArrival, leftAt);
             return mutate(async () => {
               await updateSignupArrival({ eventId: event.id, memberId: member.id, arrivalTime: nextArrival });
-              await updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, arrived_at: nextArrival, weight } });
+              await updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: checkedIn, arrived_at: checkedIn ? nextArrival : null, weight } });
             }, `ปรับเวลามาของ ${participantName} แล้ว`);
           }
 
@@ -838,9 +857,46 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             return mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, arrived_at: plannedArrival, left_at: nextDeparture || null, weight } }), `ปรับเวลากลับของ ${participantName} แล้ว`);
           }
 
+          function toggleCheckIn(nextChecked) {
+            if (!nextChecked) {
+              return mutate(
+                () => updateAttendance({
+                  clubId: event.clubId,
+                  eventId: event.id,
+                  memberId: member.id,
+                  patch: { arrived: false, arrived_at: null, left_at: null, weight: attendanceWeight(event.startTime, event.endTime, plannedArrival, "") },
+                }),
+                `ยกเลิกเช็กชื่อ ${participantName} แล้ว`,
+              );
+            }
+
+            const suggestedArrival = suggestArrivalTimeOnCheck({
+              eventDate: event.date,
+              startTime: event.startTime,
+              endTime: event.endTime,
+              plannedArrival,
+            });
+            const shouldUpdateArrival = suggestedArrival
+              ? window.confirm(`${participantName} ลงชื่อไว้ ${plannedArrival} น.\nตอนนี้ประมาณ ${suggestedArrival} น.\n\nต้องการอัปเดตเวลามาเป็น ${suggestedArrival} น. ไหม?\nกด “ยกเลิก” เพื่อใช้เวลาเดิม`)
+              : false;
+            const checkedArrival = shouldUpdateArrival ? suggestedArrival : plannedArrival;
+            const weight = attendanceWeight(event.startTime, event.endTime, checkedArrival, leftAt);
+            return mutate(async () => {
+              if (shouldUpdateArrival) {
+                await updateSignupArrival({ eventId: event.id, memberId: member.id, arrivalTime: checkedArrival });
+              }
+              await updateAttendance({
+                clubId: event.clubId,
+                eventId: event.id,
+                memberId: member.id,
+                patch: { arrived: true, arrived_at: checkedArrival, left_at: leftAt || null, weight },
+              });
+            }, shouldUpdateArrival ? `เช็กชื่อและปรับเวลามาของ ${participantName} แล้ว` : `เช็กชื่อ ${participantName} แล้ว`);
+          }
+
           return (
-            <article className="badminton-attendance-row" key={member.id}>
-              <div className="badminton-player-identity"><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><em>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
+            <article className={`badminton-attendance-row ${checkedIn ? "is-checked-in" : ""}`} key={member.id}>
+              <div className="badminton-player-identity"><label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><em>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
@@ -1001,6 +1057,7 @@ function mapDashboardToEvent(dashboard) {
       memberId: signup.member_id,
       name: memberName(membersById.get(signup.member_id)) || "ไม่ทราบชื่อ",
       arrived: true,
+      checkedIn: Boolean(row?.arrived),
       weight: attendanceWeight(startTime, endTime, arrivalTime, leftAt),
       hours: playedMinutes / 60,
       playedMinutes,

@@ -248,6 +248,35 @@ export function formatThaiLongDate(isoDate) {
   }
 }
 
+export function suggestArrivalTimeOnCheck({
+  now = new Date(),
+  eventDate,
+  startTime,
+  endTime,
+  plannedArrival,
+}) {
+  const dateParts = String(eventDate || "").split("-").map(Number);
+  const startMinutes = parseTime(startTime);
+  const endMinutes = parseTime(endTime);
+  const arrivalMinutes = parseTime(plannedArrival);
+  const current = now instanceof Date ? now : new Date(now);
+  if (dateParts.length !== 3 || dateParts.some(Number.isNaN) || startMinutes === null || endMinutes === null || arrivalMinutes === null || Number.isNaN(current.getTime())) return null;
+
+  const [year, month, day] = dateParts;
+  const startsAt = new Date(year, month - 1, day, Math.floor(startMinutes / 60), startMinutes % 60);
+  const endsAt = new Date(year, month - 1, day, Math.floor(endMinutes / 60), endMinutes % 60);
+  if (endsAt <= startsAt) endsAt.setDate(endsAt.getDate() + 1);
+  if (current < startsAt || current >= endsAt) return null;
+
+  const plannedAt = new Date(year, month - 1, day, Math.floor(arrivalMinutes / 60), arrivalMinutes % 60);
+  if (plannedAt < startsAt) plannedAt.setDate(plannedAt.getDate() + 1);
+
+  const halfHourMs = 30 * 60 * 1000;
+  const roundedAt = new Date(Math.round(current.getTime() / halfHourMs) * halfHourMs);
+  if (roundedAt <= plannedAt || roundedAt >= endsAt) return null;
+  return `${String(roundedAt.getHours()).padStart(2, "0")}:${String(roundedAt.getMinutes()).padStart(2, "0")}`;
+}
+
 function nextFridayIso() {
   const date = new Date();
   const day = date.getDay();

@@ -173,6 +173,26 @@ export async function updateEventDetails({ clubId, eventId, patch }) {
   if (patch.venue) await rememberVenue(clubId, patch.venue);
 }
 
+export async function deleteUnusedEvent(eventId) {
+  const { data: event, error: eventError } = await client().from("events")
+    .select("id, status")
+    .eq("id", eventId)
+    .single();
+  throwIfError(eventError);
+  if (event.status === "open") throw new Error("รอบที่กำลังเปิดลงชื่ออยู่ยังลบไม่ได้ กรุณาจบรอบก่อน");
+
+  const protectedTables = ["signups", "payments", "member_extra_charges", "expenses"];
+  const results = await Promise.all(protectedTables.map((table) =>
+    client().from(table).select("id", { count: "exact", head: true }).eq("event_id", eventId)));
+  results.forEach((result) => throwIfError(result.error));
+  if (results.some((result) => Number(result.count || 0) > 0)) {
+    throw new Error("รอบนี้มีข้อมูลผู้เล่น ค่าใช้จ่าย หรือการชำระเงิน จึงไม่สามารถลบได้");
+  }
+
+  const { error } = await client().from("events").delete().eq("id", eventId);
+  throwIfError(error);
+}
+
 export async function addCourt({ clubId, eventId, courtName, startsAt, endsAt }) {
   const { error } = await client().from("event_courts").insert({
     club_id: clubId,

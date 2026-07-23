@@ -1658,6 +1658,31 @@
   font-weight: 900;
 }
 
+.badminton-round-switcher-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 6px;
+}
+
+.badminton-round-switcher-controls button {
+  width: 42px;
+  min-height: 42px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #efc6c1;
+  border-radius: 8px;
+  background: #fff7f6;
+  color: #b42318;
+}
+
+.badminton-round-switcher-controls button:disabled {
+  cursor: not-allowed;
+  border-color: #dfe5dc;
+  background: #f4f6f2;
+  color: #9da59b;
+}
+
 .badminton-round-switcher small {
   max-width: 360px;
   color: #637064;
@@ -1900,6 +1925,53 @@
   padding: 10px;
   border-color: #dfe8dc;
   background: #fbfcf8;
+}
+
+.badminton-participants-card .badminton-attendance-row.is-checked-in {
+  border-color: #9fd2ad;
+  background: #f2faf4;
+}
+
+.badminton-check-in-box {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  flex: 0 0 32px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.badminton-check-in-box input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.badminton-player-identity .badminton-check-in-box > span {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  max-width: none;
+  place-items: center;
+  overflow: visible;
+  border: 1.5px solid #9daf9d;
+  border-radius: 5px;
+  background: #fff;
+  color: transparent;
+}
+
+.badminton-check-in-box input:checked + span {
+  border-color: #15966a;
+  background: #15966a;
+  color: #fff;
+}
+
+.badminton-check-in-box input:focus-visible + span {
+  outline: 3px solid rgba(21, 150, 106, 0.2);
+  outline-offset: 2px;
 }
 
 .badminton-player-identity {
