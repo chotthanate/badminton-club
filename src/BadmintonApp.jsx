@@ -30,6 +30,8 @@ import {
   createClub,
   createEvent,
   getAdminContext,
+  finishEvent,
+  listClubEvents,
   loadDashboard,
   recordAudit,
   publishEventToLine,
@@ -61,9 +63,9 @@ import {
 import { isSupabaseConfigured, supabase } from "./supabase.js";
 
 const EVENT_STATUS_LABELS = {
-  draft: "แบบร่าง",
+  draft: "เตรียมรอบ",
   open: "เปิดลงชื่อ",
-  closed: "ปิดรอบแล้ว",
+  closed: "จบรอบแล้ว",
   cancelled: "ยกเลิก",
 };
 
@@ -162,14 +164,40 @@ function AdminDashboard({ session }) {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("round");
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [eventSummaries, setEventSummaries] = useState([]);
+  const [selectedEventId, setSelectedEventId] = useState(null);
+  const [previousOutstanding, setPreviousOutstanding] = useState({ count: 0, total: 0 });
 
-  async function refresh(silent = false) {
+  async function refresh(silent = false, options = {}) {
     if (!silent) setLoading(true);
     setError("");
     try {
       const nextContext = await getAdminContext(session.user.id);
       setContext(nextContext);
-      setDashboard(nextContext ? await loadDashboard(nextContext.club_id) : null);
+      if (!nextContext) {
+        setDashboard(null);
+        setEventSummaries([]);
+        setSelectedEventId(null);
+        setPreviousOutstanding({ count: 0, total: 0 });
+        return;
+      }
+      const nextEvents = await listClubEvents(nextContext.club_id);
+      const requestedEventId = options.preferLatest ? null : (options.eventId || selectedEventId);
+      const targetEventId = nextEvents.some((event) => event.id === requestedEventId)
+        ? requestedEventId
+        : nextEvents[0]?.id || null;
+      const nextDashboard = await loadDashboard(nextContext.club_id, targetEventId);
+      const currentIndex = nextEvents.findIndex((event) => event.id === targetEventId);
+      const previousEventIds = currentIndex >= 0
+        ? nextEvents.slice(currentIndex + 1).filter((event) => event.status === "closed").map((event) => event.id)
+        : [];
+      const nextOutstanding = silent
+        ? previousOutstanding
+        : await calculatePreviousOutstanding(nextContext.club_id, previousEventIds);
+      setEventSummaries(nextEvents);
+      setSelectedEventId(targetEventId);
+      setDashboard(nextDashboard);
+      setPreviousOutstanding(nextOutstanding);
     } catch (nextError) {
       setError(nextError.message);
     } finally {
@@ -185,14 +213,14 @@ function AdminDashboard({ session }) {
     return () => window.clearInterval(timer);
   }, [dashboard?.event?.id, dashboard?.event?.status]);
 
-  async function mutate(action, successMessage) {
+  async function mutate(action, successMessage, options = {}) {
     setSaving(true);
     setError("");
     setNotice("");
     try {
       await action();
       setNotice(successMessage);
-      await refresh();
+      await refresh(false, { preferLatest: options.selectLatest });
       return true;
     } catch (nextError) {
       setError(nextError.message);
@@ -218,7 +246,7 @@ function AdminDashboard({ session }) {
             <p>{context.clubs.name}</p>
           </div>
           <div className="badminton-header-actions">
-            <button aria-label="รีเฟรชข้อมูล" className="badminton-icon-button" onClick={refresh} type="button">
+            <button aria-label="รีเฟรชข้อมูล" className="badminton-icon-button" onClick={() => refresh()} type="button">
               <RefreshCw size={18} />
             </button>
             <button aria-label="เปลี่ยนรหัสเข้าเว็บ" className="badminton-icon-button" onClick={() => setPasswordModalOpen(true)} title="เปลี่ยนรหัสเข้าเว็บ" type="button">
@@ -237,6 +265,11 @@ function AdminDashboard({ session }) {
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />
         ) : (
           <>
+            <RoundSwitcher
+              events={eventSummaries}
+              onChange={(eventId) => refresh(false, { eventId })}
+              selectedEventId={selectedEventId}
+            />
             <nav aria-label="เมนูหลังบ้าน" className="badminton-tabs">
               {ADMIN_TABS.map(({ id, label, icon: Icon }) => (
                 <button className={activeTab === id ? "is-active" : ""} key={id} onClick={() => setActiveTab(id)} type="button"><Icon size={18} /><span>{label}</span></button>
@@ -248,10 +281,16 @@ function AdminDashboard({ session }) {
                 clubName={context.clubs.name}
                 courts={dashboard.courts}
                 event={dashboard.event}
+                key={dashboard.event.id}
+                mappedEvent={appEvent}
                 mutate={mutate}
+                session={session}
+                settlement={settlement}
                 venues={dashboard.venues || []}
               />
-              {dashboard.event.status === "closed" ? <CreateEventCard compact context={context} defaultVenue={dashboard.event.venue} mutate={mutate} session={session} venues={dashboard.venues || []} /> : null}
+              {dashboard.event.status === "closed" && eventSummaries[0]?.id === dashboard.event.id
+                ? <CreateEventCard compact context={context} defaultVenue={dashboard.event.venue} mutate={mutate} session={session} venues={dashboard.venues || []} />
+                : null}
             </> : null}
 
             {activeTab === "players" ? (
@@ -266,7 +305,7 @@ function AdminDashboard({ session }) {
             ) : null}
 
             {activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} /> : null}
-            {activeTab === "payments" ? <SettlementPanel event={appEvent} mutate={mutate} session={session} settlement={settlement} /> : null}
+            {activeTab === "payments" ? <SettlementPanel event={appEvent} mutate={mutate} previousOutstanding={previousOutstanding} session={session} settlement={settlement} /> : null}
             {activeTab === "history" ? <AuditPanel actions={appEvent.actions} /> : null}
           </>
         )}
@@ -315,6 +354,24 @@ function AdminPasswordModal({ onClose, onSave, saving }) {
   );
 }
 
+function RoundSwitcher({ events, onChange, selectedEventId }) {
+  return (
+    <section className="badminton-round-switcher">
+      <label>
+        <span>กำลังดูรอบ</span>
+        <select onChange={(event) => onChange(event.target.value)} value={selectedEventId || ""}>
+          {events.map((event, index) => (
+            <option key={event.id} value={event.id}>
+              {index === 0 ? "รอบล่าสุด · " : ""}{formatRoundOption(event.event_date)} · {EVENT_STATUS_LABELS[event.status] || event.status}
+            </option>
+          ))}
+        </select>
+      </label>
+      <small>เปลี่ยนรอบเพื่อดูรายชื่อ ค่าใช้จ่าย และรับเงินของรอบเก่า</small>
+    </section>
+  );
+}
+
 function ClubSetup({ session, onCreated, error }) {
   const [name, setName] = useState("กลุ่มแบดของเรา");
   const [saving, setSaving] = useState(false);
@@ -354,6 +411,7 @@ function ClubSetup({ session, onCreated, error }) {
 
 function CreateEventCard({ compact = false, context, defaultVenue = "", session, mutate, venues = [] }) {
   const initial = createInitialEvent();
+  const [expanded, setExpanded] = useState(!compact);
   const [form, setForm] = useState({
     eventDate: initial.date,
     venue: defaultVenue || venues[0]?.name || "คอร์ทแบดเขาน้อย (คอร์ทใหม่)",
@@ -380,14 +438,23 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
         userId: session.user.id,
         action: "สร้างรอบใหม่",
       });
-    }, "สร้างรอบใหม่แล้ว");
+    }, "สร้างรอบใหม่แล้ว", { selectLatest: true });
+  }
+
+  if (!expanded) {
+    return (
+      <button className="badminton-create-next-button" onClick={() => setExpanded(true)} type="button">
+        <Plus size={18} /> เตรียมรอบถัดไป
+      </button>
+    );
   }
 
   return (
     <section className={`badminton-card ${compact ? "badminton-compact-create" : ""}`}>
       <div className="badminton-card-title">
         <CalendarDays size={20} />
-        <div><h2>{compact ? "สร้างรอบถัดไป" : "เริ่มรอบแรก"}</h2><p>ชื่อรอบจะสร้างจากชื่อกลุ่มและวันที่ให้อัตโนมัติ</p></div>
+        <div><h2>{compact ? "เตรียมรอบถัดไป" : "เริ่มรอบแรก"}</h2><p>ระบุข้อมูลให้ครบก่อนเปิดลงชื่อใน LINE</p></div>
+        {compact ? <button aria-label="ยกเลิกเตรียมรอบ" className="badminton-collapse-create" onClick={() => setExpanded(false)} type="button"><X size={17} /></button> : null}
       </div>
       <form className="badminton-event-form" onSubmit={submit}>
         <label>วันที่<input onChange={(event) => set("eventDate", event.target.value)} required type="date" value={form.eventDate} /></label>
@@ -402,14 +469,13 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
   );
 }
 
-function EventControlCard({ clubName, courts, event, mutate, venues = [] }) {
+function EventControlCard({ clubName, courts, event, mappedEvent, mutate, session, settlement, venues = [] }) {
   const [form, setForm] = useState({
     event_date: event.event_date,
     venue: event.venue,
   });
-  const [editingDetails, setEditingDetails] = useState(event.status !== "open");
+  const [editingDetails, setEditingDetails] = useState(event.status === "draft");
   const [newCourt, setNewCourt] = useState({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
-  const nextStatus = event.status === "open" ? "closed" : "open";
 
   async function addNewCourt(submitEvent) {
     submitEvent.preventDefault();
@@ -422,15 +488,34 @@ function EventControlCard({ clubName, courts, event, mutate, venues = [] }) {
     setNewCourt({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
   }
 
-  function toggleSignup() {
-    if (nextStatus === "open") {
-      const message = event.status === "closed"
-        ? "ล้างคำตอบเดิม ส่งรอบเข้า LINE และเปิดลงชื่อใหม่แล้ว"
-        : "ส่งรอบเข้า LINE และเปิดลงชื่อแล้ว";
-      return mutate(() => publishEventToLine(event.id), message);
+  function advanceRound() {
+    if (event.status === "draft") {
+      return mutate(() => publishEventToLine(event.id), "ส่งรอบเข้า LINE และเปิดลงชื่อแล้ว");
     }
-    return mutate(() => updateEvent(event.id, { status: "closed" }), "ปิดรอบแล้ว");
+    if (event.status === "open") {
+      return mutate(async () => {
+        await finishEvent({
+          clubId: mappedEvent.clubId,
+          eventId: event.id,
+          rows: settlement.rows,
+          shuttlecockCount: mappedEvent.shuttlecockCount,
+          userId: session.user.id,
+        });
+        await recordAudit({
+          clubId: mappedEvent.clubId,
+          eventId: event.id,
+          userId: session.user.id,
+          action: "จบรอบและบันทึกยอดที่ต้องชำระ",
+        });
+      }, "จบรอบแล้ว ยอดของผู้เล่นทุกคนถูกเก็บไว้");
+    }
+    return null;
   }
+
+  const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
+  const statusLabel = event.status === "closed"
+    ? (paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ")
+    : EVENT_STATUS_LABELS[event.status];
 
   return (
     <section className={`badminton-event badminton-card ${event.status === "open" ? "is-open-compact" : ""}`}>
@@ -440,9 +525,9 @@ function EventControlCard({ clubName, courts, event, mutate, venues = [] }) {
           <div><h2>{clubName} : วันที่ {formatThaiLongDate(event.event_date)}</h2><p>สถานที่ : {event.venue}</p></div>
         </div>
         <div className="badminton-event-actions">
-          <span className={`badminton-status-pill is-${event.status}`}>{EVENT_STATUS_LABELS[event.status]}</span>
-          {event.status === "open" ? <button className="badminton-secondary badminton-compact-action" onClick={() => setEditingDetails((value) => !value)} type="button">{editingDetails ? "ซ่อนตั้งค่า" : "แก้วันที่/สถานที่"}</button> : null}
-          <button className="badminton-primary badminton-round-action" onClick={toggleSignup} type="button">{nextStatus === "open" ? "เปิดลงชื่อ" : "ปิดรอบ"}</button>
+          <span className={`badminton-status-pill is-${event.status} ${paymentComplete ? "is-settled" : ""}`}>{statusLabel}</span>
+          {event.status !== "closed" ? <button className="badminton-secondary badminton-compact-action" onClick={() => setEditingDetails((value) => !value)} type="button">{editingDetails ? "ซ่อนตั้งค่า" : "แก้วันที่/สถานที่"}</button> : null}
+          {event.status !== "closed" ? <button className="badminton-primary badminton-round-action" onClick={advanceRound} type="button">{event.status === "draft" ? "เปิดลงชื่อ" : "จบรอบ"}</button> : null}
         </div>
       </div>
       {editingDetails ? <div className="badminton-event-form badminton-event-main-form">
@@ -451,16 +536,22 @@ function EventControlCard({ clubName, courts, event, mutate, venues = [] }) {
         <datalist id="round-saved-venues">{venues.map((venue) => <option key={venue.id} value={venue.name} />)}</datalist>
         <button className="badminton-secondary" onClick={() => mutate(() => updateEventDetails({ clubId: event.club_id, eventId: event.id, patch: form }), "บันทึกรายละเอียดรอบแล้ว")} type="button"><Save size={17} /> บันทึก</button>
       </div> : null}
-      <div className="badminton-courts-editor">
-        <div className="badminton-courts-heading"><strong>คอร์ทที่จอง</strong></div>
-        {courts.map((court) => <CourtEditor key={court.id} court={court} eventId={event.id} mutate={mutate} />)}
-        <form className="badminton-court-row is-new" onSubmit={addNewCourt}>
-          <div className="badminton-court-number-input"><span>คอร์ท</span><input aria-label="เลขคอร์ทใหม่" inputMode="numeric" placeholder="เลข" required value={newCourt.courtNumber} onChange={(e) => setNewCourt({ ...newCourt, courtNumber: e.target.value })} /></div>
-          <HalfHourSelect ariaLabel="เวลาเริ่มคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, startsAt: value })} value={newCourt.startsAt} />
-          <HalfHourSelect ariaLabel="เวลาจบคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, endsAt: value })} value={newCourt.endsAt} />
-          <button aria-label="เพิ่มคอร์ท" className="badminton-secondary badminton-court-add" type="submit"><Plus size={16} /><span>เพิ่ม</span></button>
-        </form>
-      </div>
+      {event.status === "closed" ? (
+        <div className="badminton-closed-courts">
+          {courts.map((court) => <span key={court.id}><strong>{court.court_name}</strong> : {court.starts_at.slice(0, 5)}–{court.ends_at.slice(0, 5) === "00:00" ? "24:00" : court.ends_at.slice(0, 5)}</span>)}
+        </div>
+      ) : (
+        <div className="badminton-courts-editor">
+          <div className="badminton-courts-heading"><strong>คอร์ทที่จอง</strong></div>
+          {courts.map((court) => <CourtEditor key={court.id} court={court} eventId={event.id} mutate={mutate} />)}
+          <form className="badminton-court-row is-new" onSubmit={addNewCourt}>
+            <div className="badminton-court-number-input"><span>คอร์ท</span><input aria-label="เลขคอร์ทใหม่" inputMode="numeric" placeholder="เลข" required value={newCourt.courtNumber} onChange={(e) => setNewCourt({ ...newCourt, courtNumber: e.target.value })} /></div>
+            <HalfHourSelect ariaLabel="เวลาเริ่มคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, startsAt: value })} value={newCourt.startsAt} />
+            <HalfHourSelect ariaLabel="เวลาจบคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, endsAt: value })} value={newCourt.endsAt} />
+            <button aria-label="เพิ่มคอร์ท" className="badminton-secondary badminton-court-add" type="submit"><Plus size={16} /><span>เพิ่ม</span></button>
+          </form>
+        </div>
+      )}
     </section>
   );
 }
@@ -672,9 +763,11 @@ function PricingPanel({ event, mutate, session }) {
   );
 }
 
-function SettlementPanel({ event, mutate, session, settlement }) {
+function SettlementPanel({ event, mutate, previousOutstanding, session, settlement }) {
   const [copied, setCopied] = useState(false);
   const lineSummary = useMemo(() => buildLineSummary(event), [event]);
+  const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
+  const combinedTotal = settlement.totalCost + previousOutstanding.total;
   async function copySummary() {
     await navigator.clipboard.writeText(lineSummary);
     setCopied(true);
@@ -682,8 +775,17 @@ function SettlementPanel({ event, mutate, session, settlement }) {
   }
   return (
     <section className="badminton-card badminton-settlement-card" id="settlement">
-      <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
-      <div className="badminton-settlement-hero"><span>ยอดรวมรอบนี้</span><strong>{baht(settlement.totalCost)} บาท</strong><small>ส่วนกลาง {baht(settlement.sharedTotalCost)} · ของเพิ่มรายคน {baht(settlement.personalExtrasTotal)} · {settlement.totalHours.toFixed(1)} ชั่วโมงผู้เล่น</small></div>
+      <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div></div>
+      <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
+        <div className="badminton-current-round-total"><span>ยอดรอบนี้</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
+        <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousOutstanding.total)} บาท</strong></div>
+        <div className="badminton-summary-grand-total"><span>รวมทั้งหมด</span><strong>{baht(combinedTotal)} บาท</strong></div>
+        <div className="badminton-round-payment-status">
+          <Check size={16} />
+          <span>{paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ"}</span>
+        </div>
+      </div>
+      <div className="badminton-card-title badminton-payment-list-title"><WalletCards size={19} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
       <div className="badminton-pay-list">
         {settlement.rows.map((row) => {
           const extraLabel = formatExtraItems(row.extraCharges);
@@ -707,6 +809,20 @@ function AuditPanel({ actions }) {
       {actions.length ? <div className="badminton-audit-list">{actions.map((action) => <p key={action.id}><strong>{action.actorName}</strong> {action.action} <span>{action.at}</span></p>)}</div> : <p className="badminton-note">ยังไม่มีรายการ</p>}
     </section>
   );
+}
+
+async function calculatePreviousOutstanding(clubId, eventIds) {
+  if (!eventIds.length) return { count: 0, total: 0 };
+  const dashboards = await Promise.all(eventIds.map((eventId) => loadDashboard(clubId, eventId)));
+  const unpaidRows = dashboards.flatMap((dashboard) => {
+    if (!dashboard?.event) return [];
+    const previousSettlement = calculateSettlement(mapDashboardToEvent(dashboard));
+    return previousSettlement.rows.filter((row) => !row.paid);
+  });
+  return {
+    count: unpaidRows.length,
+    total: unpaidRows.reduce((sum, row) => sum + Number(row.roundedDue || 0), 0),
+  };
 }
 
 function mapDashboardToEvent(dashboard) {
@@ -830,6 +946,14 @@ function attendanceWeight(startTime, endTime, arrivalTime, leftAt) {
   const played = playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt);
   if (!total || !played) return 0.05;
   return Math.max(0.05, Math.min(1, Math.round((played / total) * 100) / 100));
+}
+
+function formatRoundOption(isoDate) {
+  return new Intl.DateTimeFormat("th-TH", {
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+  }).format(new Date(`${isoDate}T12:00:00+07:00`));
 }
 
 function LoadingScreen({ label }) {

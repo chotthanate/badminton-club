@@ -33,13 +33,30 @@ export async function createClub({ name, ownerId }) {
   return data;
 }
 
-export async function loadDashboard(clubId) {
-  const { data: event, error: eventError } = await client()
+export async function listClubEvents(clubId) {
+  const { data, error } = await client()
     .from("events")
-    .select("*")
+    .select("id, event_date, venue, status, starts_at, ends_at, created_at")
     .eq("club_id", clubId)
     .order("event_date", { ascending: false })
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: false });
+  throwIfError(error);
+  return data || [];
+}
+
+export async function loadDashboard(clubId, eventId = null) {
+  let eventQuery = client()
+    .from("events")
+    .select("*")
+    .eq("club_id", clubId);
+  if (eventId) {
+    eventQuery = eventQuery.eq("id", eventId);
+  } else {
+    eventQuery = eventQuery
+      .order("event_date", { ascending: false })
+      .order("created_at", { ascending: false });
+  }
+  const { data: event, error: eventError } = await eventQuery
     .limit(1)
     .maybeSingle();
   throwIfError(eventError);
@@ -346,6 +363,37 @@ export async function setPayment({ clubId, eventId, memberId, amount, sharedAmou
     recorded_by: userId,
   }, { onConflict: "event_id,member_id" });
   throwIfError(error);
+}
+
+export async function finishEvent({ clubId, eventId, rows, shuttlecockCount, userId }) {
+  const { data: existingPayments, error: existingError } = await client()
+    .from("payments")
+    .select("member_id, paid_at")
+    .eq("event_id", eventId);
+  throwIfError(existingError);
+  const paidMemberIds = new Set((existingPayments || [])
+    .filter((payment) => payment.paid_at)
+    .map((payment) => payment.member_id));
+  const unpaidRows = rows
+    .filter((row) => !paidMemberIds.has(row.memberId))
+    .map((row) => ({
+      club_id: clubId,
+      event_id: eventId,
+      member_id: row.memberId,
+      amount: Math.max(0, Number(row.roundedDue) || 0),
+      paid_at: null,
+      shared_amount: Math.max(0, Number(row.sharedDue) || 0),
+      extras_amount: Math.max(0, Number(row.extraAmount) || 0),
+      shuttlecock_count_snapshot: Math.max(0, Number(shuttlecockCount) || 0),
+      recorded_by: userId,
+    }));
+  if (unpaidRows.length) {
+    const { error: paymentError } = await client()
+      .from("payments")
+      .upsert(unpaidRows, { onConflict: "event_id,member_id" });
+    throwIfError(paymentError);
+  }
+  await updateEvent(eventId, { status: "closed" });
 }
 
 export async function recordAudit({ clubId, eventId = null, userId, action, details = {} }) {

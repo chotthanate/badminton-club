@@ -1404,6 +1404,46 @@
   color: #0f7a52;
 }
 
+.badminton-round-switcher {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d9e1d7;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.badminton-round-switcher label {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+  color: #637064;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.badminton-round-switcher select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #cad6c8;
+  border-radius: 8px;
+  background: #fbfcf8;
+  color: #172018;
+  padding: 0 34px 0 10px;
+  font-weight: 900;
+}
+
+.badminton-round-switcher small {
+  max-width: 360px;
+  color: #637064;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .badminton-event-actions,
 .badminton-player-controls,
 .badminton-player-identity,
@@ -1432,6 +1472,126 @@
 
 .badminton-event.is-open-compact .badminton-event-title h2 {
   font-size: 18px;
+}
+
+.badminton-closed-courts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid #e3eadf;
+  color: #536056;
+  font-size: 12px;
+}
+
+.badminton-closed-courts strong {
+  color: #0f7a52;
+}
+
+.badminton-create-next-button {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-bottom: 14px;
+  border: 1px dashed #98b39b;
+  border-radius: 10px;
+  background: #f8fbf7;
+  color: #0f7a52;
+  font-weight: 900;
+}
+
+.badminton-collapse-create {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  margin-left: auto;
+  border: 1px solid #d9e1d7;
+  border-radius: 8px;
+  background: #fff;
+  color: #536056;
+}
+
+.badminton-settlement-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr);
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid #cfe2d3;
+  border-radius: 12px;
+  background: #eef8f1;
+}
+
+.badminton-current-round-total,
+.badminton-summary-line,
+.badminton-summary-grand-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.badminton-current-round-total {
+  grid-row: span 2;
+  display: grid;
+  align-content: center;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: #fff;
+  color: #0f7a52;
+}
+
+.badminton-current-round-total span,
+.badminton-summary-line span,
+.badminton-summary-grand-total span {
+  color: #637064;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badminton-current-round-total strong {
+  font-size: clamp(28px, 5vw, 42px);
+  line-height: 1.05;
+}
+
+.badminton-summary-line,
+.badminton-summary-grand-total {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.badminton-summary-grand-total {
+  color: #0f7a52;
+}
+
+.badminton-round-payment-status {
+  grid-column: 1 / -1;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  background: #fff3d6;
+  color: #725a16;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badminton-settlement-overview.is-settled .badminton-round-payment-status {
+  background: #dff3e5;
+  color: #0f7a52;
+}
+
+.badminton-payment-list-title {
+  margin-top: 4px;
 }
 
 .badminton-court-row,
@@ -1769,6 +1929,29 @@
   .badminton-tabs {
     margin-inline: -2px;
     border-radius: 10px;
+  }
+
+  .badminton-round-switcher {
+    align-items: stretch;
+    padding: 8px;
+  }
+
+  .badminton-round-switcher small {
+    display: none;
+  }
+
+  .badminton-settlement-overview {
+    grid-template-columns: 1fr;
+    padding: 9px;
+  }
+
+  .badminton-current-round-total {
+    grid-row: auto;
+    min-height: 92px;
+  }
+
+  .badminton-round-payment-status {
+    grid-column: auto;
   }
 
   .badminton-card,
