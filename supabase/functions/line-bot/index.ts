@@ -344,7 +344,7 @@ function buildSignupMessage(event: any, liffId: string) {
           { type: "separator" },
           { type: "text", text: `สถานที่ : ${event.venue}`, size: "sm", wrap: true },
           { type: "text", text: courts || "ยังไม่ได้ระบุคอร์ท", size: "xs", color: "#637064", wrap: true },
-          { type: "text", text: "🏸สนใจออกกำลังกาย เบาๆ ลงชื่อได้เลย🏸", size: "sm", color: "#15966a", wrap: true },
+          { type: "text", text: "\"ตีสนุก ตีมันส์ ง่ายๆ สบายๆ สไตล์ HeadShot\"", size: "sm", color: "#15966a", wrap: true },
         ],
       },
       footer: {
