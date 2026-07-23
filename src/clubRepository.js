@@ -144,7 +144,7 @@ export async function loadDashboard(clubId, eventId = null) {
   };
 }
 
-export async function createEvent({ clubId, clubName, userId, eventDate, venue, courtName, startsAt, endsAt }) {
+export async function createEvent({ clubId, clubName, userId, eventDate, venue, startsAt = "21:00", endsAt = "00:00" }) {
   const { data, error } = await client()
     .from("events")
     .insert({
@@ -160,19 +160,6 @@ export async function createEvent({ clubId, clubName, userId, eventDate, venue, 
     .select("*")
     .single();
   throwIfError(error);
-  try {
-    await rememberVenue(clubId, venue);
-    await addCourt({
-      clubId,
-      eventId: data.id,
-      courtName,
-      startsAt,
-      endsAt,
-    });
-  } catch (nextError) {
-    await client().from("events").delete().eq("id", data.id).eq("club_id", clubId);
-    throw nextError;
-  }
   return data;
 }
 
@@ -382,7 +369,10 @@ export async function removeMemberExtraCharge(chargeId) {
 async function rememberVenue(clubId, venue) {
   const name = venue.trim();
   if (!name) return;
-  const { error } = await client().from("club_venues").upsert({ club_id: clubId, name }, { onConflict: "club_id,name" });
+  const { error } = await client().from("club_venues").upsert(
+    { club_id: clubId, name },
+    { onConflict: "club_id,name", ignoreDuplicates: true },
+  );
   throwIfError(error);
 }
 

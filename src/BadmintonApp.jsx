@@ -474,26 +474,16 @@ function ClubSetup({ session, onCreated, error }) {
 
 function CreateEventCard({ compact = false, context, defaultVenue = "", session, mutate, venues = [] }) {
   const initial = createInitialEvent();
-  const [expanded, setExpanded] = useState(!compact);
-  const [form, setForm] = useState({
-    eventDate: initial.date,
-    venue: defaultVenue || venues[0]?.name || "คอร์ทแบดเขาน้อย (คอร์ทใหม่)",
-    courtNumber: "7",
-    startsAt: "21:00",
-    endsAt: "00:00",
-  });
+  const venue = defaultVenue || venues[0]?.name || "คอร์ทแบดเขาน้อย (คอร์ทใหม่)";
 
-  function set(field, value) { setForm((current) => ({ ...current, [field]: value })); }
-
-  async function submit(event) {
-    event.preventDefault();
+  async function createRound() {
     await mutate(async () => {
       const created = await createEvent({
         clubId: context.club_id,
         clubName: context.clubs.name,
         userId: session.user.id,
-        ...form,
-        courtName: `คอร์ท ${form.courtNumber.trim()}`,
+        eventDate: initial.date,
+        venue,
       });
       await recordAudit({
         clubId: context.club_id,
@@ -504,31 +494,10 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
     }, "สร้างรอบใหม่แล้ว", { selectLatest: true });
   }
 
-  if (!expanded) {
-    return (
-      <button className="badminton-create-next-button" onClick={() => setExpanded(true)} type="button">
-        <Plus size={18} /> เตรียมรอบถัดไป
-      </button>
-    );
-  }
-
   return (
-    <section className={`badminton-card ${compact ? "badminton-compact-create" : ""}`}>
-      <div className="badminton-card-title">
-        <CalendarDays size={20} />
-        <div><h2>{compact ? "เตรียมรอบถัดไป" : "เริ่มรอบแรก"}</h2><p>ระบุข้อมูลให้ครบก่อนเปิดลงชื่อใน LINE</p></div>
-        {compact ? <button aria-label="ยกเลิกเตรียมรอบ" className="badminton-collapse-create" onClick={() => setExpanded(false)} type="button"><X size={17} /></button> : null}
-      </div>
-      <form className="badminton-event-form" onSubmit={submit}>
-        <label>วันที่<input onChange={(event) => set("eventDate", event.target.value)} required type="date" value={form.eventDate} /></label>
-        <label>สถานที่<input list="saved-venues" onChange={(event) => set("venue", event.target.value)} required value={form.venue} /></label>
-        <datalist id="saved-venues">{venues.map((venue) => <option key={venue.id} value={venue.name} />)}</datalist>
-        <label>เลขคอร์ท<input inputMode="numeric" onChange={(event) => set("courtNumber", event.target.value)} placeholder="7" required value={form.courtNumber} /></label>
-        <label>เริ่ม<HalfHourSelect ariaLabel="เวลาเริ่มรอบ" onChange={(value) => set("startsAt", value)} value={form.startsAt} /></label>
-        <label>จบ<HalfHourSelect ariaLabel="เวลาจบรอบ" onChange={(value) => set("endsAt", value)} value={form.endsAt} /></label>
-        <button className="badminton-primary" type="submit"><Plus size={17} /> สร้างรอบ</button>
-      </form>
-    </section>
+    <button className="badminton-create-next-button" onClick={createRound} type="button">
+      <Plus size={18} /> {compact ? "สร้างรอบใหม่" : "สร้างรอบแรก"}
+    </button>
   );
 }
 
