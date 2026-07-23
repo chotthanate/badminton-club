@@ -245,7 +245,11 @@ function AdminDashboard({ session }) {
       await refresh(false, { preferLatest: options.selectLatest });
       return true;
     } catch (nextError) {
-      setError(nextError.message);
+      if (options.errorMode === "alert") {
+        window.alert(nextError.message);
+      } else {
+        setError(nextError.message);
+      }
       return false;
     } finally {
       setSaving(false);
@@ -335,7 +339,7 @@ function AdminDashboard({ session }) {
               onDelete={(round) => mutate(
                 () => deleteCompletedEvent(round.id),
                 "ลบรอบที่ชำระเงินครบแล้ว",
-                { selectLatest: true },
+                { selectLatest: true, errorMode: "alert" },
               )}
               selectedEventId={selectedEventId}
             />
