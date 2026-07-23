@@ -77,14 +77,9 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
 
   if (!payload.eventId) return json({ error: "Invalid action" }, 400);
 
-  const lineToken = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN");
-  const liffId = Deno.env.get("LINE_LIFF_ID");
-  if (!lineToken) return json({ error: "ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN" }, 503);
-  if (!liffId) return json({ error: "ยังไม่ได้ตั้งค่า LINE_LIFF_ID" }, 503);
-
   const { data: event, error: eventError } = await userClient
     .from("events")
-    .select("id, club_id, event_date, venue, status, clubs!inner(name, line_group_id), event_courts(court_name, starts_at, ends_at, position)")
+    .select("id, club_id, status, clubs!inner(line_group_id)")
     .eq("id", payload.eventId)
     .single();
   if (eventError || !event) return json({ error: "ไม่พบรอบเล่น" }, 404);
@@ -103,48 +98,21 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
   if (!club?.line_group_id) {
     return json({ error: "ยังไม่พบกลุ่ม LINE กรุณาเชิญบอทเข้ากลุ่มและพิมพ์ข้อความ 1 ครั้ง" }, 409);
   }
+  if (event.status !== "draft") return json({ error: "รอบนี้ไม่ได้อยู่ในสถานะเตรียมรอบ" }, 409);
 
-  const response = await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${lineToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      to: club.line_group_id,
-      messages: [buildSignupMessage(event, club.name, liffId)],
-    }),
-  });
+  const { error: readyError } = await userClient.from("events")
+    .update({ line_publish_ready: true })
+    .eq("id", event.id)
+    .eq("status", "draft");
+  if (readyError) return json({ error: "เตรียมเปิดลงชื่อไม่สำเร็จ" }, 500);
 
-  if (!response.ok) {
-    const details = await response.text();
-    console.error("LINE push failed", response.status, details);
-    return json({ error: "ส่งข้อความเข้า LINE ไม่สำเร็จ" }, 502);
-  }
-
-  const reopeningClosedEvent = event.status === "closed";
-  if (reopeningClosedEvent) {
-    const { error: clearError } = await userClient
-      .from("signups")
-      .delete()
-      .eq("event_id", event.id)
-      .eq("club_id", event.club_id);
-    if (clearError) {
-      console.error("Clearing old signups failed", clearError);
-      return json({ error: "ส่งการ์ดแล้ว แต่ล้างคำตอบเดิมไม่สำเร็จ กรุณาลองเปิดลงชื่ออีกครั้ง" }, 500);
-    }
-  }
-
-  await userClient.from("events").update({ status: "open" }).eq("id", event.id);
   await userClient.from("audit_logs").insert({
     club_id: event.club_id,
     event_id: event.id,
     actor_id: authData.user.id,
-    action: reopeningClosedEvent
-      ? "ล้างคำตอบเดิม เปิดลงชื่อใหม่ และส่งเข้า LINE"
-      : "เปิดลงชื่อและส่งเข้า LINE",
+    action: "เตรียมรอบสำหรับคำสั่งเปิดลงชื่อใน LINE",
   });
-  return json({ ok: true, clearedPreviousAnswers: reopeningClosedEvent });
+  return json({ ok: true, command: "เปิดลงชื่อ" });
 }
 
 async function receiveLineWebhook(request: Request, rawBody: string) {
@@ -170,10 +138,32 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
+  const { data: configuredClub, error: clubError } = await admin.from("clubs")
+    .select("id, name, line_group_id")
+    .eq("id", clubId)
+    .maybeSingle();
+  if (clubError || !configuredClub) return json({ error: "Configured club was not found" }, 500);
+
   for (const event of payload?.events || []) {
     const groupId = event.source?.groupId;
-    if (groupId) {
+    if (groupId && !configuredClub.line_group_id) {
       await admin.from("clubs").update({ line_group_id: groupId }).eq("id", clubId);
+      configuredClub.line_group_id = groupId;
+    }
+    if (groupId && configuredClub.line_group_id !== groupId) continue;
+
+    if (event.type === "message" && event.message?.type === "text" && groupId) {
+      const command = normalizeLineCommand(event.message.text);
+      if (command === "เปิดลงชื่อ" || command === "ลงชื่อ") {
+        await handleSignupCommand({
+          admin,
+          club: configuredClub,
+          command,
+          event,
+          lineToken,
+        });
+      }
+      continue;
     }
 
     if (event.type !== "postback" || !event.source?.userId) continue;
@@ -240,6 +230,110 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
   return json({ ok: true });
 }
 
+async function handleSignupCommand({ admin, club, command, event, lineToken }: {
+  admin: any;
+  club: any;
+  command: string;
+  event: any;
+  lineToken: string;
+}) {
+  const liffId = Deno.env.get("LINE_LIFF_ID");
+  if (!liffId) {
+    await replyLine(event.replyToken, "ระบบลงชื่อ LINE ยังตั้งค่าไม่ครบ", lineToken);
+    return;
+  }
+
+  const eventFields = "id, club_id, event_date, venue, status, starts_at, ends_at, line_publish_ready, event_courts(court_name, starts_at, ends_at, position)";
+  if (command === "ลงชื่อ") {
+    const currentEvent = await latestEvent(admin, club.id, eventFields, "open");
+    if (!currentEvent) {
+      await replyLine(event.replyToken, "ตอนนี้ยังไม่มีรอบที่เปิดให้ลงชื่อ", lineToken);
+      return;
+    }
+    await replyLineMessages(event.replyToken, [
+      buildSignupMessage(currentEvent, club.name, liffId),
+      permanentSignupText(liffId),
+    ], lineToken);
+    return;
+  }
+
+  const readyEvent = await latestEvent(admin, club.id, eventFields, "draft", true);
+  if (!readyEvent) {
+    const currentEvent = await latestEvent(admin, club.id, eventFields, "open");
+    const message = currentEvent
+      ? `รอบล่าสุดเปิดลงชื่ออยู่แล้ว\n${permanentSignupUrl(liffId)}`
+      : "ยังไม่มีรอบที่แอดมินกดเตรียมเปิดลงชื่อจากเว็บไซต์";
+    await replyLine(event.replyToken, message, lineToken);
+    return;
+  }
+  if (!(readyEvent.event_courts || []).length) {
+    await replyLine(event.replyToken, "รอบนี้ยังไม่มีคอร์ท กรุณาเพิ่มคอร์ทในเว็บไซต์ก่อน", lineToken);
+    return;
+  }
+
+  const { data: claimedEvent, error: claimError } = await admin.from("events")
+    .update({ status: "open", line_publish_ready: false })
+    .eq("id", readyEvent.id)
+    .eq("status", "draft")
+    .eq("line_publish_ready", true)
+    .select("id")
+    .maybeSingle();
+  if (claimError || !claimedEvent) {
+    await replyLine(event.replyToken, "รอบนี้ถูกเปิดลงชื่อไปแล้ว", lineToken);
+    return;
+  }
+
+  try {
+    await replyLineMessages(event.replyToken, [
+      buildSignupMessage(readyEvent, club.name, liffId),
+      permanentSignupText(liffId),
+    ], lineToken);
+    await admin.from("audit_logs").insert({
+      club_id: club.id,
+      event_id: readyEvent.id,
+      actor_id: null,
+      action: "เปิดลงชื่อด้วย Reply API จากกลุ่ม LINE",
+      details: { line_user_id: event.source?.userId, source: "line_command" },
+    });
+  } catch (error) {
+    await admin.from("events")
+      .update({ status: "draft", line_publish_ready: true })
+      .eq("id", readyEvent.id)
+      .eq("status", "open");
+    throw error;
+  }
+}
+
+async function latestEvent(admin: any, clubId: string, fields: string, status: string, readyOnly = false) {
+  let query = admin.from("events")
+    .select(fields)
+    .eq("club_id", clubId)
+    .eq("status", status);
+  if (readyOnly) query = query.eq("line_publish_ready", true);
+  const { data, error } = await query
+    .order("event_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+function normalizeLineCommand(value: unknown) {
+  return String(value || "").trim().replace(/\s+/g, "");
+}
+
+function permanentSignupUrl(liffId: string) {
+  return `https://liff.line.me/${liffId}?latest=1`;
+}
+
+function permanentSignupText(liffId: string) {
+  return {
+    type: "text",
+    text: `🏸 ลงชื่อเล่นแบดรอบล่าสุด\n${permanentSignupUrl(liffId)}\n\nกดค้างข้อความนี้แล้วเลือก “ประกาศ” เพื่อให้ลิงก์อยู่ด้านบนของกลุ่ม`,
+  };
+}
+
 function buildSignupMessage(event: any, clubName: string, liffId: string) {
   const courts = [...(event.event_courts || [])]
     .sort((a, b) => a.position - b.position)
@@ -288,7 +382,9 @@ function buildSignupMessage(event: any, clubName: string, liffId: string) {
 async function handleLiffRequest(payload: any) {
   const clubId = Deno.env.get("LINE_CLUB_ID");
   if (!clubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
-  if (!payload?.eventId || !payload?.idToken) return json({ error: "ข้อมูลสำหรับลงชื่อไม่ครบ" }, 400);
+  if ((!payload?.eventId && !payload?.latest) || !payload?.idToken) {
+    return json({ error: "ข้อมูลสำหรับลงชื่อไม่ครบ" }, 400);
+  }
 
   try {
     const identity = await verifyLiffIdToken(payload.idToken);
@@ -297,13 +393,22 @@ async function handleLiffRequest(payload: any) {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const { data: event, error: eventError } = await admin.from("events")
+    let eventQuery = admin.from("events")
       .select("id, club_id, event_date, venue, status, starts_at, ends_at, clubs!inner(name), event_courts(court_name, starts_at, ends_at, position)")
-      .eq("id", payload.eventId)
-      .eq("club_id", clubId)
-      .maybeSingle();
+      .eq("club_id", clubId);
+    if (payload.latest) {
+      eventQuery = eventQuery
+        .eq("status", "open")
+        .order("event_date", { ascending: false })
+        .order("created_at", { ascending: false });
+    } else {
+      eventQuery = eventQuery.eq("id", payload.eventId);
+    }
+    const { data: event, error: eventError } = await eventQuery.limit(1).maybeSingle();
     if (eventError) throw eventError;
-    if (!event) return json({ error: "ไม่พบรอบที่ต้องการลงชื่อ" }, 404);
+    if (!event) {
+      return json({ error: payload.latest ? "ตอนนี้ยังไม่มีรอบที่เปิดให้ลงชื่อ" : "ไม่พบรอบที่ต้องการลงชื่อ" }, 404);
+    }
 
     const { data: existingMember } = await admin.from("club_members")
       .select("id, display_name, nickname")
@@ -552,12 +657,17 @@ async function getLineDisplayName(source: any, token: string) {
 }
 
 async function replyLine(replyToken: string, text: string, token: string) {
+  return replyLineMessages(replyToken, [{ type: "text", text }], token);
+}
+
+async function replyLineMessages(replyToken: string, messages: any[], token: string) {
   if (!replyToken) return;
-  await fetch("https://api.line.me/v2/bot/message/reply", {
+  const response = await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ replyToken, messages: [{ type: "text", text }] }),
+    body: JSON.stringify({ replyToken, messages }),
   });
+  if (!response.ok) throw new Error(`LINE reply failed (${response.status})`);
 }
 
 async function verifyLineSignature(body: string, signature: string, secret: string) {

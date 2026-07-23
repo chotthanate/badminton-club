@@ -40,7 +40,7 @@ import {
   loadDashboard,
   recordAudit,
   resetTestClub,
-  publishEventToLine,
+  prepareEventForLine,
   removeCourt,
   removeExtraCatalogItem,
   removeMemberExtraCharge,
@@ -569,7 +569,11 @@ function EventControlCard({ clubName, courts, event, isTestMode, mappedEvent, mu
           });
         }, "เปิดลงชื่อทดลองแล้ว โดยไม่ได้ส่งเข้า LINE");
       }
-      return mutate(() => publishEventToLine(event.id), "ส่งรอบเข้า LINE และเปิดลงชื่อแล้ว");
+      if (event.line_publish_ready) return null;
+      return mutate(
+        () => prepareEventForLine(event.id),
+        "เตรียมรอบแล้ว กรุณาพิมพ์ “เปิดลงชื่อ” ในกลุ่ม LINE",
+      );
     }
     if (event.status === "open") {
       return mutate(async () => {
@@ -592,7 +596,9 @@ function EventControlCard({ clubName, courts, event, isTestMode, mappedEvent, mu
   }
 
   const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
-  const statusLabel = event.status === "closed"
+  const statusLabel = event.status === "draft" && event.line_publish_ready
+    ? "รอคำสั่ง LINE"
+    : event.status === "closed"
     ? (paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ")
     : EVENT_STATUS_LABELS[event.status];
 
@@ -606,9 +612,10 @@ function EventControlCard({ clubName, courts, event, isTestMode, mappedEvent, mu
         <div className="badminton-event-actions">
           <span className={`badminton-status-pill is-${event.status} ${paymentComplete ? "is-settled" : ""}`}>{statusLabel}</span>
           {event.status !== "closed" ? <button className="badminton-secondary badminton-compact-action" onClick={() => setEditingDetails((value) => !value)} type="button">{editingDetails ? "ซ่อนตั้งค่า" : "แก้วันที่/สถานที่"}</button> : null}
-          {event.status !== "closed" ? <button className="badminton-primary badminton-round-action" onClick={advanceRound} type="button">{event.status === "draft" ? "เปิดลงชื่อ" : "จบรอบ"}</button> : null}
+          {event.status !== "closed" ? <button className="badminton-primary badminton-round-action" disabled={event.status === "draft" && event.line_publish_ready} onClick={advanceRound} type="button">{event.status === "draft" ? (event.line_publish_ready ? "รอพิมพ์ใน LINE" : isTestMode ? "เปิดลงชื่อทดลอง" : "เตรียมเปิดลงชื่อ") : "จบรอบ"}</button> : null}
         </div>
       </div>
+      {event.status === "draft" && event.line_publish_ready ? <div className="badminton-line-command-ready"><strong>ขั้นตอนสุดท้าย</strong><span>ไปที่กลุ่ม LINE แล้วพิมพ์ <b>เปิดลงชื่อ</b> บอทจะตอบการ์ดโดยไม่หักโควตา</span></div> : null}
       {editingDetails ? <div className="badminton-event-form badminton-event-main-form">
         <label>วันที่<input type="date" value={form.event_date} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></label>
         <label>สถานที่<input list="round-saved-venues" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} /></label>

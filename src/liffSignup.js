@@ -1,11 +1,19 @@
 export function getEventIdFromSearch(search) {
+  return liffSearchParams(search).get("event_id");
+}
+
+export function isLatestEventSearch(search) {
+  return liffSearchParams(search).get("latest") === "1";
+}
+
+function liffSearchParams(search) {
   const params = new URLSearchParams(search);
   const liffState = params.get("liff.state");
   if (liffState) {
-    const stateEventId = new URLSearchParams(liffState.replace(/^\?/, "")).get("event_id");
-    if (stateEventId) return stateEventId;
+    const stateParams = new URLSearchParams(liffState.replace(/^\?/, ""));
+    if (stateParams.has("event_id") || stateParams.has("latest")) return stateParams;
   }
-  return params.get("event_id");
+  return params;
 }
 
 export function buildArrivalTimeOptions(startValue, endValue) {

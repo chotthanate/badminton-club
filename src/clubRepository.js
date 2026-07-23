@@ -231,7 +231,7 @@ function timeOnEventTimeline(time, eventStart) {
   return total;
 }
 
-export async function publishEventToLine(eventId) {
+export async function prepareEventForLine(eventId) {
   return invokeLineBot({ action: "publish_event", eventId });
 }
 

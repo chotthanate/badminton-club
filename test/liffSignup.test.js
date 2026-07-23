@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildArrivalTimeOptions, getEventIdFromSearch } from "../src/liffSignup.js";
+import { buildArrivalTimeOptions, getEventIdFromSearch, isLatestEventSearch } from "../src/liffSignup.js";
 
 test("LIFF state event takes priority over a stale direct event", () => {
   const search = "?liff=signup&event_id=old-round&liff.state=%3Fevent_id%3Dnew-round";
@@ -14,6 +14,11 @@ test("direct event remains available outside a LIFF redirect", () => {
 
 test("missing event returns null", () => {
   assert.equal(getEventIdFromSearch("?liff=signup"), null);
+});
+
+test("permanent latest link survives a LIFF redirect", () => {
+  assert.equal(isLatestEventSearch("?liff.state=%3Flatest%3D1"), true);
+  assert.equal(isLatestEventSearch("?latest=1"), true);
 });
 
 test("arrival time options advance by 30 minutes and stop before session end", () => {

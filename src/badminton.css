@@ -2102,6 +2102,32 @@
   font-weight: 900;
 }
 
+.badminton-line-command-ready {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 9px;
+  padding: 9px 11px;
+  border: 1px solid #a9d7b8;
+  border-radius: 9px;
+  background: #edf9f0;
+  color: #315a3d;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.badminton-line-command-ready strong {
+  flex: 0 0 auto;
+  color: #0f7a52;
+}
+
+.badminton-line-command-ready b {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #d8f1df;
+  color: #0f7a52;
+}
+
 @media (max-width: 760px) {
   .badminton-shell {
     padding: 10px;
@@ -2154,6 +2180,12 @@
 
   .badminton-test-banner button {
     width: 100%;
+  }
+
+  .badminton-line-command-ready {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
 
   .badminton-member-directory-list {

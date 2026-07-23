@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Check, Clock3, Edit3, LoaderCircle, MapPin, X } from "lucide-react";
-import { buildArrivalTimeOptions, getEventIdFromSearch } from "./liffSignup.js";
+import { buildArrivalTimeOptions, getEventIdFromSearch, isLatestEventSearch } from "./liffSignup.js";
 
 export default function LiffSignupApp() {
   const [event, setEvent] = useState(null);
@@ -14,7 +14,9 @@ export default function LiffSignupApp() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const eventId = getEventIdFromSearch(window.location.search);
+  const requestedEventId = getEventIdFromSearch(window.location.search);
+  const latestRequested = isLatestEventSearch(window.location.search);
+  const activeEventId = event?.id || requestedEventId;
 
   useEffect(() => {
     let active = true;
@@ -23,7 +25,7 @@ export default function LiffSignupApp() {
       try {
         const liffId = import.meta.env.VITE_LINE_LIFF_ID;
         if (!liffId || !window.liff) throw new Error("ระบบลงชื่อ LINE ยังตั้งค่าไม่ครบ");
-        if (!eventId) throw new Error("ไม่พบรอบที่ต้องการลงชื่อ");
+        if (!requestedEventId && !latestRequested) throw new Error("ไม่พบรอบที่ต้องการลงชื่อ");
 
         await window.liff.init({ liffId });
         if (!window.liff.isLoggedIn()) {
@@ -33,7 +35,7 @@ export default function LiffSignupApp() {
 
         const idToken = window.liff.getIDToken();
         if (!idToken) throw new Error("ไม่สามารถยืนยันบัญชี LINE ได้");
-        const data = await callLiffApi("get_liff_event", { eventId, idToken });
+        const data = await callLiffApi("get_liff_event", { eventId: requestedEventId, latest: latestRequested, idToken });
         if (!active) return;
         setEvent(data.event);
         setProfile(data.profile);
@@ -53,7 +55,7 @@ export default function LiffSignupApp() {
 
     start();
     return () => { active = false; };
-  }, [eventId]);
+  }, [latestRequested, requestedEventId]);
 
   useEffect(() => {
     if (!event?.id || !window.liff?.isLoggedIn()) return undefined;
@@ -63,7 +65,7 @@ export default function LiffSignupApp() {
       try {
         const idToken = window.liff.getIDToken();
         if (!idToken) return;
-        const data = await callLiffApi("get_liff_event", { eventId, idToken });
+        const data = await callLiffApi("get_liff_event", { eventId: activeEventId, idToken });
         if (!active) return;
         setEvent(data.event);
         setRoster(data.roster || { coming: [] });
@@ -78,7 +80,7 @@ export default function LiffSignupApp() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [event?.id, eventId]);
+  }, [activeEventId, event?.id]);
 
   async function saveNickname(submitEvent) {
     submitEvent.preventDefault();
@@ -91,7 +93,7 @@ export default function LiffSignupApp() {
     setError("");
     try {
       const idToken = window.liff.getIDToken();
-      const data = await callLiffApi("save_liff_nickname", { eventId, idToken, nickname: nextNickname });
+      const data = await callLiffApi("save_liff_nickname", { eventId: activeEventId, idToken, nickname: nextNickname });
       setNickname(data.nickname);
       setNicknameDraft(data.nickname);
       setShowNicknameModal(false);
@@ -114,7 +116,7 @@ export default function LiffSignupApp() {
     try {
       const idToken = window.liff.getIDToken();
       const data = await callLiffApi("submit_liff_signup", {
-        eventId,
+        eventId: activeEventId,
         idToken,
         status: "coming",
         arrivalTime,
@@ -136,7 +138,7 @@ export default function LiffSignupApp() {
     setError("");
     try {
       const idToken = window.liff.getIDToken();
-      const data = await callLiffApi("cancel_liff_signup", { eventId, idToken });
+      const data = await callLiffApi("cancel_liff_signup", { eventId: activeEventId, idToken });
       setSavedStatus(null);
       setSavedArrivalTime("");
       setRoster(data.roster || { coming: [] });
