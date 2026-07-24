@@ -18,7 +18,7 @@ Deno.serve(async (request) => {
   const payload = safeJson(rawBody);
   const authorization = request.headers.get("Authorization");
 
-  if (["get_liff_event", "save_liff_nickname", "submit_liff_signup", "cancel_liff_signup"].includes(payload?.action)) {
+  if (["get_liff_event", "save_liff_nickname", "submit_liff_signup", "submit_liff_guest", "cancel_liff_signup"].includes(payload?.action)) {
     return handleLiffRequest(payload);
   }
 
@@ -154,7 +154,7 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
 
     if (event.type === "message" && event.message?.type === "text" && groupId) {
       const command = normalizeLineCommand(event.message.text);
-      if (command === "เปิดลงชื่อ" || command === "ลงชื่อ") {
+      if (command === "เปิดลงชื่อ" || command === "ลงชื่อ" || command === "รายชื่อตีแบดวันนี้") {
         await handleSignupCommand({
           admin,
           club: configuredClub,
@@ -237,13 +237,24 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
   event: any;
   lineToken: string;
 }) {
+  const eventFields = "id, club_id, event_date, venue, status, starts_at, ends_at, line_publish_ready, event_courts(court_name, starts_at, ends_at, position)";
+  if (command === "รายชื่อตีแบดวันนี้") {
+    const currentEvent = await latestEvent(admin, club.id, eventFields, "open");
+    if (!currentEvent) {
+      await replyLine(event.replyToken, "ตอนนี้ยังไม่มีรอบที่เปิดให้ลงชื่อ", lineToken);
+      return;
+    }
+    const roster = await getLiffRoster(admin, currentEvent);
+    await replyLine(event.replyToken, buildRosterText(currentEvent, roster.coming), lineToken);
+    return;
+  }
+
   const liffId = Deno.env.get("LINE_LIFF_ID");
   if (!liffId) {
     await replyLine(event.replyToken, "ระบบลงชื่อ LINE ยังตั้งค่าไม่ครบ", lineToken);
     return;
   }
 
-  const eventFields = "id, club_id, event_date, venue, status, starts_at, ends_at, line_publish_ready, event_courts(court_name, starts_at, ends_at, position)";
   if (command === "ลงชื่อ") {
     const currentEvent = await latestEvent(admin, club.id, eventFields, "open");
     if (!currentEvent) {
@@ -368,6 +379,22 @@ function buildSignupMessage(event: any, liffId: string) {
   };
 }
 
+function buildRosterText(event: any, players: Array<{ name: string; arrivalTime: string | null }>) {
+  const courts = [...(event.event_courts || [])]
+    .sort((a, b) => a.position - b.position)
+    .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)} น.`);
+  const playerLines = players.length
+    ? players.map((player, index) => `${index + 1}. ${player.name} : ${player.arrivalTime ? `${player.arrivalTime} น.` : "ยังไม่ระบุเวลา"}`)
+    : ["ยังไม่มีผู้ลงชื่อ"];
+
+  return [
+    `รายชื่อตีแบด ${thaiLongDate(event.event_date)}`,
+    ...courts,
+    ...playerLines,
+    "🏸 ใครสนใจลงชื่อเพิ่มเติมสามารถคลิกที่ประกาศด้านบนได้เลยนะครับ",
+  ].join("\n");
+}
+
 async function handleLiffRequest(payload: any) {
   const clubId = Deno.env.get("LINE_CLUB_ID");
   if (!clubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
@@ -456,6 +483,55 @@ async function handleLiffRequest(payload: any) {
       return json({ ok: true, roster: await getLiffRoster(admin, event) });
     }
 
+    if (payload.action === "submit_liff_guest") {
+      if (event.status !== "open") return json({ error: "รอบนี้ปิดรับคำตอบแล้ว" }, 409);
+      if (!existingMember?.id) return json({ error: "กรุณาตั้งชื่อเล่นของคุณก่อนเพิ่มผู้เล่น" }, 409);
+
+      const guestName = String(payload.guestName || "").trim().replace(/\s+/g, " ");
+      if (guestName.length < 1 || guestName.length > 40) {
+        return json({ error: "กรุณากรอกชื่อผู้เล่นไม่เกิน 40 ตัวอักษร" }, 400);
+      }
+      const submitterName = String(existingMember.nickname || existingMember.display_name || "").trim();
+      if (normalizeMemberName(guestName) === normalizeMemberName(submitterName)) {
+        return json({ error: "ชื่อนี้เป็นชื่อของคุณ กรุณาลงเวลาจากช่องด้านบน" }, 409);
+      }
+
+      const arrivalTime = shortTime(payload.arrivalTime);
+      const arrivalTimes = buildArrivalTimeOptions(event.starts_at, event.ends_at);
+      if (!arrivalTime || !arrivalTimes.includes(arrivalTime)) {
+        return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
+      }
+
+      const guestMemberId = await findOrCreateGuestMember(admin, clubId, guestName);
+      const { error: signupError } = await admin.from("signups").upsert({
+        club_id: clubId,
+        event_id: event.id,
+        member_id: guestMemberId,
+        status: "coming",
+        arrival_time: arrivalTime,
+      }, { onConflict: "event_id,member_id" });
+      if (signupError) throw signupError;
+
+      await admin.from("audit_logs").insert({
+        club_id: clubId,
+        event_id: event.id,
+        actor_id: null,
+        action: `${submitterName || "สมาชิก"} เพิ่ม ${guestName} เวลา ${arrivalTime}`,
+        details: {
+          line_user_id: identity.sub,
+          guest_member_id: guestMemberId,
+          arrival_time: arrivalTime,
+          source: "liff_guest",
+        },
+      });
+      return json({
+        ok: true,
+        guestName,
+        arrivalTime,
+        roster: await getLiffRoster(admin, event),
+      });
+    }
+
     const nickname = String(payload.nickname || "").trim();
     if (nickname.length < 1 || nickname.length > 40) {
       return json({ error: "กรุณากรอกชื่อเล่นไม่เกิน 40 ตัวอักษร" }, 400);
@@ -503,6 +579,36 @@ async function handleLiffRequest(payload: any) {
     const status = message.includes("LINE login") ? 401 : 500;
     return json({ error: message }, status);
   }
+}
+
+async function findOrCreateGuestMember(admin: any, clubId: string, guestName: string) {
+  const { data: guestMembers, error: guestError } = await admin.from("club_members")
+    .select("id, nickname, display_name")
+    .eq("club_id", clubId)
+    .is("line_user_id", null);
+  if (guestError) throw guestError;
+
+  const normalizedGuestName = normalizeMemberName(guestName);
+  const existingGuest = (guestMembers || []).find((member) =>
+    normalizeMemberName(member.nickname) === normalizedGuestName
+    || normalizeMemberName(member.display_name) === normalizedGuestName
+  );
+  if (existingGuest?.id) return existingGuest.id;
+
+  const { data: newGuest, error: insertError } = await admin.from("club_members").insert({
+    club_id: clubId,
+    display_name: guestName,
+    nickname: guestName,
+    line_user_id: null,
+    role: "member",
+    active: true,
+  }).select("id").single();
+  if (insertError) throw insertError;
+  return newGuest.id;
+}
+
+function normalizeMemberName(value: unknown) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("th-TH");
 }
 
 async function upsertLiffMember(

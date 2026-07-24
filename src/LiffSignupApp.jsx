@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Check, Clock3, Edit3, LoaderCircle, MapPin, X } from "lucide-react";
+import { Check, Clock3, Edit3, LoaderCircle, MapPin, Plus, X } from "lucide-react";
 import { buildArrivalTimeOptions, getEventIdFromSearch, isLatestEventSearch } from "./liffSignup.js";
 
 export default function LiffSignupApp() {
@@ -11,6 +11,9 @@ export default function LiffSignupApp() {
   const [roster, setRoster] = useState({ coming: [] });
   const [savedStatus, setSavedStatus] = useState(null);
   const [savedArrivalTime, setSavedArrivalTime] = useState("");
+  const [guestName, setGuestName] = useState("");
+  const [guestArrivalTime, setGuestArrivalTime] = useState("");
+  const [guestSaving, setGuestSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -46,6 +49,7 @@ export default function LiffSignupApp() {
         setRoster(data.roster || { coming: [] });
         setSavedStatus(data.currentStatus || null);
         setSavedArrivalTime(data.currentArrivalTime || "");
+        setGuestArrivalTime(data.event.arrivalTimes?.[0] || data.event.startTime || "");
       } catch (nextError) {
         if (active) setError(nextError.message || "เปิดหน้าลงชื่อไม่สำเร็จ");
       } finally {
@@ -81,6 +85,14 @@ export default function LiffSignupApp() {
       window.clearInterval(timer);
     };
   }, [activeEventId, event?.id]);
+
+  useEffect(() => {
+    if (!event) return;
+    const availableTimes = event.arrivalTimes?.length
+      ? event.arrivalTimes
+      : buildArrivalTimeOptions(event.startTime, event.endTime);
+    setGuestArrivalTime((currentTime) => availableTimes.includes(currentTime) ? currentTime : (availableTimes[0] || ""));
+  }, [event?.id, event?.startTime, event?.endTime, event?.arrivalTimes?.join("|")]);
 
   async function saveNickname(submitEvent) {
     submitEvent.preventDefault();
@@ -149,6 +161,37 @@ export default function LiffSignupApp() {
     }
   }
 
+  async function addGuest(submitEvent) {
+    submitEvent.preventDefault();
+    const nextGuestName = guestName.trim();
+    if (!nextGuestName) {
+      setError("กรุณาพิมพ์ชื่อผู้เล่น");
+      return;
+    }
+    if (!nickname.trim()) {
+      setNicknameDraft("");
+      setShowNicknameModal(true);
+      return;
+    }
+    setGuestSaving(true);
+    setError("");
+    try {
+      const idToken = window.liff.getIDToken();
+      const data = await callLiffApi("submit_liff_guest", {
+        eventId: activeEventId,
+        idToken,
+        guestName: nextGuestName,
+        arrivalTime: guestArrivalTime,
+      });
+      setGuestName("");
+      setRoster(data.roster || { coming: [] });
+    } catch (nextError) {
+      setError(nextError.message || "เพิ่มผู้เล่นไม่สำเร็จ");
+    } finally {
+      setGuestSaving(false);
+    }
+  }
+
   if (loading) {
     return <SignupShell><div className="liff-loading"><LoaderCircle size={30} /><strong>กำลังเปิดรอบลงชื่อ...</strong></div></SignupShell>;
   }
@@ -194,6 +237,28 @@ export default function LiffSignupApp() {
         {error ? <div className="liff-inline-error">{error}</div> : null}
         {savedStatus === "coming" && !closed ? <button className="liff-cancel-signup" disabled={saving} onClick={cancelSignup} type="button"><X size={16} /> ยกเลิกการลงชื่อ</button> : null}
       </section>
+
+      {!closed ? (
+        <form className="liff-guest-signup-row" onSubmit={addGuest}>
+          <input
+            aria-label="ชื่อผู้เล่นที่ต้องการลงชื่อให้"
+            maxLength="40"
+            onChange={(changeEvent) => setGuestName(changeEvent.target.value)}
+            placeholder="ลงชื่อให้เพื่อน"
+            value={guestName}
+          />
+          <select
+            aria-label="เวลาที่เพื่อนจะมา"
+            onChange={(changeEvent) => setGuestArrivalTime(changeEvent.target.value)}
+            value={guestArrivalTime}
+          >
+            {arrivalTimes.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <button aria-label="เพิ่มผู้เล่น" disabled={guestSaving || !guestName.trim() || !guestArrivalTime} type="submit">
+            {guestSaving ? <LoaderCircle size={18} /> : <Plus size={19} />}
+          </button>
+        </form>
+      ) : null}
 
       <section className="liff-roster-card">
         <div className="liff-roster-title"><strong>รายชื่อผู้เล่น</strong><span>{roster.coming.length} คน</span></div>

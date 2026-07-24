@@ -2174,6 +2174,50 @@
   font-weight: 900;
 }
 
+.liff-guest-signup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 44px;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid #cbd9ca;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(37, 58, 40, 0.06);
+}
+
+.liff-guest-signup-row input,
+.liff-guest-signup-row select,
+.liff-guest-signup-row button {
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid #b9cfbc;
+  border-radius: 9px;
+  background: #fff;
+  color: #172018;
+  font: inherit;
+}
+
+.liff-guest-signup-row input,
+.liff-guest-signup-row select {
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.liff-guest-signup-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: #15966a;
+  background: #15966a;
+  color: #fff;
+}
+
+.liff-guest-signup-row button:disabled {
+  border-color: #b8c4ba;
+  background: #b8c4ba;
+}
+
 .badminton-line-command-ready {
   display: flex;
   align-items: center;
@@ -2431,6 +2475,11 @@
   .liff-event-card h1 {
     margin-bottom: 8px;
     font-size: 27px;
+  }
+
+  .liff-guest-signup-row {
+    grid-template-columns: minmax(0, 1fr) 88px 44px;
+    gap: 5px;
   }
 }
 
