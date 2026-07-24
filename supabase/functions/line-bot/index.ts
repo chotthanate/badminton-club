@@ -335,14 +335,14 @@ function normalizeLineCommand(value: unknown) {
 function buildSignupMessage(event: any, liffId: string) {
   const courts = [...(event.event_courts || [])]
     .sort((a, b) => a.position - b.position)
-    .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`)
-    .join(" · ");
+    .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`);
+  const courtLines = courts.length ? courts : ["ยังไม่ได้ระบุคอร์ท"];
   const cardDate = thaiLongDate(event.event_date).replace("ที่ ", " ที่ ");
   const title = `🏸 ลงชื่อเล่นแบดมินตัน : ${cardDate}`;
 
   return {
     type: "flex",
-    altText: `${title}\nสถานที่ : ${event.venue}\n${courts}`,
+    altText: `${title}\nสถานที่ : ${event.venue}\n${courtLines.join("\n")}`,
     contents: {
       type: "bubble",
       body: {
@@ -354,7 +354,14 @@ function buildSignupMessage(event: any, liffId: string) {
           { type: "text", text: cardDate, color: "#15966a", weight: "bold" },
           { type: "separator" },
           { type: "text", text: `สถานที่ : ${event.venue}`, size: "sm", wrap: true },
-          { type: "text", text: courts || "ยังไม่ได้ระบุคอร์ท", size: "xs", color: "#637064", wrap: true },
+          ...courtLines.map((court) => ({
+            type: "text",
+            text: court,
+            size: "xs",
+            color: "#637064",
+            wrap: false,
+            adjustMode: "shrink-to-fit",
+          })),
           { type: "text", text: "\"ตีสนุก ตีมันส์ ง่ายๆ สบายๆ สไตล์ HeadShot\"", size: "sm", color: "#15966a", wrap: true },
         ],
       },

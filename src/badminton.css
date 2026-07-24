@@ -1115,18 +1115,16 @@
 }
 
 .liff-courts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px 7px;
+  display: grid;
+  gap: 4px;
   margin-top: 10px;
   color: #536056;
   font-size: 12px;
 }
 
-.liff-courts > span + span::before {
-  margin-right: 7px;
-  color: #a0a8a1;
-  content: "·";
+.liff-courts > span {
+  display: block;
+  min-width: 0;
 }
 
 .liff-courts strong {
