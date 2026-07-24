@@ -21,9 +21,11 @@ test("permanent latest link survives a LIFF redirect", () => {
   assert.equal(isLatestEventSearch("?latest=1"), true);
 });
 
-test("arrival time options advance by 30 minutes and stop before session end", () => {
+test("arrival time options advance by 15 minutes and stop before session end", () => {
   assert.deepEqual(buildArrivalTimeOptions("21:00", "00:00"), [
-    "21:00", "21:30", "22:00", "22:30", "23:00", "23:30",
+    "21:00", "21:15", "21:30", "21:45",
+    "22:00", "22:15", "22:30", "22:45",
+    "23:00", "23:15", "23:30", "23:45",
   ]);
 });
 

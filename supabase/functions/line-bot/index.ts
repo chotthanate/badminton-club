@@ -720,7 +720,7 @@ function buildArrivalTimeOptions(startValue: unknown, endValue: unknown) {
   if (start === null || end === null) return [];
   if (end <= start) end += 24 * 60;
   const options = [];
-  for (let minute = start; minute < end; minute += 30) {
+  for (let minute = start; minute < end; minute += 15) {
     options.push(formatMinutes(minute));
   }
   return options;

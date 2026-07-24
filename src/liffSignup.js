@@ -23,7 +23,7 @@ export function buildArrivalTimeOptions(startValue, endValue) {
   if (end <= start) end += 24 * 60;
 
   const options = [];
-  for (let minute = start; minute < end; minute += 30) {
+  for (let minute = start; minute < end; minute += 15) {
     const normalized = minute % (24 * 60);
     options.push(`${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`);
   }

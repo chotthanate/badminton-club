@@ -65,6 +65,7 @@ import {
   formatPlayedDuration,
   formatThaiLongDate,
   minutesBetween,
+  playedPercentage,
   playedMinutesWithinEvent,
   suggestArrivalTimeOnCheck,
   totalCourtHours,
@@ -840,6 +841,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const plannedArrival = arrivalTime || event.startTime;
           const leftAt = row?.leftAt || "";
           const playedMinutes = playedMinutesWithinEvent(event.startTime, event.endTime, plannedArrival, leftAt);
+          const percentPlayed = playedPercentage(event.startTime, event.endTime, plannedArrival, leftAt);
           const charges = (dashboard.memberExtras || []).filter((charge) => charge.member_id === member.id);
           const extraTotal = charges.reduce((sum, charge) => sum + Number(charge.unit_price) * Number(charge.quantity), 0);
           const settlementRow = settlementByMember.get(member.id);
@@ -900,7 +902,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
           return (
             <article className={`badminton-attendance-row ${checkedIn ? "is-checked-in" : ""}`} key={member.id}>
-              <div className="badminton-player-identity"><label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><em>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
+              <div className="badminton-player-identity"><label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><em>{percentPlayed}% · {formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
@@ -1133,7 +1135,7 @@ function buildTimeOptions(startTime, endTime) {
   while (cursor <= end) {
     const normalized = cursor % (24 * 60);
     options.push(`${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`);
-    cursor += 30;
+    cursor += 15;
   }
   return options;
 }

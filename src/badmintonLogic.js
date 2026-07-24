@@ -56,6 +56,13 @@ export function playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt
   return departurePoint - arrivalPoint;
 }
 
+export function playedPercentage(startTime, endTime, arrivalTime, leftAt = "") {
+  const totalMinutes = minutesBetween(startTime, endTime);
+  if (!totalMinutes) return 0;
+  const playedMinutes = playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt);
+  return clamp(Math.round((playedMinutes / totalMinutes) * 100), 0, 100);
+}
+
 export function formatPlayedDuration(minutes) {
   const value = Math.max(0, Number(minutes) || 0);
   const hours = Math.floor(value / 60);
@@ -271,8 +278,8 @@ export function suggestArrivalTimeOnCheck({
   const plannedAt = new Date(year, month - 1, day, Math.floor(arrivalMinutes / 60), arrivalMinutes % 60);
   if (plannedAt < startsAt) plannedAt.setDate(plannedAt.getDate() + 1);
 
-  const halfHourMs = 30 * 60 * 1000;
-  const roundedAt = new Date(Math.round(current.getTime() / halfHourMs) * halfHourMs);
+  const quarterHourMs = 15 * 60 * 1000;
+  const roundedAt = new Date(Math.round(current.getTime() / quarterHourMs) * quarterHourMs);
   if (roundedAt <= plannedAt || roundedAt >= endsAt) return null;
   return `${String(roundedAt.getHours()).padStart(2, "0")}:${String(roundedAt.getMinutes()).padStart(2, "0")}`;
 }

@@ -6,6 +6,7 @@ import {
   calculateSettlement,
   formatPlayedDuration,
   minutesBetween,
+  playedPercentage,
   playedMinutesWithinEvent,
   suggestArrivalTimeOnCheck,
   totalCourtHours,
@@ -55,6 +56,12 @@ test("playedMinutesWithinEvent uses each player's arrival and departure", () => 
   assert.equal(playedMinutesWithinEvent("21:00", "00:00", "22:00", ""), 120);
   assert.equal(playedMinutesWithinEvent("21:00", "00:00", "22:00", "23:30"), 90);
   assert.equal(formatPlayedDuration(90), "1 ชม. 30 นาที");
+});
+
+test("playedPercentage reports the share of the round used for billing", () => {
+  assert.equal(playedPercentage("21:00", "00:00", "21:00", ""), 100);
+  assert.equal(playedPercentage("21:00", "00:00", "21:30", ""), 83);
+  assert.equal(playedPercentage("21:00", "00:00", "21:30", "23:00"), 50);
 });
 
 test("calculateSettlement excludes absent players and splits by weight", () => {
@@ -156,19 +163,19 @@ test("buildLineSummary uses the compact transfer format", () => {
   assert.match(summary, /โอนเงิน : ธนาคารกสิกร\n389-2-36746-8\nณฐกฤต อินนะใจ$/);
 });
 
-test("suggestArrivalTimeOnCheck offers the current half-hour when check-in is late", () => {
+test("suggestArrivalTimeOnCheck offers the nearest quarter-hour when check-in is late", () => {
   assert.equal(suggestArrivalTimeOnCheck({
     now: new Date(2026, 6, 24, 21, 20),
     eventDate: "2026-07-24",
     startTime: "21:00",
     endTime: "00:00",
     plannedArrival: "21:00",
-  }), "21:30");
+  }), "21:15");
 });
 
 test("suggestArrivalTimeOnCheck keeps the signed-up time when check-in is not late", () => {
   assert.equal(suggestArrivalTimeOnCheck({
-    now: new Date(2026, 6, 24, 21, 10),
+    now: new Date(2026, 6, 24, 21, 6),
     eventDate: "2026-07-24",
     startTime: "21:00",
     endTime: "00:00",
@@ -183,5 +190,5 @@ test("suggestArrivalTimeOnCheck supports a session after midnight", () => {
     startTime: "21:00",
     endTime: "01:00",
     plannedArrival: "23:30",
-  }), "00:00");
+  }), "00:15");
 });
