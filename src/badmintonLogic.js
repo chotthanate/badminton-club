@@ -56,13 +56,6 @@ export function playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt
   return departurePoint - arrivalPoint;
 }
 
-export function playedPercentage(startTime, endTime, arrivalTime, leftAt = "") {
-  const totalMinutes = minutesBetween(startTime, endTime);
-  if (!totalMinutes) return 0;
-  const playedMinutes = playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt);
-  return clamp(Math.round((playedMinutes / totalMinutes) * 100), 0, 100);
-}
-
 export function formatPlayedDuration(minutes) {
   const value = Math.max(0, Number(minutes) || 0);
   const hours = Math.floor(value / 60);
@@ -70,6 +63,12 @@ export function formatPlayedDuration(minutes) {
   if (!remainder) return `${hours} ชม.`;
   if (!hours) return `${remainder} นาที`;
   return `${hours} ชม. ${remainder} นาที`;
+}
+
+export function billableHours(playedMinutes, billingPercentage = 100) {
+  const minutes = Math.max(0, Number(playedMinutes) || 0);
+  const percentage = clamp(Number(billingPercentage) || 100, 0, 100);
+  return (minutes / 60) * (percentage / 100);
 }
 
 export function calculateSettlement(event) {

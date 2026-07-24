@@ -2580,8 +2580,22 @@
 }
 
 .badminton-player-identity em {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.badminton-player-identity em select {
+  min-height: 30px;
+  padding: 0 5px;
+  border: 1px solid #a9ccb0;
+  border-radius: 7px;
+  background: #eef8f1;
+  color: #0f7a52;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .badminton-player-controls {

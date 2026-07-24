@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  billableHours,
   buildLineSummary,
   calculateSettlement,
   formatPlayedDuration,
   minutesBetween,
-  playedPercentage,
   playedMinutesWithinEvent,
   suggestArrivalTimeOnCheck,
   totalCourtHours,
@@ -58,10 +58,10 @@ test("playedMinutesWithinEvent uses each player's arrival and departure", () => 
   assert.equal(formatPlayedDuration(90), "1 ชม. 30 นาที");
 });
 
-test("playedPercentage reports the share of the round used for billing", () => {
-  assert.equal(playedPercentage("21:00", "00:00", "21:00", ""), 100);
-  assert.equal(playedPercentage("21:00", "00:00", "21:30", ""), 83);
-  assert.equal(playedPercentage("21:00", "00:00", "21:30", "23:00"), 50);
+test("billableHours applies an admin-selected percentage to actual playing time", () => {
+  assert.equal(billableHours(180, 100), 3);
+  assert.equal(billableHours(180, 50), 1.5);
+  assert.equal(billableHours(90, 50), 0.75);
 });
 
 test("calculateSettlement excludes absent players and splits by weight", () => {

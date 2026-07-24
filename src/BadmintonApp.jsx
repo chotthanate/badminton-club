@@ -59,13 +59,13 @@ import {
 } from "./clubRepository.js";
 import {
   baht,
+  billableHours,
   buildLineSummary,
   calculateSettlement,
   createInitialEvent,
   formatPlayedDuration,
   formatThaiLongDate,
   minutesBetween,
-  playedPercentage,
   playedMinutesWithinEvent,
   suggestArrivalTimeOnCheck,
   totalCourtHours,
@@ -93,6 +93,8 @@ const HALF_HOUR_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   const minute = index % 2 ? "30" : "00";
   return `${String(hour).padStart(2, "0")}:${minute}`;
 });
+
+const BILLING_PERCENT_OPTIONS = [100, 75, 50, 25];
 
 export default function BadmintonApp() {
   const [session, setSession] = useState(null);
@@ -841,7 +843,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const plannedArrival = arrivalTime || event.startTime;
           const leftAt = row?.leftAt || "";
           const playedMinutes = playedMinutesWithinEvent(event.startTime, event.endTime, plannedArrival, leftAt);
-          const percentPlayed = playedPercentage(event.startTime, event.endTime, plannedArrival, leftAt);
+          const billingPercentage = Number(row?.billingPercentage ?? 100);
           const charges = (dashboard.memberExtras || []).filter((charge) => charge.member_id === member.id);
           const extraTotal = charges.reduce((sum, charge) => sum + Number(charge.unit_price) * Number(charge.quantity), 0);
           const settlementRow = settlementByMember.get(member.id);
@@ -851,16 +853,27 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const checkedIn = Boolean(row?.checkedIn);
 
           function updateArrival(nextArrival) {
-            const weight = attendanceWeight(event.startTime, event.endTime, nextArrival, leftAt);
             return mutate(async () => {
               await updateSignupArrival({ eventId: event.id, memberId: member.id, arrivalTime: nextArrival });
-              await updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: checkedIn, arrived_at: checkedIn ? nextArrival : null, weight } });
+              await updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: checkedIn, arrived_at: checkedIn ? nextArrival : null } });
             }, `ปรับเวลามาของ ${participantName} แล้ว`);
           }
 
           function updateDeparture(nextDeparture) {
-            const weight = attendanceWeight(event.startTime, event.endTime, plannedArrival, nextDeparture);
-            return mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, arrived_at: plannedArrival, left_at: nextDeparture || null, weight } }), `ปรับเวลากลับของ ${participantName} แล้ว`);
+            return mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, arrived_at: plannedArrival, left_at: nextDeparture || null } }), `ปรับเวลากลับของ ${participantName} แล้ว`);
+          }
+
+          function updateBillingPercentage(nextPercentage) {
+            const percentage = Number(nextPercentage);
+            return mutate(
+              () => updateAttendance({
+                clubId: event.clubId,
+                eventId: event.id,
+                memberId: member.id,
+                patch: { billing_percentage: percentage },
+              }),
+              `ปรับสัดส่วนคิดเงินของ ${participantName} เป็น ${percentage}% แล้ว`,
+            );
           }
 
           function toggleCheckIn(nextChecked) {
@@ -870,7 +883,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                   clubId: event.clubId,
                   eventId: event.id,
                   memberId: member.id,
-                  patch: { arrived: false, arrived_at: null, left_at: null, weight: attendanceWeight(event.startTime, event.endTime, plannedArrival, "") },
+                  patch: { arrived: false, arrived_at: null, left_at: null },
                 }),
                 `ยกเลิกเช็กชื่อ ${participantName} แล้ว`,
               );
@@ -886,7 +899,6 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
               ? window.confirm(`${participantName} ลงชื่อไว้ ${plannedArrival} น.\nตอนนี้ประมาณ ${suggestedArrival} น.\n\nต้องการอัปเดตเวลามาเป็น ${suggestedArrival} น. ไหม?\nกด “ยกเลิก” เพื่อใช้เวลาเดิม`)
               : false;
             const checkedArrival = shouldUpdateArrival ? suggestedArrival : plannedArrival;
-            const weight = attendanceWeight(event.startTime, event.endTime, checkedArrival, leftAt);
             return mutate(async () => {
               if (shouldUpdateArrival) {
                 await updateSignupArrival({ eventId: event.id, memberId: member.id, arrivalTime: checkedArrival });
@@ -895,14 +907,14 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                 clubId: event.clubId,
                 eventId: event.id,
                 memberId: member.id,
-                patch: { arrived: true, arrived_at: checkedArrival, left_at: leftAt || null, weight },
+                patch: { arrived: true, arrived_at: checkedArrival, left_at: leftAt || null },
               });
             }, shouldUpdateArrival ? `เช็กชื่อและปรับเวลามาของ ${participantName} แล้ว` : `เช็กชื่อ ${participantName} แล้ว`);
           }
 
           return (
             <article className={`badminton-attendance-row ${checkedIn ? "is-checked-in" : ""}`} key={member.id}>
-              <div className="badminton-player-identity"><label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><em>{percentPlayed}% · {formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
+              <div className="badminton-player-identity"><label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><em><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
@@ -1056,6 +1068,8 @@ function mapDashboardToEvent(dashboard) {
     const arrivalTime = signup.arrival_time?.slice(0, 5) || startTime;
     const leftAt = row?.left_at?.slice(0, 5) || "";
     const playedMinutes = playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt);
+    const billingPercentage = Number(row?.billing_percentage ?? 100);
+    const weightedHours = billableHours(playedMinutes, billingPercentage);
     const extraCharges = (dashboard.memberExtras || [])
       .filter((charge) => charge.member_id === signup.member_id)
       .map((charge) => ({ id: charge.id, name: charge.item_name, unitPrice: Number(charge.unit_price), quantity: Number(charge.quantity) }));
@@ -1064,9 +1078,10 @@ function mapDashboardToEvent(dashboard) {
       name: memberName(membersById.get(signup.member_id)) || "ไม่ทราบชื่อ",
       arrived: true,
       checkedIn: Boolean(row?.arrived),
-      weight: attendanceWeight(startTime, endTime, arrivalTime, leftAt),
-      hours: playedMinutes / 60,
+      weight: billingPercentage / 100,
+      hours: weightedHours,
       playedMinutes,
+      billingPercentage,
       arrivedAt: arrivalTime,
       leftAt,
       note: row?.note || "",
@@ -1147,13 +1162,6 @@ function timePosition(time, eventStart) {
   const start = startHour * 60 + startMinute;
   if (value < start) value += 24 * 60;
   return value;
-}
-
-function attendanceWeight(startTime, endTime, arrivalTime, leftAt) {
-  const total = minutesBetween(startTime, endTime);
-  const played = playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt);
-  if (!total || !played) return 0.05;
-  return Math.max(0.05, Math.min(1, Math.round((played / total) * 100) / 100));
 }
 
 function formatRoundOption(isoDate) {
