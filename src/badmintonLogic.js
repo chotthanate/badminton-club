@@ -82,7 +82,7 @@ export function calculateSettlement(event) {
       Number(row.extraAmount || 0),
     );
     const paidAmount = row.paidAmount === null || row.paidAmount === undefined ? null : Number(row.paidAmount);
-    const locked = Boolean(row.paid) && Number.isFinite(paidAmount);
+    const locked = !row.paymentExempt && Boolean(row.paid) && Number.isFinite(paidAmount);
     const explicitExtra = Number(row.lockedExtraAmount);
     const lockedExtraAmount = locked
       ? (row.lockedExtraAmount !== null && row.lockedExtraAmount !== undefined && Number.isFinite(explicitExtra) ? Math.max(0, explicitExtra) : Math.min(currentExtraAmount, Math.max(0, paidAmount)))
@@ -129,7 +129,7 @@ export function calculateSettlement(event) {
       sharedDue,
       extraAmount: row.currentExtraAmount,
       roundedDue: sharedDue + Math.round(row.currentExtraAmount),
-      paid: row.paymentRecorded,
+      paid: Boolean(row.paymentExempt) || row.paymentRecorded,
     };
   });
 
@@ -167,7 +167,7 @@ export function buildLineSummary(event) {
     event.venue || "",
     ...(event.courts || []).map((court) => `${court.name} : ${court.startsAt}-${court.endsAt === "00:00" ? "24:00" : court.endsAt}`),
     "",
-    ...settlement.rows.map((row, index) => {
+    ...settlement.rows.filter((row) => !row.paymentExempt).map((row, index) => {
       const extraItems = summarizeExtraCharges(row.extraCharges || []);
       const extras = extraItems ? ` (${extraItems})` : "";
       return `${index + 1}.${row.name} = ${baht(row.roundedDue)} บาท${extras}`;

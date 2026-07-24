@@ -94,7 +94,7 @@ export async function loadDashboard(clubId, eventId = null) {
 
   const membersPromise = client()
     .from("club_members")
-    .select("id, display_name, nickname, role, active, line_user_id")
+    .select("id, display_name, nickname, role, active, line_user_id, payment_exempt")
     .eq("club_id", clubId)
     .eq("active", true)
     .order("created_at");
@@ -175,20 +175,24 @@ export async function updateEventDetails({ clubId, eventId, patch }) {
 
 export async function deleteCompletedEvent(eventId) {
   const { data: event, error: eventError } = await client().from("events")
-    .select("id, status")
+    .select("id, club_id, status")
     .eq("id", eventId)
     .single();
   throwIfError(eventError);
   if (event.status !== "closed") throw new Error("ลบได้เฉพาะรอบที่จบรอบแล้ว");
 
-  const [signupsResult, paymentsResult] = await Promise.all([
+  const [signupsResult, paymentsResult, membersResult] = await Promise.all([
     client().from("signups").select("member_id").eq("event_id", eventId).eq("status", "coming"),
     client().from("payments").select("member_id, paid_at").eq("event_id", eventId),
+    client().from("club_members").select("id, payment_exempt").eq("club_id", event.club_id),
   ]);
   throwIfError(signupsResult.error);
   throwIfError(paymentsResult.error);
+  throwIfError(membersResult.error);
   const paidMemberIds = new Set((paymentsResult.data || []).filter((payment) => payment.paid_at).map((payment) => payment.member_id));
-  const unpaidPlayers = (signupsResult.data || []).filter((signup) => !paidMemberIds.has(signup.member_id));
+  const exemptMemberIds = new Set((membersResult.data || []).filter((member) => member.payment_exempt).map((member) => member.id));
+  const unpaidPlayers = (signupsResult.data || []).filter((signup) =>
+    !paidMemberIds.has(signup.member_id) && !exemptMemberIds.has(signup.member_id));
   if (unpaidPlayers.length) {
     throw new Error(`รอบนี้ยังเก็บเงินไม่ครบ ${unpaidPlayers.length} คน จึงยังลบไม่ได้`);
   }
@@ -281,11 +285,12 @@ export async function addLineMember({ clubId, displayName, lineUserId = null }) 
   return data;
 }
 
-export async function updateClubMember(memberId, { nickname, displayName }) {
+export async function updateClubMember(memberId, { nickname, displayName, paymentExempt = false }) {
   const { error } = await client().from("club_members")
     .update({
       nickname: nickname.trim(),
       display_name: displayName.trim(),
+      payment_exempt: Boolean(paymentExempt),
     })
     .eq("id", memberId);
   throwIfError(error);
@@ -444,23 +449,23 @@ export async function finishEvent({ clubId, eventId, rows, shuttlecockCount, use
   const paidMemberIds = new Set((existingPayments || [])
     .filter((payment) => payment.paid_at)
     .map((payment) => payment.member_id));
-  const unpaidRows = rows
+  const rowsToSave = rows
     .filter((row) => !paidMemberIds.has(row.memberId))
     .map((row) => ({
       club_id: clubId,
       event_id: eventId,
       member_id: row.memberId,
       amount: Math.max(0, Number(row.roundedDue) || 0),
-      paid_at: null,
+      paid_at: row.paymentExempt ? new Date().toISOString() : null,
       shared_amount: Math.max(0, Number(row.sharedDue) || 0),
       extras_amount: Math.max(0, Number(row.extraAmount) || 0),
       shuttlecock_count_snapshot: Math.max(0, Number(shuttlecockCount) || 0),
       recorded_by: userId,
     }));
-  if (unpaidRows.length) {
+  if (rowsToSave.length) {
     const { error: paymentError } = await client()
       .from("payments")
-      .upsert(unpaidRows, { onConflict: "event_id,member_id" });
+      .upsert(rowsToSave, { onConflict: "event_id,member_id" });
     throwIfError(paymentError);
   }
   await updateEvent(eventId, { status: "closed" });

@@ -108,6 +108,33 @@ test("calculateSettlement splits shared cost by hours and adds personal extras",
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [210, 130]);
 });
 
+test("payment-exempt members still share costs but are treated as settled", () => {
+  const result = calculateSettlement(makeEvent({
+    costs: [{ amount: 300 }],
+    attendance: [
+      { memberId: "family", name: "ครอบครัว", arrived: true, hours: 3, paymentExempt: true },
+      { memberId: "member", name: "สมาชิก", arrived: true, hours: 3 },
+    ],
+  }));
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [150, 150]);
+  assert.equal(result.rows[0].paid, true);
+  assert.equal(result.rows[1].paid, false);
+});
+
+test("buildLineSummary omits payment-exempt members", () => {
+  const summary = buildLineSummary(makeEvent({
+    costs: [{ amount: 300 }],
+    attendance: [
+      { memberId: "family", name: "ครอบครัว", arrived: true, hours: 3, paymentExempt: true },
+      { memberId: "member", name: "สมาชิก", arrived: true, hours: 3 },
+    ],
+  }));
+
+  assert.doesNotMatch(summary, /ครอบครัว/);
+  assert.match(summary, /1\.สมาชิก = 150 บาท/);
+});
+
 test("calculateSettlement keeps an early payment locked when later costs increase", () => {
   const result = calculateSettlement(makeEvent({
     costs: [{ amount: 500 }],

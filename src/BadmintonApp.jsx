@@ -302,6 +302,7 @@ function AdminDashboard({ session }) {
 
   const appEvent = dashboard.event ? mapDashboardToEvent(dashboard) : null;
   const settlement = appEvent ? calculateSettlement(appEvent) : null;
+  const hasUnfinishedRound = eventSummaries.some((round) => ["draft", "open"].includes(round.status));
 
   return (
     <main className="badminton-app">
@@ -365,7 +366,7 @@ function AdminDashboard({ session }) {
                 settlement={settlement}
                 venues={dashboard.venues || []}
               />
-              {dashboard.event.status === "closed" && eventSummaries[0]?.id === dashboard.event.id
+              {dashboard.event.status === "closed" && !hasUnfinishedRound
                 ? <CreateEventCard compact context={context} defaultVenue={dashboard.event.venue} mutate={mutate} session={session} venues={dashboard.venues || []} />
                 : null}
             </> : null}
@@ -520,9 +521,12 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
   }
 
   return (
-    <button className="badminton-create-next-button" onClick={createRound} type="button">
-      <Plus size={18} /> {compact ? "สร้างรอบใหม่" : "สร้างรอบแรก"}
-    </button>
+    <div className={`badminton-create-round-wrap ${compact ? "is-compact" : ""}`}>
+      <button className="badminton-create-next-button" onClick={createRound} type="button">
+        <Plus size={18} /> {compact ? "สร้างรอบถัดไป" : "สร้างรอบแรก"}
+      </button>
+      {compact ? <small>สร้างได้ทันทีแม้ยังเก็บเงินไม่ครบ ยอดค้างจะยังอยู่ในรอบเดิม</small> : null}
+    </div>
   );
 }
 
@@ -665,7 +669,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [customChargeFor, setCustomChargeFor] = useState(null);
   const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
   const [editingMember, setEditingMember] = useState(null);
-  const [memberEdit, setMemberEdit] = useState({ nickname: "", displayName: "" });
+  const [memberEdit, setMemberEdit] = useState({ nickname: "", displayName: "", paymentExempt: false });
+  const [pendingCheckIn, setPendingCheckIn] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sortMode, setSortMode] = useState("signup");
   const participants = event.signups
@@ -727,6 +732,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     setMemberEdit({
       nickname: member.nickname || member.display_name || "",
       displayName: member.display_name || member.nickname || "",
+      paymentExempt: Boolean(member.payment_exempt),
     });
   }
 
@@ -737,13 +743,17 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     const saved = await mutate(async () => {
       if (!nickname) throw new Error("กรุณากรอกชื่อเล่น");
       if (!displayName) throw new Error("กรุณากรอกชื่อ LINE");
-      await updateClubMember(editingMember.id, { nickname, displayName });
+      await updateClubMember(editingMember.id, {
+        nickname,
+        displayName,
+        paymentExempt: memberEdit.paymentExempt,
+      });
       await recordAudit({
         clubId: context.club_id,
         eventId: event.id,
         userId: session.user.id,
         action: `แก้ไขชื่อผู้เล่น ${nickname}`,
-        details: { member_id: editingMember.id },
+        details: { member_id: editingMember.id, payment_exempt: memberEdit.paymentExempt },
       });
     }, `บันทึกชื่อ ${nickname} แล้ว`);
     if (saved) setEditingMember(null);
@@ -780,6 +790,32 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       item: { name: item.name, price: Number(item.price) },
       userId: session.user.id,
     }), `เพิ่ม ${item.name} ให้ ${participantName} แล้ว`);
+  }
+
+  async function completeCheckIn(target, useSuggestedTime) {
+    const checkedArrival = useSuggestedTime ? target.suggestedArrival : target.plannedArrival;
+    const saved = await mutate(async () => {
+      if (useSuggestedTime) {
+        await updateSignupArrival({
+          eventId: event.id,
+          memberId: target.memberId,
+          arrivalTime: checkedArrival,
+        });
+      }
+      await updateAttendance({
+        clubId: event.clubId,
+        eventId: event.id,
+        memberId: target.memberId,
+        patch: {
+          arrived: true,
+          arrived_at: checkedArrival,
+          left_at: target.leftAt || null,
+        },
+      });
+    }, useSuggestedTime
+      ? `เช็กชื่อและปรับเวลามาของ ${target.participantName} แล้ว`
+      : `เช็กชื่อ ${target.participantName} แล้ว`);
+    if (saved) setPendingCheckIn(null);
   }
 
   return (
@@ -848,7 +884,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const extraTotal = charges.reduce((sum, charge) => sum + Number(charge.unit_price) * Number(charge.quantity), 0);
           const settlementRow = settlementByMember.get(member.id);
           const due = settlementRow?.roundedDue || 0;
-          const isPaid = Boolean(settlementRow?.paid);
+          const isPaid = Boolean(settlementRow?.paid) && !settlementRow?.paymentExempt;
           const lineName = member.nickname && member.nickname !== member.display_name ? member.display_name : "";
           const checkedIn = Boolean(row?.checkedIn);
 
@@ -876,6 +912,20 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             );
           }
 
+          function togglePaymentExempt() {
+            const nextExempt = !member.payment_exempt;
+            return mutate(
+              () => updateClubMember(member.id, {
+                nickname: memberName(member),
+                displayName: member.display_name || memberName(member),
+                paymentExempt: nextExempt,
+              }),
+              nextExempt
+                ? `ตั้ง ${participantName} เป็นสมาชิกไม่ต้องเก็บเงินแล้ว`
+                : `นำ ${participantName} ออกจากรายชื่อไม่ต้องเก็บเงินแล้ว`,
+            );
+          }
+
           function toggleCheckIn(nextChecked) {
             if (!nextChecked) {
               return mutate(
@@ -895,26 +945,28 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
               endTime: event.endTime,
               plannedArrival,
             });
-            const shouldUpdateArrival = suggestedArrival
-              ? window.confirm(`${participantName} ลงชื่อไว้ ${plannedArrival} น.\nตอนนี้ประมาณ ${suggestedArrival} น.\n\nต้องการอัปเดตเวลามาเป็น ${suggestedArrival} น. ไหม?\nกด “ยกเลิก” เพื่อใช้เวลาเดิม`)
-              : false;
-            const checkedArrival = shouldUpdateArrival ? suggestedArrival : plannedArrival;
-            return mutate(async () => {
-              if (shouldUpdateArrival) {
-                await updateSignupArrival({ eventId: event.id, memberId: member.id, arrivalTime: checkedArrival });
-              }
-              await updateAttendance({
-                clubId: event.clubId,
-                eventId: event.id,
+            if (suggestedArrival) {
+              setPendingCheckIn({
                 memberId: member.id,
-                patch: { arrived: true, arrived_at: checkedArrival, left_at: leftAt || null },
+                participantName,
+                plannedArrival,
+                suggestedArrival,
+                leftAt,
               });
-            }, shouldUpdateArrival ? `เช็กชื่อและปรับเวลามาของ ${participantName} แล้ว` : `เช็กชื่อ ${participantName} แล้ว`);
+              return null;
+            }
+            return completeCheckIn({
+              memberId: member.id,
+              participantName,
+              plannedArrival,
+              suggestedArrival: null,
+              leftAt,
+            }, false);
           }
 
           return (
             <article className={`badminton-attendance-row ${checkedIn ? "is-checked-in" : ""}`} key={member.id}>
-              <div className="badminton-player-identity"><label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><em><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
+              <div className="badminton-player-identity"><label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><button aria-label={`${member.payment_exempt ? "นำออกจาก" : "เพิ่มเข้า"}รายชื่อไม่ต้องเก็บเงิน ${participantName}`} className={`badminton-payment-exempt-button ${member.payment_exempt ? "is-active" : ""}`} onClick={togglePaymentExempt} title={member.payment_exempt ? "คนนี้ไม่ต้องเก็บเงิน แตะเพื่อยกเลิก" : "ตั้งเป็นสมาชิกไม่ต้องเก็บเงิน"} type="button">ฟรี</button><em><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
@@ -929,6 +981,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
       {editingMember ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}><div className="badminton-modal-title"><div><p className="badminton-kicker">ข้อมูลสมาชิกเดิม</p><h2>แก้ไขรายชื่อ</h2></div><button aria-label="ปิดหน้าต่างแก้ไขชื่อ" onClick={() => setEditingMember(null)} type="button"><X size={19} /></button></div><label>ชื่อเล่น<input autoFocus maxLength="40" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, nickname: changeEvent.target.value })} required value={memberEdit.nickname} /></label><label>ชื่อ LINE<input maxLength="80" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, displayName: changeEvent.target.value })} required value={memberEdit.displayName} /></label>{editingMember.line_user_id ? <p className="badminton-member-sync-note">คนนี้เชื่อมกับ LINE แล้ว หากเปลี่ยนชื่อ LINE ระบบจะอัปเดตชื่อใหม่อัตโนมัติเมื่อสมาชิกเข้าหน้าลงชื่อครั้งถัดไป โดยประวัติและยอดค้างยังเป็นคนเดิม</p> : <p className="badminton-member-sync-note">สมาชิกที่เพิ่มเองยังไม่เชื่อมกับบัญชี LINE การแก้ชื่อตรงนี้จะไม่กระทบประวัติและยอดค้างเดิม</p>}<button className="badminton-primary" type="submit"><Save size={17} /> บันทึกชื่อ</button></form></div> : null}
       {customChargeFor ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal" onSubmit={addCustomCharge}><div className="badminton-modal-title"><div><p className="badminton-kicker">ค่าใช้จ่ายเฉพาะคน</p><h2>เพิ่มรายการให้ {customChargeFor.name}</h2></div><button aria-label="ปิดหน้าต่าง" onClick={() => setCustomChargeFor(null)} type="button"><X size={19} /></button></div><label>ชื่อรายการ<input autoFocus maxLength="80" onChange={(changeEvent) => setCustomCharge({ ...customCharge, name: changeEvent.target.value })} placeholder="เช่น ค่าเอ็นไม้" required value={customCharge.name} /></label><label>ราคา (บาท)<input min="0" onChange={(changeEvent) => setCustomCharge({ ...customCharge, price: changeEvent.target.value })} placeholder="0" required type="number" value={customCharge.price} /></label><button className="badminton-primary" type="submit"><Plus size={17} /> เพิ่มค่าใช้จ่าย</button></form></div> : null}
+      {pendingCheckIn ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ยืนยันเวลาเช็กชื่อ" aria-modal="true" className="badminton-custom-charge-modal badminton-check-in-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เช็กชื่อผู้เล่น</p><h2>{pendingCheckIn.participantName} มาถึงแล้ว</h2></div><button aria-label="ปิด" onClick={() => setPendingCheckIn(null)} type="button"><X size={19} /></button></div><p>ลงชื่อไว้เวลา <strong>{pendingCheckIn.plannedArrival} น.</strong> ตอนนี้ประมาณ <strong>{pendingCheckIn.suggestedArrival} น.</strong></p><div className="badminton-check-in-actions"><button className="badminton-secondary" onClick={() => completeCheckIn(pendingCheckIn, false)} type="button">ใช้เวลาเดิม {pendingCheckIn.plannedArrival}</button><button className="badminton-primary" onClick={() => completeCheckIn(pendingCheckIn, true)} type="button">ปรับเป็น {pendingCheckIn.suggestedArrival}</button></div></div></div> : null}
     </section>
   );
 }
@@ -1009,9 +1062,9 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
         {settlement.rows.map((row) => {
           const extraLabel = formatExtraItems(row.extraCharges);
           return <article className={`badminton-pay-row ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
-            <div className="badminton-pay-person"><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paid && row.shuttlecockCountSnapshot !== null && row.shuttlecockCountSnapshot !== undefined ? <small>ปิดยอดตอนใช้ลูกแบด {row.shuttlecockCountSnapshot} ลูก</small> : null}</div>
+            <div className="badminton-pay-person"><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.paid && row.shuttlecockCountSnapshot !== null && row.shuttlecockCountSnapshot !== undefined ? <small>ปิดยอดตอนใช้ลูกแบด {row.shuttlecockCountSnapshot} ลูก</small> : null}</div>
             <strong className="badminton-pay-amount">{baht(row.roundedDue)} บาท</strong>
-            <button className={row.paid ? "is-paid" : ""} onClick={() => mutate(() => setPayment({ clubId: event.clubId, eventId: event.id, memberId: row.memberId, amount: row.roundedDue, sharedAmount: row.sharedDue, extrasAmount: row.extraAmount, shuttlecockCount: event.shuttlecockCount, paid: !row.paid, userId: session.user.id }), row.paid ? "ยกเลิกสถานะรับเงินแล้ว" : `รับเงิน ${row.name} และล็อกยอดแล้ว`)} type="button"><Check size={16} /> {row.paid ? "จ่ายแล้ว" : "รับเงิน"}</button>
+            {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : ""} onClick={() => mutate(() => setPayment({ clubId: event.clubId, eventId: event.id, memberId: row.memberId, amount: row.roundedDue, sharedAmount: row.sharedDue, extrasAmount: row.extraAmount, shuttlecockCount: event.shuttlecockCount, paid: !row.paid, userId: session.user.id }), row.paid ? "ยกเลิกสถานะรับเงินแล้ว" : `รับเงิน ${row.name} และล็อกยอดแล้ว`)} type="button"><Check size={16} /> {row.paid ? "จ่ายแล้ว" : "รับเงิน"}</button>}
           </article>;
         })}
       </div>
@@ -1065,6 +1118,7 @@ function mapDashboardToEvent(dashboard) {
   const attendance = billableSignups.map((signup) => {
     const row = attendanceByMember.get(signup.member_id);
     const payment = paymentsByMember.get(signup.member_id);
+    const member = membersById.get(signup.member_id);
     const arrivalTime = signup.arrival_time?.slice(0, 5) || startTime;
     const leftAt = row?.left_at?.slice(0, 5) || "";
     const playedMinutes = playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt);
@@ -1075,13 +1129,14 @@ function mapDashboardToEvent(dashboard) {
       .map((charge) => ({ id: charge.id, name: charge.item_name, unitPrice: Number(charge.unit_price), quantity: Number(charge.quantity) }));
     return {
       memberId: signup.member_id,
-      name: memberName(membersById.get(signup.member_id)) || "ไม่ทราบชื่อ",
+      name: memberName(member) || "ไม่ทราบชื่อ",
       arrived: true,
       checkedIn: Boolean(row?.arrived),
       weight: billingPercentage / 100,
       hours: weightedHours,
       playedMinutes,
       billingPercentage,
+      paymentExempt: Boolean(member?.payment_exempt),
       arrivedAt: arrivalTime,
       leftAt,
       note: row?.note || "",
@@ -1106,7 +1161,7 @@ function mapDashboardToEvent(dashboard) {
     courtHourlyRate,
     shuttlecockCount,
     shuttlecockUnitPrice,
-    members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, role: member.role, lineUserId: member.line_user_id, active: member.active })),
+    members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, role: member.role, lineUserId: member.line_user_id, active: member.active, paymentExempt: Boolean(member.payment_exempt) })),
     signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note, createdAt: row.created_at })),
     attendance,
     extraCosts,
