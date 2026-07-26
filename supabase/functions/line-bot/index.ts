@@ -584,6 +584,14 @@ async function handlePaymentLiffRequest(payload: any) {
       });
     }
 
+    const { data: replacedSlips, error: replacedSlipError } = await admin.from("payment_slips")
+      .select("id, storage_path")
+      .eq("club_id", clubId)
+      .eq("beneficiary_member_id", beneficiary.id)
+      .eq("status", "pending")
+      .overlaps("payment_ids", paymentIds);
+    if (replacedSlipError) throw replacedSlipError;
+
     const expectedAmount = (payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     const transferredAmount = finiteNumber(slip.amount);
     const transferredOn = isoDateValue(slip.transferredOn);
@@ -638,6 +646,24 @@ async function handlePaymentLiffRequest(payload: any) {
       overpayment_amount: overpaymentAmount,
     });
     if (slipError) throw slipError;
+
+    if ((replacedSlips || []).length) {
+      const replacedIds = (replacedSlips || []).map((entry: any) => entry.id);
+      const { error: replaceError } = await admin.from("payment_slips").update({
+        status: "rejected",
+        review_reason: "สมาชิกส่งสลิปใหม่แทนรายการเดิม",
+        reviewed_at: new Date().toISOString(),
+      }).in("id", replacedIds);
+      if (replaceError) {
+        console.error("Old slip replacement failed", replaceError.message);
+      } else {
+        const oldStoragePaths = (replacedSlips || []).map((entry: any) => entry.storage_path).filter(Boolean);
+        if (oldStoragePaths.length) {
+          const { error: removeError } = await admin.storage.from("payment-slips").remove(oldStoragePaths);
+          if (removeError) console.error("Old slip cleanup failed", removeError.message);
+        }
+      }
+    }
 
     if (autoPaid) {
       const paidAt = new Date().toISOString();

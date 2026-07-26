@@ -3539,6 +3539,8 @@
 .badminton-slip-review > article > div:last-child {
   flex: 0 0 auto;
   gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .badminton-slip-review > article button {
@@ -3822,6 +3824,24 @@
 .liff-payment-result span {
   font-size: 12px;
   line-height: 1.5;
+}
+
+.liff-payment-result button {
+  width: fit-content;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding: 0 14px;
+  border: 1px solid currentColor;
+  border-radius: 9px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 @keyframes badminton-spin {

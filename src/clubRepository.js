@@ -602,6 +602,15 @@ export async function reviewPaymentSlip({ slip, approved, userId }) {
   throwIfError(slipError);
 }
 
+export async function getPaymentSlipImageUrl(storagePath) {
+  if (!storagePath) throw new Error("สลิปนี้ไม่มีรูปสำหรับเปิดดู");
+  const { data, error } = await client().storage.from("payment-slips")
+    .createSignedUrl(storagePath, 10 * 60);
+  throwIfError(error);
+  if (!data?.signedUrl) throw new Error("เปิดรูปสลิปไม่สำเร็จ");
+  return data.signedUrl;
+}
+
 export async function finishEvent({ clubId, eventId, rows, shuttlecockCount, userId }) {
   const { data: existingPayments, error: existingError } = await client()
     .from("payments")

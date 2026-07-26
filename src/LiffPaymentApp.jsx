@@ -116,13 +116,20 @@ export default function LiffPaymentApp() {
       setResult(response);
       const refreshed = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken() });
       setData(refreshed);
-      setSelectedPaymentIds([]);
       setSlip(null);
+      if (response.status === "auto_paid") setSelectedPaymentIds([]);
     } catch (nextError) {
       setError(nextError.message || "ตรวจสลิปไม่สำเร็จ");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function sendNewSlip() {
+    setResult(null);
+    setSlip(null);
+    setError("");
+    window.setTimeout(() => document.querySelector(".liff-slip-picker")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   }
 
   if (loading) return <PaymentShell><div className="liff-loading"><LoaderCircle size={30} /><strong>กำลังเปิดยอดค้างชำระ...</strong></div></PaymentShell>;
@@ -162,7 +169,7 @@ export default function LiffPaymentApp() {
         <button className="liff-payment-submit" disabled={!selectedPaymentIds.length || !slip || reading || submitting} onClick={submitPayment} type="button">{submitting ? "กำลังตรวจสอบ..." : `ยืนยันแจ้งโอน ${baht(total)} บาท`}</button>
       </section> : null}
 
-      {result ? <section className={`liff-payment-result is-${result.status}`}><Check size={25} /><div><strong>{result.status === "auto_paid" ? "บันทึกว่าชำระแล้ว" : "ส่งให้แอดมินตรวจสอบแล้ว"}</strong><span>{result.message}</span></div></section> : null}
+      {result ? <section className={`liff-payment-result is-${result.status}`}><Check size={25} /><div><strong>{result.status === "auto_paid" ? "บันทึกว่าชำระแล้ว" : "ส่งให้แอดมินตรวจสอบแล้ว"}</strong><span>{result.message}</span>{result.status === "pending" ? <button onClick={sendNewSlip} type="button"><ImagePlus size={16} /> ส่งสลิปใหม่</button> : null}</div></section> : null}
     </PaymentShell>
   );
 }

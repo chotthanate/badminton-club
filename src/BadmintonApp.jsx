@@ -8,6 +8,7 @@ import {
   Calculator,
   FlaskConical,
   History,
+  Image,
   LogIn,
   LogOut,
   PackagePlus,
@@ -38,6 +39,7 @@ import {
   finalizeMemberBill,
   getAdminContexts,
   finishEvent,
+  getPaymentSlipImageUrl,
   listClubEvents,
   loadDashboard,
   recordAudit,
@@ -1255,6 +1257,18 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
     }, approved ? `รับเงิน ${slip.beneficiaryName} จากสลิปแล้ว` : "ปฏิเสธสลิปและคืนสถานะเป็นรอชำระแล้ว");
   }
 
+  async function openSlipImage(slip) {
+    const preview = window.open("", "_blank");
+    try {
+      const signedUrl = await getPaymentSlipImageUrl(slip.storage_path);
+      if (preview) preview.location.href = signedUrl;
+      else window.location.href = signedUrl;
+    } catch (nextError) {
+      if (preview) preview.close();
+      window.alert(nextError.message || "เปิดรูปสลิปไม่สำเร็จ");
+    }
+  }
+
   return (
     <section className="badminton-card badminton-settlement-card" id="settlement">
       <div className="badminton-payment-workspace">
@@ -1268,7 +1282,7 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
             <span>{paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ"}</span>
           </div>
         </div>
-        {event.paymentSlips?.length ? <div className="badminton-slip-review"><div className="badminton-slip-review-title"><ShieldCheck size={18} /><div><strong>สลิปรอตรวจสอบ</strong><span>{event.paymentSlips.length} รายการ · ยังไม่ถือว่าจ่ายแล้ว</span></div></div>{event.paymentSlips.map((slip) => <article key={slip.id}><div><strong>{slip.beneficiaryName}</strong><span>ยอดเรียกเก็บ {baht(slip.expected_amount)} บาท · สลิป {slip.transferred_amount === null ? "อ่านยอดไม่ชัด" : `${baht(slip.transferred_amount)} บาท`}</span><small>{slip.review_reason || "รอตรวจสอบ"}{slip.transferred_on ? ` · ${slip.transferred_on}` : ""}</small></div><div><button className="badminton-secondary" onClick={() => reviewSlip(slip, false)} type="button"><X size={15} /> ไม่ผ่าน</button><button className="badminton-primary" onClick={() => reviewSlip(slip, true)} type="button"><Check size={15} /> รับเงิน</button></div></article>)}</div> : null}
+        {event.paymentSlips?.length ? <div className="badminton-slip-review"><div className="badminton-slip-review-title"><ShieldCheck size={18} /><div><strong>สลิปรอตรวจสอบ</strong><span>{event.paymentSlips.length} รายการ · ตรวจได้จากเว็บนี้ ไม่ต้องย้อนหาใน LINE</span></div></div>{event.paymentSlips.map((slip) => <article key={slip.id}><div><strong>{slip.beneficiaryName}</strong><span>ยอดเรียกเก็บ {baht(slip.expected_amount)} บาท · สลิป {slip.transferred_amount === null ? "อ่านยอดไม่ชัด" : `${baht(slip.transferred_amount)} บาท`}</span><small>{slip.review_reason || "รอตรวจสอบ"}{slip.transferred_on ? ` · ${slip.transferred_on}` : ""}</small></div><div>{slip.storage_path ? <button className="badminton-secondary" onClick={() => openSlipImage(slip)} type="button"><Image size={15} /> ดูสลิป</button> : null}<button className="badminton-secondary" onClick={() => reviewSlip(slip, false)} type="button"><X size={15} /> ไม่ผ่าน</button><button className="badminton-primary" onClick={() => reviewSlip(slip, true)} type="button"><Check size={15} /> รับเงิน</button></div></article>)}</div> : null}
         <div className="badminton-card-title badminton-payment-list-title"><WalletCards size={19} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
         <div className="badminton-pay-list">
           {settlement.rows.map((row) => {
