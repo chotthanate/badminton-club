@@ -7,7 +7,9 @@ import {
   calculateSettlement,
   formatPlayedDuration,
   minutesBetween,
+  nextFridayIso,
   playedMinutesWithinEvent,
+  roundDefaultsForDate,
   suggestArrivalTimeOnCheck,
   totalCourtHours,
   weightFromTimes,
@@ -62,6 +64,7 @@ test("billableHours applies an admin-selected percentage to actual playing time"
   assert.equal(billableHours(180, 100), 3);
   assert.equal(billableHours(180, 50), 1.5);
   assert.equal(billableHours(90, 50), 0.75);
+  assert.equal(billableHours(135, 25), 0.5625);
 });
 
 test("calculateSettlement excludes absent players and splits by weight", () => {
@@ -162,6 +165,18 @@ test("calculateSettlement keeps an early payment locked when later costs increas
   assert.equal(result.rows.reduce((sum, row) => sum + row.roundedDue, 0), 510);
 });
 
+test("calculateSettlement gives equal open balances to players with equal hours and percentages", () => {
+  const result = calculateSettlement(makeEvent({
+    costs: [{ amount: 454 }],
+    attendance: [
+      { memberId: "tiger", name: "ไทเกอร์", arrived: true, hours: 3.5 },
+      { memberId: "friend", name: "เพื่อนไทเกอร์", arrived: true, hours: 3.5 },
+    ],
+  }));
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [227, 227]);
+});
+
 test("buildLineSummary lists personal items instead of a generic extras total", () => {
   const summary = buildLineSummary(makeEvent({
     costs: [{ amount: 100 }],
@@ -218,4 +233,39 @@ test("suggestArrivalTimeOnCheck supports a session after midnight", () => {
     endTime: "01:00",
     plannedArrival: "23:30",
   }), "00:15");
+});
+
+test("roundDefaultsForDate uses the requested Friday and Saturday court presets", () => {
+  assert.deepEqual(roundDefaultsForDate("2026-07-24"), {
+    courtHourlyRate: 200,
+    shuttlecockUnitPrice: 95,
+    courts: [
+      { name: "คอร์ท 11", startsAt: "21:00", endsAt: "00:00" },
+      { name: "คอร์ท 12", startsAt: "21:00", endsAt: "00:00" },
+      { name: "คอร์ท 10", startsAt: "22:00", endsAt: "00:00" },
+    ],
+  });
+  assert.deepEqual(roundDefaultsForDate("2026-07-25"), {
+    courtHourlyRate: 150,
+    shuttlecockUnitPrice: 95,
+    courts: [
+      { name: "คอร์ท 10", startsAt: "22:00", endsAt: "00:00" },
+      { name: "คอร์ท 11", startsAt: "21:00", endsAt: "00:00" },
+      { name: "คอร์ท 12", startsAt: "21:00", endsAt: "00:00" },
+    ],
+  });
+});
+
+test("roundDefaultsForDate respects the club's latest saved prices", () => {
+  const defaults = roundDefaultsForDate("2026-07-25", {
+    default_saturday_court_hourly_rate: 175,
+    default_shuttlecock_unit_price: 92,
+  });
+  assert.equal(defaults.courtHourlyRate, 175);
+  assert.equal(defaults.shuttlecockUnitPrice, 92);
+});
+
+test("nextFridayIso formats the date in local time without UTC date drift", () => {
+  assert.equal(nextFridayIso(new Date(2026, 6, 23, 0, 15)), "2026-07-24");
+  assert.equal(nextFridayIso(new Date(2026, 6, 24, 23, 55)), "2026-07-31");
 });

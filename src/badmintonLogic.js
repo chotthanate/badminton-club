@@ -3,6 +3,25 @@ export const STATUS_LABELS = {
   not_coming: "ไม่มา",
 };
 
+export const DEFAULT_ROUND_SETTINGS = {
+  fridayCourtHourlyRate: 200,
+  saturdayCourtHourlyRate: 150,
+  otherCourtHourlyRate: 200,
+  shuttlecockUnitPrice: 95,
+};
+
+const FRIDAY_COURTS = [
+  { name: "คอร์ท 11", startsAt: "21:00", endsAt: "00:00" },
+  { name: "คอร์ท 12", startsAt: "21:00", endsAt: "00:00" },
+  { name: "คอร์ท 10", startsAt: "22:00", endsAt: "00:00" },
+];
+
+const SATURDAY_COURTS = [
+  { name: "คอร์ท 10", startsAt: "22:00", endsAt: "00:00" },
+  { name: "คอร์ท 11", startsAt: "21:00", endsAt: "00:00" },
+  { name: "คอร์ท 12", startsAt: "21:00", endsAt: "00:00" },
+];
+
 export function baht(value) {
   return new Intl.NumberFormat("th-TH", {
     maximumFractionDigits: 0,
@@ -193,10 +212,10 @@ function summarizeExtraCharges(charges) {
   return [...grouped.entries()].map(([name, value]) => `${name}${value.quantity > 1 ? `×${value.quantity}` : ""} ${baht(value.amount)} บาท`).join(", ");
 }
 
-export function createInitialEvent() {
+export function createInitialEvent(now = new Date()) {
   return {
     id: "fri-current",
-    date: nextFridayIso(),
+    date: nextFridayIso(now),
     title: "แบดวันศุกร์",
     startTime: "21:00",
     endTime: "00:00",
@@ -224,6 +243,48 @@ export function createInitialEvent() {
     ],
     actions: [],
   };
+}
+
+export function roundDefaultsForDate(isoDate, settings = {}) {
+  const weekday = weekdayFromIsoDate(isoDate);
+  const shuttlecockUnitPrice = finiteOr(
+    settings.default_shuttlecock_unit_price,
+    DEFAULT_ROUND_SETTINGS.shuttlecockUnitPrice,
+  );
+  if (weekday === 5) {
+    return {
+      courtHourlyRate: finiteOr(
+        settings.default_friday_court_hourly_rate,
+        DEFAULT_ROUND_SETTINGS.fridayCourtHourlyRate,
+      ),
+      shuttlecockUnitPrice,
+      courts: FRIDAY_COURTS.map((court) => ({ ...court })),
+    };
+  }
+  if (weekday === 6) {
+    return {
+      courtHourlyRate: finiteOr(
+        settings.default_saturday_court_hourly_rate,
+        DEFAULT_ROUND_SETTINGS.saturdayCourtHourlyRate,
+      ),
+      shuttlecockUnitPrice,
+      courts: SATURDAY_COURTS.map((court) => ({ ...court })),
+    };
+  }
+  return {
+    courtHourlyRate: finiteOr(
+      settings.default_other_court_hourly_rate,
+      DEFAULT_ROUND_SETTINGS.otherCourtHourlyRate,
+    ),
+    shuttlecockUnitPrice,
+    courts: [],
+  };
+}
+
+export function weekdayFromIsoDate(isoDate) {
+  const parts = String(isoDate || "").split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+  return new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0).getDay();
 }
 
 export function memberName(event, memberId) {
@@ -283,12 +344,12 @@ export function suggestArrivalTimeOnCheck({
   return `${String(roundedAt.getHours()).padStart(2, "0")}:${String(roundedAt.getMinutes()).padStart(2, "0")}`;
 }
 
-function nextFridayIso() {
-  const date = new Date();
+export function nextFridayIso(now = new Date()) {
+  const date = new Date(now);
   const day = date.getDay();
   const diff = (5 - day + 7) % 7 || 7;
   date.setDate(date.getDate() + diff);
-  return date.toISOString().slice(0, 10);
+  return localIsoDate(date);
 }
 
 function parseTime(value) {
@@ -306,6 +367,19 @@ function roundToStep(value, step) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function finiteOr(value, fallback) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function localIsoDate(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 function billingUnits(row) {

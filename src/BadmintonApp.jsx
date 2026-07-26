@@ -40,6 +40,7 @@ import {
   listClubEvents,
   loadDashboard,
   recordAudit,
+  replaceEventCourts,
   resetTestClub,
   prepareEventForLine,
   removeCourt,
@@ -52,6 +53,7 @@ import {
   updateCourt,
   updateEvent,
   updateEventDetails,
+  updateEventPriceAndDefault,
   updateExtraCatalogItem,
   updateExpense,
   updateSignup,
@@ -67,8 +69,10 @@ import {
   formatThaiLongDate,
   minutesBetween,
   playedMinutesWithinEvent,
+  roundDefaultsForDate,
   suggestArrivalTimeOnCheck,
   totalCourtHours,
+  weekdayFromIsoDate,
 } from "./badmintonLogic.js";
 import { normalizeMemberSearch, rankMemberSuggestions } from "./memberSearch.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
@@ -356,6 +360,7 @@ function AdminDashboard({ session }) {
             {activeTab === "round" ? <>
               <EventControlCard
                 clubName={context.clubs.name}
+                clubSettings={context.clubs}
                 courts={dashboard.courts}
                 event={dashboard.event}
                 isTestMode={context.clubs.is_test}
@@ -501,6 +506,7 @@ function ClubSetup({ session, onCreated, error }) {
 function CreateEventCard({ compact = false, context, defaultVenue = "", session, mutate, venues = [] }) {
   const initial = createInitialEvent();
   const venue = defaultVenue || venues[0]?.name || "คอร์ทแบดเขาน้อย (คอร์ทใหม่)";
+  const defaults = roundDefaultsForDate(initial.date, context.clubs);
 
   async function createRound() {
     await mutate(async () => {
@@ -510,6 +516,11 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
         userId: session.user.id,
         eventDate: initial.date,
         venue,
+        startsAt: defaults.courts.map((court) => court.startsAt).sort()[0] || "21:00",
+        endsAt: defaults.courts[0]?.endsAt || "00:00",
+        courtHourlyRate: defaults.courtHourlyRate,
+        shuttlecockUnitPrice: defaults.shuttlecockUnitPrice,
+        courts: defaults.courts,
       });
       await recordAudit({
         clubId: context.club_id,
@@ -530,13 +541,44 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
   );
 }
 
-function EventControlCard({ clubName, courts, event, isTestMode, mappedEvent, mutate, session, settlement, venues = [] }) {
+function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, mappedEvent, mutate, session, settlement, venues = [] }) {
   const [form, setForm] = useState({
     event_date: event.event_date,
     venue: event.venue,
   });
   const [editingDetails, setEditingDetails] = useState(event.status === "draft");
   const [newCourt, setNewCourt] = useState({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
+
+  async function saveEventDetails() {
+    const previousWeekday = weekdayFromIsoDate(event.event_date);
+    const nextWeekday = weekdayFromIsoDate(form.event_date);
+    const shouldApplyPreset = event.status === "draft"
+      && previousWeekday !== nextWeekday
+      && [5, 6].includes(nextWeekday);
+    await mutate(async () => {
+      const preset = shouldApplyPreset ? roundDefaultsForDate(form.event_date, clubSettings) : null;
+      await updateEventDetails({
+        clubId: event.club_id,
+        eventId: event.id,
+        patch: {
+          ...form,
+          ...(preset ? {
+            court_hourly_rate: preset.courtHourlyRate,
+            shuttlecock_unit_price: preset.shuttlecockUnitPrice,
+          } : {}),
+        },
+      });
+      if (preset) {
+        await replaceEventCourts({
+          clubId: event.club_id,
+          eventId: event.id,
+          courts: preset.courts,
+        });
+      }
+    }, shouldApplyPreset
+      ? `บันทึกรายละเอียดและใช้คอร์ทตั้งต้นของวัน${nextWeekday === 5 ? "ศุกร์" : "เสาร์"}แล้ว`
+      : "บันทึกรายละเอียดรอบแล้ว");
+  }
 
   async function addNewCourt(submitEvent) {
     submitEvent.preventDefault();
@@ -618,7 +660,7 @@ function EventControlCard({ clubName, courts, event, isTestMode, mappedEvent, mu
         <label>วันที่<input type="date" value={form.event_date} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></label>
         <label>สถานที่<input list="round-saved-venues" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} /></label>
         <datalist id="round-saved-venues">{venues.map((venue) => <option key={venue.id} value={venue.name} />)}</datalist>
-        <button className="badminton-secondary" onClick={() => mutate(() => updateEventDetails({ clubId: event.club_id, eventId: event.id, patch: form }), "บันทึกรายละเอียดรอบแล้ว")} type="button"><Save size={17} /> บันทึก</button>
+        <button className="badminton-secondary" onClick={saveEventDetails} type="button"><Save size={17} /> บันทึก</button>
       </div> : null}
       {event.status === "closed" ? (
         <div className="badminton-closed-courts">
@@ -673,6 +715,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [pendingCheckIn, setPendingCheckIn] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sortMode, setSortMode] = useState("signup");
+  const [exemptName, setExemptName] = useState("");
   const participants = event.signups
     .filter((signup) => signup.status === "coming")
     .map((signup) => ({
@@ -725,6 +768,41 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     submitEvent.preventDefault();
     await mutate(() => addExtraCatalogItem({ clubId: context.club_id, name: newItem.name, price: newItem.price }), "เพิ่มสินค้าแล้ว");
     setNewItem({ name: "", price: "" });
+  }
+
+  async function addPaymentExemptMember(submitEvent) {
+    submitEvent.preventDefault();
+    const normalizedName = normalizeMemberSearch(exemptName);
+    const member = savedMembers.find((entry) =>
+      [entry.nickname, entry.display_name].some(
+        (value) => normalizeMemberSearch(value) === normalizedName,
+      ));
+    if (!member) {
+      await mutate(async () => {
+        throw new Error("ไม่พบชื่อนี้ กรุณาเลือกชื่อจากรายชื่อผู้เล่นเดิม");
+      }, "");
+      return;
+    }
+    const saved = await mutate(
+      () => updateClubMember(member.id, {
+        nickname: memberName(member),
+        displayName: member.display_name || memberName(member),
+        paymentExempt: true,
+      }),
+      `เพิ่ม ${memberName(member)} ในรายชื่อไม่ต้องเก็บเงินแล้ว`,
+    );
+    if (saved) setExemptName("");
+  }
+
+  function removePaymentExemptMember(member) {
+    return mutate(
+      () => updateClubMember(member.id, {
+        nickname: memberName(member),
+        displayName: member.display_name || memberName(member),
+        paymentExempt: false,
+      }),
+      `นำ ${memberName(member)} ออกจากรายชื่อไม่ต้องเก็บเงินแล้ว`,
+    );
   }
 
   function openMemberEditor(member) {
@@ -912,20 +990,6 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             );
           }
 
-          function togglePaymentExempt() {
-            const nextExempt = !member.payment_exempt;
-            return mutate(
-              () => updateClubMember(member.id, {
-                nickname: memberName(member),
-                displayName: member.display_name || memberName(member),
-                paymentExempt: nextExempt,
-              }),
-              nextExempt
-                ? `ตั้ง ${participantName} เป็นสมาชิกไม่ต้องเก็บเงินแล้ว`
-                : `นำ ${participantName} ออกจากรายชื่อไม่ต้องเก็บเงินแล้ว`,
-            );
-          }
-
           function toggleCheckIn(nextChecked) {
             if (!nextChecked) {
               return mutate(
@@ -966,19 +1030,25 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
           return (
             <article className={`badminton-attendance-row ${checkedIn ? "is-checked-in" : ""}`} key={member.id}>
-              <div className="badminton-player-identity"><label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label><b className="badminton-player-index">{playerIndex + 1}.</b><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}<button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button><button aria-label={`${member.payment_exempt ? "นำออกจาก" : "เพิ่มเข้า"}รายชื่อไม่ต้องเก็บเงิน ${participantName}`} className={`badminton-payment-exempt-button ${member.payment_exempt ? "is-active" : ""}`} onClick={togglePaymentExempt} title={member.payment_exempt ? "คนนี้ไม่ต้องเก็บเงิน แตะเพื่อยกเลิก" : "ตั้งเป็นสมาชิกไม่ต้องเก็บเงิน"} type="button">ฟรี</button><em><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>{formatPlayedDuration(playedMinutes)} · ≈ {baht(due)} บาท</em></div>
+              <div className="badminton-player-identity">
+                <label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label>
+                <b className="badminton-player-index">{playerIndex + 1}.</b>
+                <div className="badminton-player-name"><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}</div>
+                <button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button>
+                <em className={settlementRow?.locked ? "is-locked" : ""}><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select><span>{formatPlayedDuration(playedMinutes)}</span><b>{settlementRow?.locked ? `ล็อกยอดแล้ว ${baht(due)} บาท` : `≈ ${baht(due)} บาท`}</b></em>
+              </div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label className="badminton-extra-select-wrap"><span>น้ำ/ขนม</span><select aria-label={`เพิ่มน้ำหรือขนมให้ ${participantName}`} disabled={isPaid} onChange={(changeEvent) => chooseExtra(changeEvent.target.value, member.id, participantName)} title={isPaid ? "ยกเลิกรับเงินก่อนแก้สินค้า" : "เลือกน้ำหรือขนม"} value=""><option value="">+ น้ำ/ขนม{extraTotal ? ` ${baht(extraTotal)}` : ""}</option>{(dashboard.extraItems || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {baht(item.price)} บาท</option>)}<option value="custom">กรอกค่าใช้จ่ายเอง…</option></select></label>
-                <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={() => mutate(() => removeParticipant({ eventId: event.id, memberId: member.id }), `ลบ ${participantName} ออกจากรอบแล้ว`)} type="button"><Trash2 size={17} /></button>
+                <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={() => { if (window.confirm(`ลบ ${participantName} ออกจากรอบนี้ใช่ไหม?`)) mutate(() => removeParticipant({ eventId: event.id, memberId: member.id }), `ลบ ${participantName} ออกจากรอบแล้ว`); }} type="button"><Trash2 size={17} /></button>
               </div>
               {charges.length ? <div className="badminton-member-charges">{charges.map((charge) => <span key={charge.id}>{charge.item_name} {baht(Number(charge.unit_price) * Number(charge.quantity))}{!isPaid ? <button aria-label={`ลบ ${charge.item_name}`} onClick={() => mutate(() => removeMemberExtraCharge(charge.id), `ลบ ${charge.item_name} แล้ว`)} type="button">×</button> : null}</span>)}</div> : null}
             </article>
           );
         }) : <div className="badminton-empty">ยังไม่มีผู้เล่น</div>}
       </div>
-      {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
+      {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><WalletCards size={17} /><strong>รายชื่อไม่ต้องเก็บเงิน</strong><em>{savedMembers.filter((member) => member.payment_exempt).length} คน</em></div><form className="badminton-exempt-member-form" onSubmit={addPaymentExemptMember}><input list="payment-exempt-member-options" onChange={(changeEvent) => setExemptName(changeEvent.target.value)} placeholder="พิมพ์ชื่อเล่นหรือชื่อ LINE" required value={exemptName} /><datalist id="payment-exempt-member-options">{savedMembers.filter((member) => !member.payment_exempt).map((member) => <option key={member.id} value={memberName(member)}>{member.display_name}</option>)}</datalist><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form><div className="badminton-exempt-member-list">{savedMembers.filter((member) => member.payment_exempt).map((member) => <span key={member.id}><strong>{memberName(member)}</strong><button aria-label={`นำ ${memberName(member)} ออกจากรายชื่อไม่ต้องเก็บเงิน`} onClick={() => removePaymentExemptMember(member)} type="button"><X size={14} /></button></span>)}</div><small className="badminton-settings-help">คนในรายชื่อนี้ยังร่วมถูกหารค่าใช้จ่าย แต่ระบบจะถือว่าชำระแล้วและไม่ใส่ในข้อความส่ง LINE</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
       {editingMember ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}><div className="badminton-modal-title"><div><p className="badminton-kicker">ข้อมูลสมาชิกเดิม</p><h2>แก้ไขรายชื่อ</h2></div><button aria-label="ปิดหน้าต่างแก้ไขชื่อ" onClick={() => setEditingMember(null)} type="button"><X size={19} /></button></div><label>ชื่อเล่น<input autoFocus maxLength="40" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, nickname: changeEvent.target.value })} required value={memberEdit.nickname} /></label><label>ชื่อ LINE<input maxLength="80" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, displayName: changeEvent.target.value })} required value={memberEdit.displayName} /></label>{editingMember.line_user_id ? <p className="badminton-member-sync-note">คนนี้เชื่อมกับ LINE แล้ว หากเปลี่ยนชื่อ LINE ระบบจะอัปเดตชื่อใหม่อัตโนมัติเมื่อสมาชิกเข้าหน้าลงชื่อครั้งถัดไป โดยประวัติและยอดค้างยังเป็นคนเดิม</p> : <p className="badminton-member-sync-note">สมาชิกที่เพิ่มเองยังไม่เชื่อมกับบัญชี LINE การแก้ชื่อตรงนี้จะไม่กระทบประวัติและยอดค้างเดิม</p>}<button className="badminton-primary" type="submit"><Save size={17} /> บันทึกชื่อ</button></form></div> : null}
       {customChargeFor ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal" onSubmit={addCustomCharge}><div className="badminton-modal-title"><div><p className="badminton-kicker">ค่าใช้จ่ายเฉพาะคน</p><h2>เพิ่มรายการให้ {customChargeFor.name}</h2></div><button aria-label="ปิดหน้าต่าง" onClick={() => setCustomChargeFor(null)} type="button"><X size={19} /></button></div><label>ชื่อรายการ<input autoFocus maxLength="80" onChange={(changeEvent) => setCustomCharge({ ...customCharge, name: changeEvent.target.value })} placeholder="เช่น ค่าเอ็นไม้" required value={customCharge.name} /></label><label>ราคา (บาท)<input min="0" onChange={(changeEvent) => setCustomCharge({ ...customCharge, price: changeEvent.target.value })} placeholder="0" required type="number" value={customCharge.price} /></label><button className="badminton-primary" type="submit"><Plus size={17} /> เพิ่มค่าใช้จ่าย</button></form></div> : null}
       {pendingCheckIn ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ยืนยันเวลาเช็กชื่อ" aria-modal="true" className="badminton-custom-charge-modal badminton-check-in-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เช็กชื่อผู้เล่น</p><h2>{pendingCheckIn.participantName} มาถึงแล้ว</h2></div><button aria-label="ปิด" onClick={() => setPendingCheckIn(null)} type="button"><X size={19} /></button></div><p>ลงชื่อไว้เวลา <strong>{pendingCheckIn.plannedArrival} น.</strong> ตอนนี้ประมาณ <strong>{pendingCheckIn.suggestedArrival} น.</strong></p><div className="badminton-check-in-actions"><button className="badminton-secondary" onClick={() => completeCheckIn(pendingCheckIn, false)} type="button">ใช้เวลาเดิม {pendingCheckIn.plannedArrival}</button><button className="badminton-primary" onClick={() => completeCheckIn(pendingCheckIn, true)} type="button">ปรับเป็น {pendingCheckIn.suggestedArrival}</button></div></div></div> : null}
@@ -1005,7 +1075,7 @@ function PricingPanel({ event, mutate, session }) {
           <div className="badminton-price-head"><span>สรุปคอร์ท</span><strong>{baht(courtCost)} บาท</strong></div>
           <div className="badminton-court-summary-list">{event.courts.map((court) => <span key={court.id}><strong>{court.name}</strong> {court.startsAt}–{court.endsAt === "00:00" ? "24:00" : court.endsAt} · {formatPlayedDuration(minutesBetween(court.startsAt, court.endsAt))}</span>)}</div>
           <div className="badminton-price-setting">
-            {editingCourt ? <input autoFocus min="0" type="number" defaultValue={event.courtHourlyRate} onBlur={(e) => { setEditingCourt(false); mutate(() => updateEvent(event.id, { court_hourly_rate: Number(e.target.value) }), "แก้ราคาคอร์ดแล้ว"); }} /> : <span>{baht(event.courtHourlyRate)} บาท/ชม.</span>}
+            {editingCourt ? <input autoFocus min="0" type="number" defaultValue={event.courtHourlyRate} onBlur={(e) => { setEditingCourt(false); mutate(() => updateEventPriceAndDefault({ clubId: event.clubId, eventId: event.id, eventDate: event.date, priceType: "court", value: e.target.value }), "แก้ราคาคอร์ดและบันทึกเป็นค่าเริ่มต้นของวันนี้แล้ว"); }} /> : <span>{baht(event.courtHourlyRate)} บาท/ชม.</span>}
             <button className="badminton-edit-price" onClick={() => setEditingCourt(true)} type="button">แก้ราคา</button>
           </div>
         </article>
@@ -1013,7 +1083,7 @@ function PricingPanel({ event, mutate, session }) {
           <label>จำนวนลูกแบด<input defaultValue={event.shuttlecockCount} min="0" type="number" onBlur={(e) => mutate(() => updateEvent(event.id, { shuttlecock_count: Number(e.target.value) }), "อัปเดตจำนวนลูกแบดแล้ว")} /></label>
           <div className="badminton-price-head"><span>ค่าลูกแบด</span><strong>{baht(shuttleCost)} บาท</strong></div>
           <div className="badminton-price-setting">
-            {editingShuttle ? <input autoFocus min="0" type="number" defaultValue={event.shuttlecockUnitPrice} onBlur={(e) => { setEditingShuttle(false); mutate(() => updateEvent(event.id, { shuttlecock_unit_price: Number(e.target.value) }), "แก้ราคาลูกแบดแล้ว"); }} /> : <span>{baht(event.shuttlecockUnitPrice)} บาท/ลูก</span>}
+            {editingShuttle ? <input autoFocus min="0" type="number" defaultValue={event.shuttlecockUnitPrice} onBlur={(e) => { setEditingShuttle(false); mutate(() => updateEventPriceAndDefault({ clubId: event.clubId, eventId: event.id, eventDate: event.date, priceType: "shuttlecock", value: e.target.value }), "แก้ราคาลูกแบดและบันทึกเป็นค่าเริ่มต้นแล้ว"); }} /> : <span>{baht(event.shuttlecockUnitPrice)} บาท/ลูก</span>}
             <button className="badminton-edit-price" onClick={() => setEditingShuttle(true)} type="button">แก้ราคา</button>
           </div>
         </article>
@@ -1105,7 +1175,7 @@ function mapDashboardToEvent(dashboard) {
   const endTime = dashboard.event.ends_at.slice(0, 5);
   const courtHourlyRate = Number(dashboard.event.court_hourly_rate ?? 200);
   const shuttlecockCount = Number(dashboard.event.shuttlecock_count ?? 0);
-  const shuttlecockUnitPrice = Number(dashboard.event.shuttlecock_unit_price ?? 60);
+  const shuttlecockUnitPrice = Number(dashboard.event.shuttlecock_unit_price ?? 95);
   const extraCosts = dashboard.expenses.map((row) => ({ id: row.id, type: row.category, label: row.label, amount: Number(row.amount) }));
   const courts = dashboard.courts.map((court) => ({
     id: court.id,

@@ -12,7 +12,7 @@ function throwIfError(error) {
 export async function getAdminContexts(userId) {
   const { data, error } = await client()
     .from("club_members")
-    .select("id, club_id, display_name, nickname, role, clubs!inner(id, name, line_group_id, is_test)")
+    .select("id, club_id, display_name, nickname, role, clubs!inner(id, name, line_group_id, is_test, default_friday_court_hourly_rate, default_saturday_court_hourly_rate, default_other_court_hourly_rate, default_shuttlecock_unit_price)")
     .eq("profile_id", userId)
     .eq("role", "admin")
     .eq("active", true)
@@ -144,7 +144,18 @@ export async function loadDashboard(clubId, eventId = null) {
   };
 }
 
-export async function createEvent({ clubId, clubName, userId, eventDate, venue, startsAt = "21:00", endsAt = "00:00" }) {
+export async function createEvent({
+  clubId,
+  clubName,
+  userId,
+  eventDate,
+  venue,
+  startsAt = "21:00",
+  endsAt = "00:00",
+  courtHourlyRate = 200,
+  shuttlecockUnitPrice = 95,
+  courts = [],
+}) {
   const { data, error } = await client()
     .from("events")
     .insert({
@@ -154,12 +165,27 @@ export async function createEvent({ clubId, clubName, userId, eventDate, venue, 
       venue: venue.trim(),
       starts_at: startsAt,
       ends_at: endsAt,
+      court_hourly_rate: Math.max(0, Number(courtHourlyRate) || 0),
+      shuttlecock_unit_price: Math.max(0, Number(shuttlecockUnitPrice) || 0),
       status: "draft",
       created_by: userId,
     })
     .select("*")
     .single();
   throwIfError(error);
+  if (courts.length) {
+    const { error: courtError } = await client().from("event_courts").insert(
+      courts.map((court, position) => ({
+        club_id: clubId,
+        event_id: data.id,
+        court_name: court.name,
+        starts_at: court.startsAt,
+        ends_at: court.endsAt,
+        position,
+      })),
+    );
+    throwIfError(courtError);
+  }
   return data;
 }
 
@@ -171,6 +197,55 @@ export async function updateEvent(eventId, patch) {
 export async function updateEventDetails({ clubId, eventId, patch }) {
   await updateEvent(eventId, patch);
   if (patch.venue) await rememberVenue(clubId, patch.venue);
+}
+
+export async function replaceEventCourts({ clubId, eventId, courts }) {
+  const { error: deleteError } = await client().from("event_courts").delete().eq("event_id", eventId);
+  throwIfError(deleteError);
+  if (!courts.length) return;
+  const { error: insertError } = await client().from("event_courts").insert(
+    courts.map((court, position) => ({
+      club_id: clubId,
+      event_id: eventId,
+      court_name: court.name,
+      starts_at: court.startsAt,
+      ends_at: court.endsAt,
+      position,
+    })),
+  );
+  throwIfError(insertError);
+  await syncEventTimes(eventId);
+}
+
+export async function updateEventPriceAndDefault({
+  clubId,
+  eventId,
+  eventDate,
+  priceType,
+  value,
+}) {
+  const amount = Math.max(0, Number(value) || 0);
+  if (priceType === "shuttlecock") {
+    const [eventResult, clubResult] = await Promise.all([
+      client().from("events").update({ shuttlecock_unit_price: amount }).eq("id", eventId),
+      client().from("clubs").update({ default_shuttlecock_unit_price: amount }).eq("id", clubId),
+    ]);
+    throwIfError(eventResult.error);
+    throwIfError(clubResult.error);
+    return;
+  }
+  const weekday = new Date(`${eventDate}T12:00:00`).getDay();
+  const defaultColumn = weekday === 5
+    ? "default_friday_court_hourly_rate"
+    : weekday === 6
+    ? "default_saturday_court_hourly_rate"
+    : "default_other_court_hourly_rate";
+  const [eventResult, clubResult] = await Promise.all([
+    client().from("events").update({ court_hourly_rate: amount }).eq("id", eventId),
+    client().from("clubs").update({ [defaultColumn]: amount }).eq("id", clubId),
+  ]);
+  throwIfError(eventResult.error);
+  throwIfError(clubResult.error);
 }
 
 export async function deleteCompletedEvent(eventId) {

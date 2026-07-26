@@ -3149,3 +3149,162 @@
     height: 52px;
   }
 }
+
+/* Stable mobile layout for long player names and native iOS date inputs. */
+.badminton-event-main-form label {
+  min-width: 0;
+}
+
+.badminton-event-main-form input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.badminton-event-main-form input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.badminton-attendance-row > .badminton-player-identity {
+  display: grid;
+  grid-template-columns: 32px auto minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 5px 7px;
+  min-width: 0;
+}
+
+.badminton-player-name {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  overflow: hidden;
+}
+
+.badminton-player-name strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-player-name span {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #637064;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-player-identity > em {
+  grid-column: 3 / -1;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0;
+  white-space: normal;
+  text-align: right;
+}
+
+.badminton-player-identity > em > span,
+.badminton-player-identity > em > b {
+  flex: 0 1 auto;
+  max-width: 100%;
+  margin: 0;
+  overflow: visible;
+  white-space: normal;
+}
+
+.badminton-player-identity > em > select {
+  width: 78px;
+  flex: 0 0 78px;
+}
+
+.badminton-player-identity > em.is-locked > b {
+  color: #536056;
+}
+
+.badminton-exempt-member-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
+.badminton-exempt-member-form input,
+.badminton-exempt-member-form button {
+  min-height: 42px;
+}
+
+.badminton-exempt-member-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.badminton-exempt-member-list > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 5px 7px 5px 10px;
+  border-radius: 999px;
+  background: #e7f6ec;
+  color: #0f7a52;
+  font-size: 12px;
+}
+
+.badminton-exempt-member-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-exempt-member-list button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+  color: #b42318;
+}
+
+.badminton-settings-help {
+  color: #637064;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .badminton-event-form.badminton-event-main-form {
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  }
+
+  .badminton-event-main-form button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .badminton-player-name {
+    display: block;
+  }
+
+  .badminton-player-name strong,
+  .badminton-player-name span {
+    display: block;
+    width: 100%;
+  }
+
+  .badminton-player-name span {
+    margin-top: 2px;
+  }
+}
