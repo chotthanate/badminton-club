@@ -162,7 +162,7 @@ export default function LiffPaymentApp() {
         <div className="liff-payment-section-title"><div><strong>แนบรูปสลิป</strong><span>รองรับภาพจากแอปธนาคาร</span></div></div>
         <label className={`liff-slip-picker ${slip ? "has-slip" : ""}`}>
           <input accept="image/*" disabled={reading || submitting} onChange={readSlip} type="file" />
-          {reading ? <><LoaderCircle className="is-spinning" size={28} /><strong>กำลังอ่านข้อความ {progress}%</strong><span>ประมวลผลบนโทรศัพท์โดยไม่เสียค่าบริการ</span></> : slip ? <><Check size={29} /><strong>อ่านสลิปแล้ว</strong><span>ยอด {slip.amount === null ? "อ่านไม่ชัด" : `${baht(slip.amount)} บาท`} · วันที่ {slip.date || "อ่านไม่ชัด"}</span></> : <><ImagePlus size={29} /><strong>เลือกรูปสลิป</strong><span>แตะเพื่อเลือกรูปจากเครื่อง</span></>}
+          {reading ? <><LoaderCircle className="is-spinning" size={28} /><strong>กำลังอ่านข้อความ {progress}%</strong></> : slip ? <><Check size={29} /><strong>อ่านสลิปแล้ว</strong><span>ยอด {slip.amount === null ? "อ่านไม่ชัด" : `${baht(slip.amount)} บาท`} · วันที่ {slip.date || "อ่านไม่ชัด"}</span></> : <><ImagePlus size={29} /><strong>เลือกรูปสลิป</strong><span>แตะเพื่อเลือกรูปจากเครื่อง</span></>}
         </label>
         {slip && (slip.amount === null || !slip.date) ? <p className="liff-slip-warning">ระบบอ่านยอดหรือวันที่ไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
         {error ? <div className="liff-inline-error">{error}</div> : null}
