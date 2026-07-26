@@ -346,7 +346,7 @@ function AdminDashboard({ session }) {
               onChange={(eventId) => refresh(false, { eventId })}
               onDelete={(round) => mutate(
                 () => deleteCompletedEvent(round.id),
-                "ลบรอบที่ชำระเงินครบแล้ว",
+                round.status === "draft" ? "ลบรอบที่กำลังเตรียมแล้ว" : "ลบรอบที่ชำระเงินครบแล้ว",
                 { selectLatest: true, errorMode: "alert" },
               )}
               selectedEventId={selectedEventId}
@@ -439,10 +439,14 @@ function AdminPasswordModal({ onClose, onSave, saving }) {
 
 function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
   const selectedRound = events.find((event) => event.id === selectedEventId);
+  const canDelete = selectedRound && ["draft", "closed"].includes(selectedRound.status);
 
   function confirmDelete() {
     if (!selectedRound) return;
-    const confirmed = window.confirm(`ลบรอบ ${formatRoundOption(selectedRound.event_date)} ใช่ไหม?\n\nรายชื่อ ค่าใช้จ่าย การชำระเงิน และประวัติของรอบนี้จะถูกลบถาวร`);
+    const detail = selectedRound.status === "draft"
+      ? "ข้อมูลคอร์ทและการตั้งค่าของรอบที่กำลังเตรียมจะถูกลบ"
+      : "รายชื่อ ค่าใช้จ่าย การชำระเงิน และประวัติของรอบนี้จะถูกลบถาวร";
+    const confirmed = window.confirm(`ลบรอบ ${formatRoundOption(selectedRound.event_date)} ใช่ไหม?\n\n${detail}`);
     if (confirmed) onDelete(selectedRound);
   }
 
@@ -458,10 +462,10 @@ function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
               </option>
             ))}
           </select>
-          <button aria-label="ลบรอบที่เลือก" disabled={!selectedRound || selectedRound.status !== "closed"} onClick={confirmDelete} title={selectedRound?.status !== "closed" ? "จบรอบก่อนจึงจะลบได้" : "ลบรอบที่ชำระเงินครบแล้ว"} type="button"><Trash2 size={17} /></button>
+          <button aria-label="ลบรอบที่เลือก" disabled={!canDelete} onClick={confirmDelete} title={selectedRound?.status === "draft" ? "ลบรอบที่กำลังเตรียม" : selectedRound?.status === "closed" ? "ลบรอบที่ชำระเงินครบแล้ว" : "รอบที่เปิดลงชื่ออยู่ยังลบไม่ได้"} type="button"><Trash2 size={17} /></button>
         </div>
       </label>
-      <small>ลบรอบได้เมื่อจบรอบและเก็บเงินครบทุกคนแล้ว</small>
+      <small>ลบรอบที่กำลังเตรียมได้ทันที ส่วนรอบที่จบแล้วต้องเก็บเงินครบก่อน</small>
     </section>
   );
 }
@@ -977,16 +981,50 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             return mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, arrived_at: plannedArrival, left_at: nextDeparture || null } }), `ปรับเวลากลับของ ${participantName} แล้ว`);
           }
 
-          function updateBillingPercentage(nextPercentage) {
+          function updateBillingPercentage(nextPercentage, selectElement) {
             const percentage = Number(nextPercentage);
+            if (percentage === billingPercentage) return null;
+            const confirmed = window.confirm(
+              `ยืนยันเปลี่ยนสัดส่วนคิดเงินของ ${participantName}\nจาก ${billingPercentage}% เป็น ${percentage}% ใช่ไหม?`,
+            );
+            if (!confirmed) {
+              if (selectElement) selectElement.value = String(billingPercentage);
+              return null;
+            }
             return mutate(
-              () => updateAttendance({
-                clubId: event.clubId,
-                eventId: event.id,
-                memberId: member.id,
-                patch: { billing_percentage: percentage },
-              }),
+              async () => {
+                await updateAttendance({
+                  clubId: event.clubId,
+                  eventId: event.id,
+                  memberId: member.id,
+                  patch: { billing_percentage: percentage },
+                });
+                await recordAudit({
+                  clubId: event.clubId,
+                  eventId: event.id,
+                  userId: session.user.id,
+                  action: `ปรับสัดส่วนคิดเงิน ${participantName} จาก ${billingPercentage}% เป็น ${percentage}%`,
+                  details: { member_id: member.id, from: billingPercentage, to: percentage },
+                });
+              },
               `ปรับสัดส่วนคิดเงินของ ${participantName} เป็น ${percentage}% แล้ว`,
+            );
+          }
+
+          function removePlayer() {
+            if (!window.confirm(`ลบ ${participantName} ออกจากรอบนี้ใช่ไหม?`)) return null;
+            return mutate(
+              async () => {
+                await removeParticipant({ eventId: event.id, memberId: member.id });
+                await recordAudit({
+                  clubId: event.clubId,
+                  eventId: event.id,
+                  userId: session.user.id,
+                  action: `ลบผู้เล่น ${participantName} ออกจากรอบ`,
+                  details: { member_id: member.id },
+                });
+              },
+              `ลบ ${participantName} ออกจากรอบแล้ว`,
             );
           }
 
@@ -1035,13 +1073,13 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                 <b className="badminton-player-index">{playerIndex + 1}.</b>
                 <div className="badminton-player-name"><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}</div>
                 <button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button>
-                <em className={settlementRow?.locked ? "is-locked" : ""}><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select><span>{formatPlayedDuration(playedMinutes)}</span><b>{settlementRow?.locked ? `ล็อกยอดแล้ว ${baht(due)} บาท` : `≈ ${baht(due)} บาท`}</b></em>
+                <em className={settlementRow?.locked ? "is-locked" : ""}><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select><span>{formatPlayedDuration(playedMinutes)}</span><b>{settlementRow?.locked ? `ล็อกยอดแล้ว ${baht(due)} บาท` : `≈ ${baht(due)} บาท`}</b></em>
               </div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label className="badminton-extra-select-wrap"><span>น้ำ/ขนม</span><select aria-label={`เพิ่มน้ำหรือขนมให้ ${participantName}`} disabled={isPaid} onChange={(changeEvent) => chooseExtra(changeEvent.target.value, member.id, participantName)} title={isPaid ? "ยกเลิกรับเงินก่อนแก้สินค้า" : "เลือกน้ำหรือขนม"} value=""><option value="">+ น้ำ/ขนม{extraTotal ? ` ${baht(extraTotal)}` : ""}</option>{(dashboard.extraItems || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {baht(item.price)} บาท</option>)}<option value="custom">กรอกค่าใช้จ่ายเอง…</option></select></label>
-                <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={() => { if (window.confirm(`ลบ ${participantName} ออกจากรอบนี้ใช่ไหม?`)) mutate(() => removeParticipant({ eventId: event.id, memberId: member.id }), `ลบ ${participantName} ออกจากรอบแล้ว`); }} type="button"><Trash2 size={17} /></button>
+                <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={removePlayer} type="button"><Trash2 size={17} /></button>
               </div>
               {charges.length ? <div className="badminton-member-charges">{charges.map((charge) => <span key={charge.id}>{charge.item_name} {baht(Number(charge.unit_price) * Number(charge.quantity))}{!isPaid ? <button aria-label={`ลบ ${charge.item_name}`} onClick={() => mutate(() => removeMemberExtraCharge(charge.id), `ลบ ${charge.item_name} แล้ว`)} type="button">×</button> : null}</span>)}</div> : null}
             </article>
@@ -1107,48 +1145,106 @@ function PricingPanel({ event, mutate, session }) {
 
 function SettlementPanel({ event, mutate, previousOutstanding, session, settlement }) {
   const [copied, setCopied] = useState(false);
+  const [collectionEnabled, setCollectionEnabled] = useState(false);
   const lineSummary = useMemo(() => buildLineSummary(event), [event]);
   const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
   const combinedTotal = settlement.totalCost + previousOutstanding.total;
+
   async function copySummary() {
     await navigator.clipboard.writeText(lineSummary);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   }
+
+  function togglePayment(row) {
+    const nextPaid = !row.paid;
+    return mutate(async () => {
+      await setPayment({
+        clubId: event.clubId,
+        eventId: event.id,
+        memberId: row.memberId,
+        amount: row.roundedDue,
+        sharedAmount: row.sharedDue,
+        extrasAmount: row.extraAmount,
+        shuttlecockCount: event.shuttlecockCount,
+        paid: nextPaid,
+        userId: session.user.id,
+      });
+      await recordAudit({
+        clubId: event.clubId,
+        eventId: event.id,
+        userId: session.user.id,
+        action: nextPaid
+          ? `รับเงิน ${row.name} จำนวน ${baht(row.roundedDue)} บาท`
+          : `ยกเลิกสถานะรับเงินของ ${row.name}`,
+        details: {
+          member_id: row.memberId,
+          amount: row.roundedDue,
+          paid: nextPaid,
+        },
+      });
+    }, nextPaid ? `รับเงิน ${row.name} และล็อกยอดแล้ว` : "ยกเลิกสถานะรับเงินแล้ว");
+  }
+
   return (
-    <section className="badminton-card badminton-settlement-card" id="settlement">
-      <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div></div>
-      <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
-        <div className="badminton-current-round-total"><span>ยอดรอบนี้</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
-        <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousOutstanding.total)} บาท</strong></div>
-        <div className="badminton-summary-grand-total"><span>รวมทั้งหมด</span><strong>{baht(combinedTotal)} บาท</strong></div>
-        <div className="badminton-round-payment-status">
-          <Check size={16} />
-          <span>{paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ"}</span>
+    <section className={`badminton-card badminton-settlement-card ${collectionEnabled ? "" : "is-collection-locked"}`} id="settlement">
+      <div aria-hidden={!collectionEnabled} className="badminton-payment-workspace" inert={!collectionEnabled}>
+        <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div></div>
+        <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
+          <div className="badminton-current-round-total"><span>ยอดรอบนี้</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
+          <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousOutstanding.total)} บาท</strong></div>
+          <div className="badminton-summary-grand-total"><span>รวมทั้งหมด</span><strong>{baht(combinedTotal)} บาท</strong></div>
+          <div className="badminton-round-payment-status">
+            <Check size={16} />
+            <span>{paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ"}</span>
+          </div>
         </div>
+        <div className="badminton-card-title badminton-payment-list-title"><WalletCards size={19} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
+        <div className="badminton-pay-list">
+          {settlement.rows.map((row) => {
+            const extraLabel = formatExtraItems(row.extraCharges);
+            return <article className={`badminton-pay-row ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
+              <div className="badminton-pay-person"><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.paid && row.shuttlecockCountSnapshot !== null && row.shuttlecockCountSnapshot !== undefined ? <small>ปิดยอดตอนใช้ลูกแบด {row.shuttlecockCountSnapshot} ลูก</small> : null}</div>
+              <strong className="badminton-pay-amount">{baht(row.roundedDue)} บาท</strong>
+              {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : ""} onClick={() => togglePayment(row)} type="button"><Check size={16} /> {row.paid ? "จ่ายแล้ว" : "รับเงิน"}</button>}
+            </article>;
+          })}
+        </div>
+        <textarea readOnly value={lineSummary} />
+        <button className="badminton-primary" onClick={copySummary} type="button"><Copy size={18} /> {copied ? "คัดลอกแล้ว" : "คัดลอกสรุปส่ง LINE"}</button>
       </div>
-      <div className="badminton-card-title badminton-payment-list-title"><WalletCards size={19} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
-      <div className="badminton-pay-list">
-        {settlement.rows.map((row) => {
-          const extraLabel = formatExtraItems(row.extraCharges);
-          return <article className={`badminton-pay-row ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
-            <div className="badminton-pay-person"><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.paid && row.shuttlecockCountSnapshot !== null && row.shuttlecockCountSnapshot !== undefined ? <small>ปิดยอดตอนใช้ลูกแบด {row.shuttlecockCountSnapshot} ลูก</small> : null}</div>
-            <strong className="badminton-pay-amount">{baht(row.roundedDue)} บาท</strong>
-            {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : ""} onClick={() => mutate(() => setPayment({ clubId: event.clubId, eventId: event.id, memberId: row.memberId, amount: row.roundedDue, sharedAmount: row.sharedDue, extrasAmount: row.extraAmount, shuttlecockCount: event.shuttlecockCount, paid: !row.paid, userId: session.user.id }), row.paid ? "ยกเลิกสถานะรับเงินแล้ว" : `รับเงิน ${row.name} และล็อกยอดแล้ว`)} type="button"><Check size={16} /> {row.paid ? "จ่ายแล้ว" : "รับเงิน"}</button>}
-          </article>;
-        })}
-      </div>
-      <textarea readOnly value={lineSummary} />
-      <button className="badminton-primary" onClick={copySummary} type="button"><Copy size={18} /> {copied ? "คัดลอกแล้ว" : "คัดลอกสรุปส่ง LINE"}</button>
+      {!collectionEnabled ? (
+        <div aria-label="เปิดใช้งานหน้าเก็บเงิน" className="badminton-payment-gate" role="dialog">
+          <WalletCards size={28} />
+          <strong>หน้าเก็บเงินถูกล็อกไว้</strong>
+          <span>กดปุ่มด้านล่างก่อน จึงจะรับเงินหรือแก้สถานะการชำระได้</span>
+          <button className="badminton-primary" onClick={() => setCollectionEnabled(true)} type="button"><WalletCards size={18} /> เริ่มเก็บเงิน</button>
+        </div>
+      ) : null}
     </section>
   );
 }
 
 function AuditPanel({ actions }) {
+  const lineActions = actions.filter((action) => action.source === "line");
+  const adminActions = actions.filter((action) => action.source !== "line");
+
+  function ActionList({ entries, emptyLabel }) {
+    return entries.length
+      ? <div className="badminton-audit-list">{entries.map((action) => <p key={action.id}><strong>{action.actorName}</strong> {action.action} <span>{action.at}</span></p>)}</div>
+      : <p className="badminton-note">{emptyLabel}</p>;
+  }
+
   return (
-    <section className="badminton-card badminton-audit">
-      <div className="badminton-card-title"><BadgeCheck size={20} /><div><h2>ประวัติการทำรายการ</h2><p>กิจกรรมสำคัญของแอดมินและระบบ LINE</p></div></div>
-      {actions.length ? <div className="badminton-audit-list">{actions.map((action) => <p key={action.id}><strong>{action.actorName}</strong> {action.action} <span>{action.at}</span></p>)}</div> : <p className="badminton-note">ยังไม่มีรายการ</p>}
+    <section className="badminton-audit-groups">
+      <article className="badminton-card badminton-audit">
+        <div className="badminton-card-title"><Users size={20} /><div><h2>LINE bot</h2><p>การลงชื่อ แก้คำตอบ และคำสั่งจากกลุ่ม LINE</p></div></div>
+        <ActionList entries={lineActions} emptyLabel="ยังไม่มีกิจกรรมจาก LINE bot" />
+      </article>
+      <article className="badminton-card badminton-audit">
+        <div className="badminton-card-title"><BadgeCheck size={20} /><div><h2>ประวัติรายการ</h2><p>การเปลี่ยนแปลงสำคัญจากหน้าแอดมิน</p></div></div>
+        <ActionList entries={adminActions} emptyLabel="ยังไม่มีรายการจากแอดมิน" />
+      </article>
     </section>
   );
 }
@@ -1243,6 +1339,7 @@ function mapDashboardToEvent(dashboard) {
     actions: dashboard.auditLogs.map((row) => ({
       id: row.id,
       actorName: row.actor_id ? "แอดมิน" : "LINE bot",
+      source: row.actor_id ? "admin" : "line",
       action: row.action,
       at: new Date(row.created_at).toLocaleString("th-TH"),
     })),

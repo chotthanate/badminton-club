@@ -120,7 +120,7 @@ export async function loadDashboard(clubId, eventId = null) {
     client().from("attendance").select("*").eq("event_id", event.id),
     client().from("expenses").select("*").eq("event_id", event.id).order("created_at"),
     client().from("payments").select("*").eq("event_id", event.id),
-    client().from("audit_logs").select("*").eq("event_id", event.id).order("created_at", { ascending: false }).limit(20),
+    client().from("audit_logs").select("*").eq("event_id", event.id).order("created_at", { ascending: false }).limit(100),
     venuesPromise,
     extraItemsPromise,
     client().from("member_extra_charges").select("*").eq("event_id", event.id).order("created_at"),
@@ -254,7 +254,15 @@ export async function deleteCompletedEvent(eventId) {
     .eq("id", eventId)
     .single();
   throwIfError(eventError);
-  if (event.status !== "closed") throw new Error("ลบได้เฉพาะรอบที่จบรอบแล้ว");
+  if (!["draft", "closed"].includes(event.status)) {
+    throw new Error("ลบได้เฉพาะรอบที่กำลังเตรียมหรือรอบที่จบแล้ว");
+  }
+
+  if (event.status === "draft") {
+    const { error } = await client().from("events").delete().eq("id", eventId);
+    throwIfError(error);
+    return;
+  }
 
   const [signupsResult, paymentsResult, membersResult] = await Promise.all([
     client().from("signups").select("member_id").eq("event_id", eventId).eq("status", "coming"),
