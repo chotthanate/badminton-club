@@ -3362,7 +3362,39 @@
   margin-top: 7px;
 }
 
-.badminton-audit-groups {
+.badminton-audit-section {
   display: grid;
   gap: 12px;
+}
+
+.badminton-history-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid #d5dfd2;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(32, 54, 37, 0.06);
+}
+
+.badminton-history-tabs button {
+  min-width: 0;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #657066;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.badminton-history-tabs button.is-active {
+  background: #e3f4e9;
+  color: #0f7a52;
 }

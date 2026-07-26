@@ -1226,6 +1226,7 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
 }
 
 function AuditPanel({ actions }) {
+  const [activeHistory, setActiveHistory] = useState("line");
   const lineActions = actions.filter((action) => action.source === "line");
   const adminActions = actions.filter((action) => action.source !== "line");
 
@@ -1236,14 +1237,23 @@ function AuditPanel({ actions }) {
   }
 
   return (
-    <section className="badminton-audit-groups">
-      <article className="badminton-card badminton-audit">
-        <div className="badminton-card-title"><Users size={20} /><div><h2>LINE bot</h2><p>การลงชื่อ แก้คำตอบ และคำสั่งจากกลุ่ม LINE</p></div></div>
-        <ActionList entries={lineActions} emptyLabel="ยังไม่มีกิจกรรมจาก LINE bot" />
-      </article>
-      <article className="badminton-card badminton-audit">
-        <div className="badminton-card-title"><BadgeCheck size={20} /><div><h2>ประวัติรายการ</h2><p>การเปลี่ยนแปลงสำคัญจากหน้าแอดมิน</p></div></div>
-        <ActionList entries={adminActions} emptyLabel="ยังไม่มีรายการจากแอดมิน" />
+    <section className="badminton-audit-section">
+      <div aria-label="เลือกประเภทประวัติ" className="badminton-history-tabs" role="tablist">
+        <button aria-selected={activeHistory === "line"} className={activeHistory === "line" ? "is-active" : ""} onClick={() => setActiveHistory("line")} role="tab" type="button"><Users size={17} /> LINE bot</button>
+        <button aria-selected={activeHistory === "admin"} className={activeHistory === "admin" ? "is-active" : ""} onClick={() => setActiveHistory("admin")} role="tab" type="button"><BadgeCheck size={17} /> ประวัติรายการ</button>
+      </div>
+      <article className="badminton-card badminton-audit" role="tabpanel">
+        {activeHistory === "line" ? (
+          <>
+            <div className="badminton-card-title"><Users size={20} /><div><h2>LINE bot</h2><p>การลงชื่อ แก้คำตอบ และคำสั่งจากกลุ่ม LINE</p></div></div>
+            <ActionList entries={lineActions} emptyLabel="ยังไม่มีกิจกรรมจาก LINE bot" />
+          </>
+        ) : (
+          <>
+            <div className="badminton-card-title"><BadgeCheck size={20} /><div><h2>ประวัติรายการ</h2><p>การเปลี่ยนแปลงสำคัญจากหน้าแอดมิน</p></div></div>
+            <ActionList entries={adminActions} emptyLabel="ยังไม่มีรายการจากแอดมิน" />
+          </>
+        )}
       </article>
     </section>
   );
