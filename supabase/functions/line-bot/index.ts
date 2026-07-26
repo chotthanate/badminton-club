@@ -430,7 +430,7 @@ function buildPaymentMessage(liffId: string) {
           action: {
             type: "uri",
             label: "แจ้งโอน",
-            uri: `https://liff.line.me/${liffId}?liff=payment`,
+            uri: `https://liff.line.me/${liffId}?mode=payment`,
           },
         }],
       },

@@ -15,6 +15,7 @@ import {
   weightFromTimes,
 } from "../src/badmintonLogic.js";
 import { parseSlipText } from "../src/paymentSlip.js";
+import { getLiffMode } from "../src/liffMode.js";
 
 function makeEvent({ attendance = [], costs = [] } = {}) {
   return {
@@ -248,6 +249,17 @@ test("slip parser reads Thai transfer amount and Buddhist date", () => {
     amount: 200,
     date: "2026-07-25",
   });
+});
+
+test("LIFF payment mode overrides the signup mode from the configured endpoint", () => {
+  assert.equal(
+    getLiffMode("?liff=signup&liff.state=%3Fmode%3Dpayment"),
+    "payment",
+  );
+  assert.equal(
+    getLiffMode("?liff=signup&liff.state=%3Fliff.state%3D%25253Fmode%25253Dpayment"),
+    "payment",
+  );
 });
 
 test("suggestArrivalTimeOnCheck offers the nearest quarter-hour when check-in is late", () => {
