@@ -513,7 +513,7 @@ async function seedTestMembers(clubId) {
 
 export async function setPayment({ clubId, eventId, memberId, amount, sharedAmount, extrasAmount, shuttlecockCount, paid, userId }) {
   const { data: existing, error: existingError } = await client().from("payments")
-    .select("amount, billed_at")
+    .select("amount, billed_at, calculated_amount")
     .eq("event_id", eventId)
     .eq("member_id", memberId)
     .maybeSingle();
@@ -524,7 +524,9 @@ export async function setPayment({ clubId, eventId, memberId, amount, sharedAmou
     event_id: eventId,
     member_id: memberId,
     amount: finalAmount,
-    calculated_amount: Math.max(0, Number(amount) || 0),
+    calculated_amount: existing?.billed_at
+      ? Math.max(0, Number(existing.calculated_amount) || 0)
+      : Math.max(0, Number(amount) || 0),
     billed_at: existing?.billed_at || new Date().toISOString(),
     paid_at: paid ? new Date().toISOString() : null,
     payment_status: paid ? "paid" : "awaiting",
@@ -575,14 +577,17 @@ export async function reviewPaymentSlip({ slip, approved, userId }) {
   if (!paymentIds.length) throw new Error("สลิปนี้ไม่มีรายการชำระเงิน");
   const now = new Date().toISOString();
   if (approved) {
-    const { error: paymentError } = await client().from("payments").update({
-      paid_at: now,
-      payment_status: "paid",
-      paid_source: "slip_review",
-      transferred_amount: slip.transferred_amount,
-      overpayment_amount: Math.max(0, Number(slip.transferred_amount || 0) - Number(slip.expected_amount || 0)),
-    }).in("id", paymentIds).is("paid_at", null);
-    throwIfError(paymentError);
+    const excess = Math.max(0, Number(slip.transferred_amount || 0) - Number(slip.expected_amount || 0));
+    for (let index = 0; index < paymentIds.length; index += 1) {
+      const { error: paymentError } = await client().from("payments").update({
+        paid_at: now,
+        payment_status: "paid",
+        paid_source: "slip_review",
+        transferred_amount: index === 0 ? slip.transferred_amount : null,
+        overpayment_amount: index === 0 ? excess : 0,
+      }).eq("id", paymentIds[index]).is("paid_at", null);
+      throwIfError(paymentError);
+    }
   } else {
     const { error: paymentError } = await client().from("payments").update({
       payment_status: "awaiting",
