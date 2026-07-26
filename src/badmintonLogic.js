@@ -100,21 +100,23 @@ export function calculateSettlement(event) {
       (sum, charge) => sum + Number(charge.unitPrice || 0) * Number(charge.quantity || 1),
       Number(row.extraAmount || 0),
     );
-    const paidAmount = row.paidAmount === null || row.paidAmount === undefined ? null : Number(row.paidAmount);
-    const locked = !row.paymentExempt && Boolean(row.paid) && Number.isFinite(paidAmount);
+    const billedAmount = row.billedAmount === null || row.billedAmount === undefined
+      ? (row.paidAmount === null || row.paidAmount === undefined ? null : Number(row.paidAmount))
+      : Number(row.billedAmount);
+    const locked = !row.paymentExempt && Boolean(row.billingFinalized || row.paid) && Number.isFinite(billedAmount);
     const explicitExtra = Number(row.lockedExtraAmount);
     const lockedExtraAmount = locked
-      ? (row.lockedExtraAmount !== null && row.lockedExtraAmount !== undefined && Number.isFinite(explicitExtra) ? Math.max(0, explicitExtra) : Math.min(currentExtraAmount, Math.max(0, paidAmount)))
+      ? (row.lockedExtraAmount !== null && row.lockedExtraAmount !== undefined && Number.isFinite(explicitExtra) ? Math.max(0, explicitExtra) : Math.min(currentExtraAmount, Math.max(0, billedAmount)))
       : null;
     const explicitShared = Number(row.lockedSharedAmount);
     const lockedSharedAmount = locked
-      ? (row.lockedSharedAmount !== null && row.lockedSharedAmount !== undefined && Number.isFinite(explicitShared) ? Math.max(0, explicitShared) : Math.max(0, paidAmount - lockedExtraAmount))
+      ? (row.lockedSharedAmount !== null && row.lockedSharedAmount !== undefined && Number.isFinite(explicitShared) ? Math.max(0, explicitShared) : Math.max(0, billedAmount - lockedExtraAmount))
       : null;
     return {
       ...row,
       hours,
       paymentRecorded: Boolean(row.paid),
-      paidAmount,
+      billedAmount,
       currentExtraAmount,
       locked,
       lockedExtraAmount,
@@ -132,11 +134,11 @@ export function calculateSettlement(event) {
     if (row.locked) {
       return {
         ...row,
-        rawDue: row.paidAmount,
+        rawDue: row.billedAmount,
         sharedDue: row.lockedSharedAmount,
         extraAmount: row.lockedExtraAmount,
-        roundedDue: Math.round(row.paidAmount),
-        paid: true,
+        roundedDue: Math.round(row.billedAmount),
+        paid: Boolean(row.paymentRecorded),
       };
     }
     const rawSharedDue = unitPrice * row.hours;
@@ -186,7 +188,7 @@ export function buildLineSummary(event) {
     event.venue || "",
     ...(event.courts || []).map((court) => `${court.name} : ${court.startsAt}-${court.endsAt === "00:00" ? "24:00" : court.endsAt}`),
     "",
-    ...settlement.rows.filter((row) => !row.paymentExempt).map((row, index) => {
+    ...settlement.rows.filter((row) => !row.paymentExempt && row.billingFinalized !== false).map((row, index) => {
       const extraItems = summarizeExtraCharges(row.extraCharges || []);
       const extras = extraItems ? ` (${extraItems})` : "";
       return `${index + 1}.${row.name} = ${baht(row.roundedDue)} บาท${extras}`;

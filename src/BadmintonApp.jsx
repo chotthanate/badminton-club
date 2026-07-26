@@ -35,6 +35,7 @@ import {
   createEvent,
   createTestClub,
   deleteCompletedEvent,
+  finalizeMemberBill,
   getAdminContexts,
   finishEvent,
   listClubEvents,
@@ -42,6 +43,7 @@ import {
   recordAudit,
   replaceEventCourts,
   resetTestClub,
+  reviewPaymentSlip,
   prepareEventForLine,
   removeCourt,
   removeExtraCatalogItem,
@@ -1145,7 +1147,7 @@ function PricingPanel({ event, mutate, session }) {
 
 function SettlementPanel({ event, mutate, previousOutstanding, session, settlement }) {
   const [copied, setCopied] = useState(false);
-  const [collectionEnabled, setCollectionEnabled] = useState(false);
+  const [billDraft, setBillDraft] = useState(null);
   const lineSummary = useMemo(() => buildLineSummary(event), [event]);
   const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
   const combinedTotal = settlement.totalCost + previousOutstanding.total;
@@ -1157,13 +1159,17 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
   }
 
   function togglePayment(row) {
+    if (!row.billingFinalized) {
+      setBillDraft({ row, amount: String(row.roundedDue) });
+      return undefined;
+    }
     const nextPaid = !row.paid;
     return mutate(async () => {
       await setPayment({
         clubId: event.clubId,
         eventId: event.id,
         memberId: row.memberId,
-        amount: row.roundedDue,
+        amount: row.billedAmount,
         sharedAmount: row.sharedDue,
         extrasAmount: row.extraAmount,
         shuttlecockCount: event.shuttlecockCount,
@@ -1175,20 +1181,83 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
         eventId: event.id,
         userId: session.user.id,
         action: nextPaid
-          ? `รับเงิน ${row.name} จำนวน ${baht(row.roundedDue)} บาท`
+          ? `รับเงิน ${row.name} จำนวน ${baht(row.billedAmount)} บาท`
           : `ยกเลิกสถานะรับเงินของ ${row.name}`,
         details: {
           member_id: row.memberId,
-          amount: row.roundedDue,
+          amount: row.billedAmount,
           paid: nextPaid,
         },
       });
     }, nextPaid ? `รับเงิน ${row.name} และล็อกยอดแล้ว` : "ยกเลิกสถานะรับเงินแล้ว");
   }
 
+  function confirmBill(submitEvent) {
+    submitEvent.preventDefault();
+    if (!billDraft?.row) return;
+    const billedAmount = Number(billDraft.amount);
+    if (!Number.isFinite(billedAmount) || billedAmount < 0) {
+      window.alert("กรุณากรอกยอดเรียกเก็บเป็นตัวเลขตั้งแต่ 0 บาท");
+      return;
+    }
+    const row = billDraft.row;
+    const previousBilledAmount = row.billingFinalized ? Number(row.billedAmount) : null;
+    mutate(async () => {
+      await finalizeMemberBill({
+        clubId: event.clubId,
+        eventId: event.id,
+        memberId: row.memberId,
+        calculatedAmount: row.billingFinalized && row.calculatedAmount !== null
+          ? row.calculatedAmount
+          : row.roundedDue,
+        billedAmount,
+        sharedAmount: row.sharedDue,
+        extrasAmount: row.extraAmount,
+        shuttlecockCount: event.shuttlecockCount,
+        userId: session.user.id,
+      });
+      await recordAudit({
+        clubId: event.clubId,
+        eventId: event.id,
+        userId: session.user.id,
+        action: `${previousBilledAmount === null ? "สรุป" : "แก้"}ยอดเรียกเก็บ ${row.name} เป็น ${baht(billedAmount)} บาท`,
+        details: {
+          member_id: row.memberId,
+          calculated_amount: row.billingFinalized && row.calculatedAmount !== null
+            ? row.calculatedAmount
+            : row.roundedDue,
+          billed_amount: billedAmount,
+          previous_billed_amount: previousBilledAmount,
+          adjustment: billedAmount - Number(row.billingFinalized && row.calculatedAmount !== null
+            ? row.calculatedAmount
+            : row.roundedDue),
+        },
+      });
+    }, `สรุปยอด ${row.name} เป็น ${baht(billedAmount)} บาทแล้ว`);
+    setBillDraft(null);
+  }
+
+  function reviewSlip(slip, approved) {
+    return mutate(async () => {
+      await reviewPaymentSlip({ slip, approved, userId: session.user.id });
+      await recordAudit({
+        clubId: event.clubId,
+        eventId: event.id,
+        userId: session.user.id,
+        action: `${approved ? "อนุมัติ" : "ปฏิเสธ"}สลิปของ ${slip.beneficiaryName}`,
+        details: {
+          slip_id: slip.id,
+          expected_amount: slip.expected_amount,
+          transferred_amount: slip.transferred_amount,
+          approved,
+        },
+      });
+    }, approved ? `รับเงิน ${slip.beneficiaryName} จากสลิปแล้ว` : "ปฏิเสธสลิปและคืนสถานะเป็นรอชำระแล้ว");
+  }
+
   return (
-    <section className={`badminton-card badminton-settlement-card ${collectionEnabled ? "" : "is-collection-locked"}`} id="settlement">
-      <div aria-hidden={!collectionEnabled} className="badminton-payment-workspace" inert={!collectionEnabled}>
+    <section className="badminton-card badminton-settlement-card" id="settlement">
+      <div className="badminton-payment-workspace">
         <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div></div>
         <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
           <div className="badminton-current-round-total"><span>ยอดรอบนี้</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
@@ -1199,28 +1268,22 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
             <span>{paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ"}</span>
           </div>
         </div>
+        {event.paymentSlips?.length ? <div className="badminton-slip-review"><div className="badminton-slip-review-title"><ShieldCheck size={18} /><div><strong>สลิปรอตรวจสอบ</strong><span>{event.paymentSlips.length} รายการ · ยังไม่ถือว่าจ่ายแล้ว</span></div></div>{event.paymentSlips.map((slip) => <article key={slip.id}><div><strong>{slip.beneficiaryName}</strong><span>ยอดเรียกเก็บ {baht(slip.expected_amount)} บาท · สลิป {slip.transferred_amount === null ? "อ่านยอดไม่ชัด" : `${baht(slip.transferred_amount)} บาท`}</span><small>{slip.review_reason || "รอตรวจสอบ"}{slip.transferred_on ? ` · ${slip.transferred_on}` : ""}</small></div><div><button className="badminton-secondary" onClick={() => reviewSlip(slip, false)} type="button"><X size={15} /> ไม่ผ่าน</button><button className="badminton-primary" onClick={() => reviewSlip(slip, true)} type="button"><Check size={15} /> รับเงิน</button></div></article>)}</div> : null}
         <div className="badminton-card-title badminton-payment-list-title"><WalletCards size={19} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
         <div className="badminton-pay-list">
           {settlement.rows.map((row) => {
             const extraLabel = formatExtraItems(row.extraCharges);
-            return <article className={`badminton-pay-row ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
-              <div className="badminton-pay-person"><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.paid && row.shuttlecockCountSnapshot !== null && row.shuttlecockCountSnapshot !== undefined ? <small>ปิดยอดตอนใช้ลูกแบด {row.shuttlecockCountSnapshot} ลูก</small> : null}</div>
-              <strong className="badminton-pay-amount">{baht(row.roundedDue)} บาท</strong>
-              {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : ""} onClick={() => togglePayment(row)} type="button"><Check size={16} /> {row.paid ? "จ่ายแล้ว" : "รับเงิน"}</button>}
+            const amount = row.billingFinalized ? row.billedAmount : row.roundedDue;
+            return <article className={`badminton-pay-row ${row.billingFinalized ? "is-billed" : ""} ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
+              <div className="badminton-pay-person"><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>ยอดคำนวณสำหรับแอดมิน</small>}</div>
+              <strong className="badminton-pay-amount">{baht(amount)} บาท{row.billingFinalized && !row.paid ? <button aria-label={`แก้ยอดเรียกเก็บของ ${row.name}`} className="badminton-edit-bill" onClick={() => setBillDraft({ row, amount: String(row.billedAmount) })} title="แก้ยอดเรียกเก็บ" type="button"><Pencil size={13} /></button> : null}</strong>
+              {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : "สรุปยอด"}</button>}
             </article>;
           })}
         </div>
-        <textarea readOnly value={lineSummary} />
-        <button className="badminton-primary" onClick={copySummary} type="button"><Copy size={18} /> {copied ? "คัดลอกแล้ว" : "คัดลอกสรุปส่ง LINE"}</button>
+        {lineSummary.trim() ? <><textarea readOnly value={lineSummary} /><button className="badminton-primary" onClick={copySummary} type="button"><Copy size={18} /> {copied ? "คัดลอกแล้ว" : "คัดลอกสรุปส่ง LINE"}</button></> : <p className="badminton-note">กด “สรุปยอด” ของผู้เล่นก่อน จึงจะมีข้อความยอดเรียกเก็บสำหรับส่ง LINE</p>}
       </div>
-      {!collectionEnabled ? (
-        <div aria-label="เปิดใช้งานหน้าเก็บเงิน" className="badminton-payment-gate" role="dialog">
-          <WalletCards size={28} />
-          <strong>หน้าเก็บเงินถูกล็อกไว้</strong>
-          <span>กดปุ่มด้านล่างก่อน จึงจะรับเงินหรือแก้สถานะการชำระได้</span>
-          <button className="badminton-primary" onClick={() => setCollectionEnabled(true)} type="button"><WalletCards size={18} /> เริ่มเก็บเงิน</button>
-        </div>
-      ) : null}
+      {billDraft ? <div className="badminton-modal-backdrop" role="presentation"><form aria-label={`สรุปยอดเรียกเก็บ ${billDraft.row.name}`} className="badminton-custom-charge-modal badminton-bill-modal" onSubmit={confirmBill}><div className="badminton-modal-title"><div><p className="badminton-kicker">ยอดเรียกเก็บรายคน</p><h2>{billDraft.row.name}</h2></div><button aria-label="ปิดหน้าต่างสรุปยอด" onClick={() => setBillDraft(null)} type="button"><X size={19} /></button></div><div className="badminton-calculated-amount"><span>ยอดที่ระบบคำนวณ</span><strong>{baht(billDraft.row.billingFinalized && billDraft.row.calculatedAmount !== null ? billDraft.row.calculatedAmount : billDraft.row.roundedDue)} บาท</strong><small>ข้อมูลนี้แสดงเฉพาะแอดมิน สมาชิกจะไม่เห็น</small></div><label>ยอดเรียกเก็บจริง<input autoFocus inputMode="decimal" min="0" onChange={(changeEvent) => setBillDraft({ ...billDraft, amount: changeEvent.target.value })} required step="1" type="number" value={billDraft.amount} /><span>บาท</span></label><p className="badminton-bill-help">เมื่อยืนยัน สมาชิกจะเห็นเฉพาะยอดเรียกเก็บจริง และระบบตรวจสลิปจะเทียบกับยอดนี้</p><button className="badminton-primary" type="submit"><Check size={17} /> ยืนยันยอดเรียกเก็บ</button></form></div> : null}
     </section>
   );
 }
@@ -1265,7 +1328,7 @@ async function calculatePreviousOutstanding(clubId, eventIds) {
   const unpaidRows = dashboards.flatMap((dashboard) => {
     if (!dashboard?.event) return [];
     const previousSettlement = calculateSettlement(mapDashboardToEvent(dashboard));
-    return previousSettlement.rows.filter((row) => !row.paid);
+    return previousSettlement.rows.filter((row) => row.billingFinalized && !row.paid);
   });
   return {
     count: unpaidRows.length,
@@ -1319,9 +1382,16 @@ function mapDashboardToEvent(dashboard) {
       extraCharges,
       paid: Boolean(payment?.paid_at),
       paidAmount: payment?.paid_at ? Number(payment.amount || 0) : null,
-      lockedSharedAmount: payment?.paid_at && payment.shared_amount !== null && payment.shared_amount !== undefined ? Number(payment.shared_amount) : null,
-      lockedExtraAmount: payment?.paid_at && payment.extras_amount !== null && payment.extras_amount !== undefined ? Number(payment.extras_amount) : null,
-      shuttlecockCountSnapshot: payment?.paid_at ? payment.shuttlecock_count_snapshot : null,
+      billingFinalized: Boolean(payment?.billed_at || payment?.paid_at),
+      billedAmount: payment?.billed_at || payment?.paid_at ? Number(payment.amount || 0) : null,
+      calculatedAmount: payment?.calculated_amount === null || payment?.calculated_amount === undefined ? null : Number(payment.calculated_amount),
+      paymentStatus: payment?.payment_status || (payment?.paid_at ? "paid" : "draft"),
+      paidSource: payment?.paid_source || null,
+      transferredAmount: payment?.transferred_amount === null || payment?.transferred_amount === undefined ? null : Number(payment.transferred_amount),
+      overpaymentAmount: Number(payment?.overpayment_amount || 0),
+      lockedSharedAmount: (payment?.billed_at || payment?.paid_at) && payment.shared_amount !== null && payment.shared_amount !== undefined ? Number(payment.shared_amount) : null,
+      lockedExtraAmount: (payment?.billed_at || payment?.paid_at) && payment.extras_amount !== null && payment.extras_amount !== undefined ? Number(payment.extras_amount) : null,
+      shuttlecockCountSnapshot: payment?.billed_at || payment?.paid_at ? payment.shuttlecock_count_snapshot : null,
     };
   });
   return {
@@ -1340,6 +1410,10 @@ function mapDashboardToEvent(dashboard) {
     members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, role: member.role, lineUserId: member.line_user_id, active: member.active, paymentExempt: Boolean(member.payment_exempt) })),
     signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note, createdAt: row.created_at })),
     attendance,
+    paymentSlips: (dashboard.paymentSlips || []).map((slip) => ({
+      ...slip,
+      beneficiaryName: memberName(membersById.get(slip.beneficiary_member_id)) || "สมาชิก",
+    })),
     extraCosts,
     costs: [
       { id: "computed-court", type: "court", label: `ค่าคอร์ดรวม ${courtHours} ชม.`, amount: courtHours * courtHourlyRate },

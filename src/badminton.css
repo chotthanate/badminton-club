@@ -3398,3 +3398,447 @@
   background: #e3f4e9;
   color: #0f7a52;
 }
+
+/* Final per-member bills: admin-only calculated amount, public billed amount. */
+.badminton-pay-row.is-billed:not(.is-paid) {
+  border-color: #e4ca7d;
+  background: #fff9e6;
+  box-shadow: inset 4px 0 #d8b752;
+}
+
+.badminton-pay-row > button.is-awaiting {
+  border-color: #d8b752;
+  background: #fff4c9;
+  color: #765a08;
+}
+
+.badminton-pay-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badminton-edit-bill {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d8b752;
+  border-radius: 7px;
+  background: #fff;
+  color: #765a08;
+}
+
+.badminton-bill-modal {
+  width: min(430px, calc(100vw - 28px));
+}
+
+.badminton-calculated-amount {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  padding: 13px;
+  border: 1px solid #dbe3d8;
+  border-radius: 11px;
+  background: #f4f7f3;
+}
+
+.badminton-calculated-amount span {
+  color: #536056;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.badminton-calculated-amount strong {
+  font-size: 20px;
+}
+
+.badminton-calculated-amount small {
+  grid-column: 1 / -1;
+  color: #7a847b;
+  font-size: 11px;
+}
+
+.badminton-bill-modal > label {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  font-weight: 900;
+}
+
+.badminton-bill-modal > label input {
+  min-height: 54px;
+  padding: 0 56px 0 14px;
+  border: 1px solid #bdcdb9;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 21px;
+  font-weight: 900;
+}
+
+.badminton-bill-modal > label > span {
+  position: absolute;
+  right: 15px;
+  bottom: 16px;
+  color: #536056;
+}
+
+.badminton-bill-help {
+  margin: 0;
+  color: #536056;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.badminton-slip-review {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid #e4ca7d;
+  border-radius: 12px;
+  background: #fff9e6;
+}
+
+.badminton-slip-review-title,
+.badminton-slip-review > article,
+.badminton-slip-review > article > div:last-child {
+  display: flex;
+  align-items: center;
+}
+
+.badminton-slip-review-title {
+  gap: 8px;
+  color: #765a08;
+}
+
+.badminton-slip-review-title > div,
+.badminton-slip-review > article > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.badminton-slip-review-title span,
+.badminton-slip-review > article span,
+.badminton-slip-review > article small {
+  color: #6d654d;
+  font-size: 11px;
+}
+
+.badminton-slip-review > article {
+  justify-content: space-between;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid #eadba8;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.badminton-slip-review > article > div:last-child {
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.badminton-slip-review > article button {
+  min-height: 38px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+/* LIFF payment flow */
+.liff-payment-page {
+  background: linear-gradient(180deg, #eef8f2 0, #f7f8f6 340px);
+}
+
+.liff-payment-header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 6px 3px;
+}
+
+.liff-payment-header > svg {
+  flex: 0 0 auto;
+  color: #15966a;
+}
+
+.liff-payment-header h1,
+.liff-payment-header p {
+  margin: 0;
+}
+
+.liff-payment-header h1 {
+  font-size: 25px;
+}
+
+.liff-payment-header p {
+  margin-top: 2px;
+  color: #637064;
+  font-size: 12px;
+}
+
+.liff-payment-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #d4dfd2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 9px 25px rgba(30, 54, 37, 0.07);
+}
+
+.liff-payment-profile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid #e6ebe4;
+}
+
+.liff-payment-profile > svg {
+  color: #15966a;
+}
+
+.liff-payment-profile span {
+  color: #637064;
+  font-size: 12px;
+}
+
+.liff-payment-profile strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liff-beneficiary-select {
+  display: grid;
+  gap: 7px;
+}
+
+.liff-beneficiary-select > span {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.liff-beneficiary-select select {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 12px;
+  border: 1px solid #b9cfbc;
+  border-radius: 10px;
+  background: #f8fbf8;
+  color: #172018;
+  font: inherit;
+  font-weight: 800;
+}
+
+.liff-beneficiary-select small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #637064;
+  font-size: 10px;
+}
+
+.liff-payment-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.liff-payment-section-title > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.liff-payment-section-title strong {
+  font-size: 17px;
+}
+
+.liff-payment-section-title span {
+  color: #637064;
+  font-size: 11px;
+}
+
+.liff-payment-section-title > b {
+  color: #0f7a52;
+  font-size: 20px;
+  white-space: nowrap;
+}
+
+.liff-due-list {
+  display: grid;
+  gap: 7px;
+}
+
+.liff-due-list > label {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 61px;
+  padding: 9px 10px;
+  border: 1px solid #d9e2d7;
+  border-radius: 10px;
+  background: #fafcf9;
+}
+
+.liff-due-list > label.is-selected {
+  border-color: #75bd99;
+  background: #e8f6ee;
+}
+
+.liff-due-list input {
+  width: 20px;
+  height: 20px;
+  accent-color: #15966a;
+}
+
+.liff-due-list span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.liff-due-list small {
+  overflow: hidden;
+  color: #637064;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liff-due-list b {
+  color: #0f7a52;
+  white-space: nowrap;
+}
+
+.liff-payment-empty {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 24px 12px;
+  color: #0f7a52;
+  text-align: center;
+}
+
+.liff-payment-empty span {
+  color: #637064;
+  font-size: 11px;
+}
+
+.liff-slip-picker {
+  min-height: 132px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 5px;
+  padding: 15px;
+  border: 2px dashed #b7cab8;
+  border-radius: 12px;
+  background: #f7faf7;
+  color: #536056;
+  cursor: pointer;
+  text-align: center;
+}
+
+.liff-slip-picker.has-slip {
+  border-style: solid;
+  border-color: #75bd99;
+  background: #e8f6ee;
+  color: #0f7a52;
+}
+
+.liff-slip-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.liff-slip-picker span {
+  font-size: 11px;
+}
+
+.liff-slip-picker .is-spinning {
+  animation: badminton-spin 900ms linear infinite;
+}
+
+.liff-slip-warning {
+  margin: 0;
+  padding: 9px;
+  border-radius: 8px;
+  background: #fff4c9;
+  color: #765a08;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.liff-payment-submit {
+  min-height: 54px;
+  border: 0;
+  border-radius: 11px;
+  background: #15966a;
+  color: #fff;
+  font: inherit;
+  font-weight: 900;
+}
+
+.liff-payment-submit:disabled {
+  background: #cbd4cc;
+  color: #7c867d;
+}
+
+.liff-payment-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid #79c5a1;
+  border-radius: 13px;
+  background: #e5f7ed;
+  color: #0f7a52;
+}
+
+.liff-payment-result.is-pending {
+  border-color: #e4ca7d;
+  background: #fff9e6;
+  color: #765a08;
+}
+
+.liff-payment-result > div {
+  display: grid;
+  gap: 3px;
+}
+
+.liff-payment-result span {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@keyframes badminton-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 520px) {
+  .badminton-slip-review > article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .badminton-slip-review > article > div:last-child button {
+    flex: 1;
+  }
+
+  .liff-payment-card {
+    padding: 13px;
+  }
+}

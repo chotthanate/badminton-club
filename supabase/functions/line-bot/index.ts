@@ -18,6 +18,10 @@ Deno.serve(async (request) => {
   const payload = safeJson(rawBody);
   const authorization = request.headers.get("Authorization");
 
+  if (["get_liff_payments", "submit_liff_payment"].includes(payload?.action)) {
+    return handlePaymentLiffRequest(payload);
+  }
+
   if (["get_liff_event", "save_liff_nickname", "submit_liff_signup", "submit_liff_guest", "cancel_liff_signup"].includes(payload?.action)) {
     return handleLiffRequest(payload);
   }
@@ -154,7 +158,7 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
 
     if (event.type === "message" && event.message?.type === "text" && groupId) {
       const command = normalizeLineCommand(event.message.text);
-      if (command === "เปิดลงชื่อ" || command === "ลงชื่อ" || command === "รายชื่อตีแบดวันนี้") {
+      if (command === "เปิดลงชื่อ" || command === "ลงชื่อ" || command === "รายชื่อตีแบดวันนี้" || command === "แจ้งโอน") {
         await handleSignupCommand({
           admin,
           club: configuredClub,
@@ -264,6 +268,19 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
     await replyLineMessages(event.replyToken, [
       buildSignupMessage(currentEvent, liffId),
     ], lineToken);
+    return;
+  }
+
+  if (command === "แจ้งโอน") {
+    await replyLineMessages(event.replyToken, [
+      buildPaymentMessage(liffId),
+    ], lineToken);
+    await admin.from("audit_logs").insert({
+      club_id: club.id,
+      actor_id: null,
+      action: "ส่งการ์ดแจ้งโอนสำหรับเพิ่มเป็นประกาศ",
+      details: { line_user_id: event.source?.userId, source: "line_command" },
+    });
     return;
   }
 
@@ -386,6 +403,41 @@ function buildSignupMessage(event: any, liffId: string) {
   };
 }
 
+function buildPaymentMessage(liffId: string) {
+  return {
+    type: "flex",
+    altText: "แจ้งโอนค่าแบด · ตรวจยอดค้างและแนบสลิป",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "md",
+        contents: [
+          { type: "text", text: "💸 แจ้งโอนค่าแบด", weight: "bold", size: "xl", wrap: true },
+          { type: "text", text: "กดปุ่มด้านล่างเพื่อตรวจยอดค้าง เลือกรอบ และแนบสลิป ระบบจะเช็กยอดให้อัตโนมัติ", size: "sm", color: "#637064", wrap: true },
+          { type: "separator" },
+          { type: "text", text: "การ์ดนี้ใช้ได้ต่อเนื่องทุกรอบ สามารถเพิ่มเป็นประกาศของกลุ่มได้เลย", size: "xs", color: "#15966a", wrap: true },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [{
+          type: "button",
+          style: "primary",
+          color: "#15966a",
+          action: {
+            type: "uri",
+            label: "แจ้งโอน",
+            uri: `https://liff.line.me/${liffId}?liff=payment`,
+          },
+        }],
+      },
+    },
+  };
+}
+
 function buildRosterText(event: any, players: Array<{ name: string; arrivalTime: string | null }>) {
   const courts = [...(event.event_courts || [])]
     .sort((a, b) => a.position - b.position)
@@ -400,6 +452,242 @@ function buildRosterText(event: any, players: Array<{ name: string; arrivalTime:
     ...playerLines,
     "🏸 ใครสนใจลงชื่อเพิ่มเติมสามารถคลิกที่ประกาศด้านบนได้เลยนะครับ",
   ].join("\n");
+}
+
+async function handlePaymentLiffRequest(payload: any) {
+  const clubId = Deno.env.get("LINE_CLUB_ID");
+  if (!clubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
+  if (!payload?.idToken) return json({ error: "ไม่พบบัญชี LINE สำหรับแจ้งโอน" }, 400);
+
+  try {
+    const identity = await verifyLiffIdToken(payload.idToken);
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const { data: submitter, error: submitterError } = await admin.from("club_members")
+      .select("id, nickname, display_name, line_user_id")
+      .eq("club_id", clubId)
+      .eq("line_user_id", identity.sub)
+      .eq("active", true)
+      .maybeSingle();
+    if (submitterError) throw submitterError;
+
+    if (payload.action === "get_liff_payments") {
+      const { data: unlinkedMembers, error: memberError } = await admin.from("club_members")
+        .select("id, nickname, display_name")
+        .eq("club_id", clubId)
+        .eq("active", true)
+        .is("line_user_id", null)
+        .order("created_at");
+      if (memberError) throw memberError;
+      const beneficiaryIds = [
+        ...(submitter?.id ? [submitter.id] : []),
+        ...(unlinkedMembers || []).map((member) => member.id),
+      ];
+      const { data: duePayments, error: paymentError } = beneficiaryIds.length
+        ? await admin.from("payments")
+          .select("id, member_id, event_id, amount, events!inner(event_date, venue)")
+          .eq("club_id", clubId)
+          .in("member_id", beneficiaryIds)
+          .not("billed_at", "is", null)
+          .is("paid_at", null)
+          .order("created_at")
+        : { data: [], error: null };
+      if (paymentError) throw paymentError;
+      const paymentsByMember = new Map<string, any[]>();
+      for (const payment of duePayments || []) {
+        const badmintonEvent = Array.isArray(payment.events) ? payment.events[0] : payment.events;
+        const rows = paymentsByMember.get(payment.member_id) || [];
+        rows.push({
+          id: payment.id,
+          eventId: payment.event_id,
+          eventDate: badmintonEvent?.event_date,
+          venue: badmintonEvent?.venue || "",
+          amount: Number(payment.amount || 0),
+        });
+        paymentsByMember.set(payment.member_id, rows);
+      }
+      const beneficiaries = [];
+      if (submitter?.id) {
+        beneficiaries.push({
+          id: submitter.id,
+          name: submitter.nickname || submitter.display_name || "ตัวเอง",
+          isSelf: true,
+          payments: paymentsByMember.get(submitter.id) || [],
+        });
+      }
+      for (const member of unlinkedMembers || []) {
+        const payments = paymentsByMember.get(member.id) || [];
+        if (!payments.length) continue;
+        beneficiaries.push({
+          id: member.id,
+          name: member.nickname || member.display_name || "สมาชิก",
+          isSelf: false,
+          payments,
+        });
+      }
+      return json({
+        profile: {
+          memberId: submitter?.id || null,
+          name: String(identity.name || submitter?.display_name || "สมาชิก LINE").slice(0, 80),
+          nickname: submitter?.nickname || "",
+        },
+        beneficiaries,
+      });
+    }
+
+    if (!submitter?.id) {
+      return json({ error: "ยังไม่พบชื่อของคุณในระบบ กรุณาลงชื่อเล่นแบดอย่างน้อย 1 ครั้งก่อนแจ้งโอน" }, 409);
+    }
+    const beneficiaryMemberId = String(payload.beneficiaryMemberId || "");
+    const paymentIds = [...new Set(Array.isArray(payload.paymentIds) ? payload.paymentIds.map(String) : [])].slice(0, 12);
+    if (!beneficiaryMemberId || !paymentIds.length) {
+      return json({ error: "กรุณาเลือกผู้เล่นและรอบที่ต้องการชำระ" }, 400);
+    }
+    const { data: beneficiary, error: beneficiaryError } = await admin.from("club_members")
+      .select("id, nickname, display_name, line_user_id")
+      .eq("club_id", clubId)
+      .eq("id", beneficiaryMemberId)
+      .eq("active", true)
+      .maybeSingle();
+    if (beneficiaryError) throw beneficiaryError;
+    if (!beneficiary || (beneficiary.id !== submitter.id && beneficiary.line_user_id !== null)) {
+      return json({ error: "สามารถจ่ายให้ตัวเองหรือเพื่อนที่ไม่ได้เชื่อม LINE เท่านั้น" }, 403);
+    }
+
+    const { data: payments, error: paymentError } = await admin.from("payments")
+      .select("id, event_id, member_id, amount, paid_at, billed_at, events!inner(event_date)")
+      .eq("club_id", clubId)
+      .eq("member_id", beneficiary.id)
+      .in("id", paymentIds);
+    if (paymentError) throw paymentError;
+    if ((payments || []).length !== paymentIds.length
+      || (payments || []).some((payment) => payment.paid_at || !payment.billed_at)) {
+      return json({ error: "ยอดที่เลือกมีการเปลี่ยนแปลง กรุณาเปิดหน้าแจ้งโอนใหม่" }, 409);
+    }
+
+    const slip = payload.slip || {};
+    const slipHash = String(slip.hash || "").trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(slipHash)) return json({ error: "ข้อมูลรูปสลิปไม่ถูกต้อง" }, 400);
+    const { data: duplicate } = await admin.from("payment_slips")
+      .select("id, status")
+      .eq("club_id", clubId)
+      .eq("slip_hash", slipHash)
+      .maybeSingle();
+    if (duplicate) {
+      return json({
+        status: duplicate.status,
+        message: duplicate.status === "auto_paid"
+          ? "สลิปนี้ถูกบันทึกว่าชำระแล้วก่อนหน้านี้"
+          : "สลิปนี้อยู่ระหว่างรอแอดมินตรวจสอบ",
+      });
+    }
+
+    const expectedAmount = (payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const transferredAmount = finiteNumber(slip.amount);
+    const transferredOn = isoDateValue(slip.transferredOn);
+    const confidence = finiteNumber(slip.confidence);
+    const eventDates = (payments || []).map((payment) => {
+      const badmintonEvent = Array.isArray(payment.events) ? payment.events[0] : payment.events;
+      return String(badmintonEvent?.event_date || "");
+    }).filter(Boolean);
+    const latestEventDate = [...eventDates].sort().at(-1) || null;
+    const amountPasses = transferredAmount !== null && transferredAmount >= expectedAmount;
+    const datePasses = Boolean(transferredOn && latestEventDate && transferredOn >= latestEventDate);
+    const ocrPasses = confidence !== null && confidence >= 35 && transferredAmount !== null && Boolean(transferredOn);
+    const autoPaid = amountPasses && datePasses && ocrPasses;
+    const overpaymentAmount = autoPaid ? Math.max(0, Number(transferredAmount) - expectedAmount) : 0;
+    const reviewReasons = [
+      !ocrPasses ? "ระบบอ่านข้อความในสลิปไม่ชัด" : "",
+      transferredAmount !== null && transferredAmount < expectedAmount ? "ยอดโอนน้อยกว่ายอดที่เลือก" : "",
+      transferredOn && latestEventDate && transferredOn < latestEventDate ? "วันที่โอนอยู่ก่อนวันที่ตีแบด" : "",
+    ].filter(Boolean);
+    const slipId = crypto.randomUUID();
+    let storagePath: string | null = null;
+
+    if (!autoPaid && typeof slip.dataUrl === "string") {
+      const image = decodeDataUrl(slip.dataUrl);
+      if (image && image.bytes.byteLength <= 3 * 1024 * 1024) {
+        const extension = image.mimeType === "image/png" ? "png" : image.mimeType === "image/webp" ? "webp" : "jpg";
+        storagePath = `${clubId}/${slipId}.${extension}`;
+        const { error: uploadError } = await admin.storage.from("payment-slips")
+          .upload(storagePath, image.bytes, { contentType: image.mimeType, upsert: false });
+        if (uploadError) {
+          console.error("Slip upload failed", uploadError.message);
+          storagePath = null;
+        }
+      }
+    }
+
+    const { error: slipError } = await admin.from("payment_slips").insert({
+      id: slipId,
+      club_id: clubId,
+      submitted_by_member_id: submitter.id,
+      beneficiary_member_id: beneficiary.id,
+      payment_ids: paymentIds,
+      expected_amount: expectedAmount,
+      transferred_amount: transferredAmount,
+      transferred_on: transferredOn,
+      ocr_confidence: confidence,
+      ocr_text: String(slip.text || "").slice(0, 12000),
+      slip_hash: slipHash,
+      storage_path: storagePath,
+      status: autoPaid ? "auto_paid" : "pending",
+      review_reason: reviewReasons.join(" · ") || (autoPaid ? null : "รอแอดมินตรวจสอบ"),
+      overpayment_amount: overpaymentAmount,
+    });
+    if (slipError) throw slipError;
+
+    if (autoPaid) {
+      const paidAt = new Date().toISOString();
+      for (let index = 0; index < paymentIds.length; index += 1) {
+        const { error: updateError } = await admin.from("payments").update({
+          paid_at: paidAt,
+          payment_status: "paid",
+          paid_source: "slip_auto",
+          transferred_amount: index === 0 ? transferredAmount : null,
+          overpayment_amount: index === 0 ? overpaymentAmount : 0,
+        }).eq("id", paymentIds[index]).is("paid_at", null);
+        if (updateError) throw updateError;
+      }
+    } else {
+      await admin.from("payments").update({ payment_status: "review" })
+        .in("id", paymentIds)
+        .is("paid_at", null);
+    }
+
+    const beneficiaryName = beneficiary.nickname || beneficiary.display_name || "สมาชิก";
+    await admin.from("audit_logs").insert({
+      club_id: clubId,
+      actor_id: null,
+      action: autoPaid
+        ? `ตรวจสลิปและรับเงิน ${beneficiaryName} อัตโนมัติ`
+        : `รับสลิปของ ${beneficiaryName} ไว้รอตรวจสอบ`,
+      details: {
+        source: "liff_payment",
+        submitted_by_member_id: submitter.id,
+        beneficiary_member_id: beneficiary.id,
+        payment_ids: paymentIds,
+        expected_amount: expectedAmount,
+        transferred_amount: transferredAmount,
+        overpayment_amount: overpaymentAmount,
+        transferred_on: transferredOn,
+        slip_id: slipId,
+      },
+    });
+
+    return json({
+      status: autoPaid ? "auto_paid" : "pending",
+      message: autoPaid
+        ? `ระบบตรวจสลิปผ่านและปิดยอด ${paymentIds.length} รอบเรียบร้อยแล้ว`
+        : "ยังไม่ได้เปลี่ยนสถานะเป็นจ่ายแล้ว แอดมินจะตรวจสอบรายการนี้อีกครั้ง",
+    });
+  } catch (error) {
+    console.error("LIFF payment request failed", error);
+    const message = error instanceof Error ? error.message : "ตรวจสลิปไม่สำเร็จ";
+    return json({ error: message }, message.includes("LINE login") ? 401 : 500);
+  }
 }
 
 async function handleLiffRequest(payload: any) {
@@ -596,7 +884,7 @@ async function findOrCreateGuestMember(admin: any, clubId: string, guestName: st
   if (guestError) throw guestError;
 
   const normalizedGuestName = normalizeMemberName(guestName);
-  const existingGuest = (guestMembers || []).find((member) =>
+  const existingGuest = (guestMembers || []).find((member: any) =>
     normalizeMemberName(member.nickname) === normalizedGuestName
     || normalizeMemberName(member.display_name) === normalizedGuestName
   );
@@ -654,18 +942,18 @@ async function getLiffRoster(admin: any, event: any) {
     .eq("status", "coming")
     .order("created_at");
   if (signupError) throw signupError;
-  const memberIds = [...new Set((signups || []).map((row) => row.member_id))];
+  const memberIds = [...new Set((signups || []).map((row: any) => row.member_id))];
   if (!memberIds.length) return { coming: [] };
 
   const { data: members, error: memberError } = await admin.from("club_members")
     .select("id, nickname, display_name")
     .in("id", memberIds);
   if (memberError) throw memberError;
-  const names = new Map((members || []).map((member) => [
+  const names = new Map<string, string>((members || []).map((member: any) => [
     member.id,
     String(member.nickname || member.display_name || "สมาชิก").slice(0, 40),
   ]));
-  const coming = (signups || []).reduce((rows, signup) => {
+  const coming = (signups || []).reduce((rows: Array<{ name: string; arrivalTime: string | null }>, signup: any) => {
     const name = names.get(signup.member_id);
     if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time) });
     return rows;
@@ -787,6 +1075,32 @@ async function verifyLineSignature(body: string, signature: string, secret: stri
   let difference = 0;
   for (let index = 0; index < digest.length; index += 1) difference |= digest[index] ^ expected[index];
   return difference === 0;
+}
+
+function finiteNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function isoDateValue(value: unknown) {
+  const text = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const date = new Date(`${text}T12:00:00+07:00`);
+  return Number.isNaN(date.getTime()) ? null : text;
+}
+
+function decodeDataUrl(value: string) {
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(value);
+  if (!match) return null;
+  try {
+    return {
+      mimeType: match[1],
+      bytes: Uint8Array.from(atob(match[2]), (character) => character.charCodeAt(0)),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function safeJson(value: string) {

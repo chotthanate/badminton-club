@@ -14,6 +14,7 @@ import {
   totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
+import { parseSlipText } from "../src/paymentSlip.js";
 
 function makeEvent({ attendance = [], costs = [] } = {}) {
   return {
@@ -203,6 +204,50 @@ test("buildLineSummary uses the compact transfer format", () => {
   assert.match(summary, /2\.บอย = 50 บาท/);
   assert.doesNotMatch(summary, /ชั่วโมงผู้เล่น|ชม\.|จ่ายแล้ว|รวม 150/);
   assert.match(summary, /โอนเงิน : ธนาคารกสิกร\n389-2-36746-8\nณฐกฤต อินนะใจ$/);
+});
+
+test("member summary hides rows that an admin has not finalized", () => {
+  const summary = buildLineSummary(makeEvent({
+    costs: [{ amount: 200 }],
+    attendance: [
+      { memberId: "draft", name: "ยังไม่สรุป", arrived: true, hours: 1, billingFinalized: false },
+      { memberId: "ready", name: "สรุปแล้ว", arrived: true, hours: 1, billingFinalized: true, billedAmount: 120 },
+    ],
+  }));
+
+  assert.doesNotMatch(summary, /ยังไม่สรุป/);
+  assert.match(summary, /1\.สรุปแล้ว = 120 บาท/);
+});
+
+test("settlement locks a finalized bill without marking it paid", () => {
+  const result = calculateSettlement(makeEvent({
+    costs: [{ amount: 200 }],
+    attendance: [
+      {
+        memberId: "ready",
+        name: "สรุปแล้ว",
+        arrived: true,
+        hours: 1,
+        billingFinalized: true,
+        billedAmount: 120,
+        lockedSharedAmount: 100,
+        lockedExtraAmount: 0,
+        paid: false,
+      },
+      { memberId: "open", name: "ยังไม่สรุป", arrived: true, hours: 1 },
+    ],
+  }));
+
+  assert.equal(result.rows[0].roundedDue, 120);
+  assert.equal(result.rows[0].paid, false);
+  assert.equal(result.rows[1].roundedDue, 100);
+});
+
+test("slip parser reads Thai transfer amount and Buddhist date", () => {
+  assert.deepEqual(parseSlipText("จำนวนเงิน 200.00 บาท\nวันที่ 25/07/2569"), {
+    amount: 200,
+    date: "2026-07-25",
+  });
 });
 
 test("suggestArrivalTimeOnCheck offers the nearest quarter-hour when check-in is late", () => {
