@@ -13,6 +13,16 @@ const THAI_MONTHS = new Map([
   ["ธ.ค.", 12], ["ธค", 12], ["ธันวาคม", 12],
 ]);
 
+export const PAYMENT_RECIPIENT_NAME = "นาย ณฐกฤต อินนะใจ";
+
+export function slipRecipientMatches(text) {
+  const normalized = String(text || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^ก-๙a-z0-9]/g, "");
+  return normalized.includes("ณฐกฤตอินนะใจ");
+}
+
 export function parseSlipText(text) {
   const source = String(text || "").replace(/[๐-๙]/g, (digit) => String("๐๑๒๓๔๕๖๗๘๙".indexOf(digit)));
   return {

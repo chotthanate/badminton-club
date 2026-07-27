@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Check, ImagePlus, LoaderCircle, ReceiptText, ShieldCheck, UserRound, Users } from "lucide-react";
 import { baht, formatThaiDate } from "./badmintonLogic.js";
-import { recognizeSlip } from "./paymentSlip.js";
+import { PAYMENT_RECIPIENT_NAME, recognizeSlip, slipRecipientMatches } from "./paymentSlip.js";
 
 export default function LiffPaymentApp() {
   const [data, setData] = useState(null);
@@ -47,6 +47,11 @@ export default function LiffPaymentApp() {
     () => selectedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
     [selectedPayments],
   );
+  const recipientMatches = slip ? slipRecipientMatches(slip.text) : true;
+  const amountDifference = slip?.amount === null || slip?.amount === undefined
+    ? null
+    : Number(slip.amount) - total;
+  const amountMatches = amountDifference !== null && Math.abs(amountDifference) < 0.009;
 
   function selectBeneficiary(nextId) {
     setBeneficiaryId(nextId);
@@ -139,7 +144,7 @@ export default function LiffPaymentApp() {
     <PaymentShell>
       <header className="liff-payment-header">
         <ReceiptText size={25} />
-        <div><h1>แจ้งโอนค่าแบด</h1><p>ระบบตรวจยอดและวันที่จากสลิปให้โดยอัตโนมัติ</p></div>
+        <div><h1>แจ้งโอนค่าแบด</h1><p>ระบบตรวจชื่อผู้รับ ยอด และวันที่จากสลิปให้อัตโนมัติ</p></div>
       </header>
 
       <section className="liff-payment-card">
@@ -164,9 +169,13 @@ export default function LiffPaymentApp() {
           <input accept="image/*" disabled={reading || submitting} onChange={readSlip} type="file" />
           {reading ? <><LoaderCircle className="is-spinning" size={28} /><strong>กำลังอ่านข้อความ {progress}%</strong></> : slip ? <><Check size={29} /><strong>อ่านสลิปแล้ว</strong><span>ยอด {slip.amount === null ? "อ่านไม่ชัด" : `${baht(slip.amount)} บาท`} · วันที่ {slip.date || "อ่านไม่ชัด"}</span></> : <><ImagePlus size={29} /><strong>เลือกรูปสลิป</strong><span>แตะเพื่อเลือกรูปจากเครื่อง</span></>}
         </label>
-        {slip && (slip.amount === null || !slip.date) ? <p className="liff-slip-warning">ระบบอ่านยอดหรือวันที่ไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
+        {slip && !recipientMatches ? <p className="liff-slip-warning">ไม่พบชื่อบัญชีผู้รับ กรุณาตรวจสอบว่าโอนไปยัง {PAYMENT_RECIPIENT_NAME}</p> : null}
+        {slip && slip.amount === null ? <p className="liff-slip-warning">ระบบอ่านยอดเงินไม่ชัด กรุณาเลือกรูปสลิปใหม่</p> : null}
+        {slip && amountDifference !== null && amountDifference < -0.009 ? <p className="liff-slip-warning">ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากน้อยกว่ายอดที่ต้องจ่ายจริง ต้องชำระ {baht(total)} บาท แต่สลิปเป็น {baht(slip.amount)} บาท</p> : null}
+        {slip && amountDifference !== null && amountDifference > 0.009 ? <p className="liff-slip-warning">ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากมากกว่ายอดที่ต้องจ่ายจริง ต้องชำระ {baht(total)} บาท แต่สลิปเป็น {baht(slip.amount)} บาท</p> : null}
+        {slip && !slip.date ? <p className="liff-slip-warning">ระบบอ่านวันที่ไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
         {error ? <div className="liff-inline-error">{error}</div> : null}
-        <button className="liff-payment-submit" disabled={!selectedPaymentIds.length || !slip || reading || submitting} onClick={submitPayment} type="button">{submitting ? "กำลังตรวจสอบ..." : `ยืนยันแจ้งโอน ${baht(total)} บาท`}</button>
+        <button className="liff-payment-submit" disabled={!selectedPaymentIds.length || !slip || !recipientMatches || !amountMatches || reading || submitting} onClick={submitPayment} type="button">{submitting ? "กำลังตรวจสอบ..." : `ยืนยันแจ้งโอน ${baht(total)} บาท`}</button>
       </section> : null}
 
       {result ? <section className={`liff-payment-result is-${result.status}`}><Check size={25} /><div><strong>{result.status === "auto_paid" ? "บันทึกว่าชำระแล้ว" : "ส่งให้แอดมินตรวจสอบแล้ว"}</strong><span>{result.message}</span>{result.status === "pending" ? <button onClick={sendNewSlip} type="button"><ImagePlus size={16} /> ส่งสลิปใหม่</button> : null}</div></section> : null}

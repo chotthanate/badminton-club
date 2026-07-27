@@ -14,7 +14,7 @@ import {
   totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
-import { parseSlipText } from "../src/paymentSlip.js";
+import { parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
 import { getLiffMode } from "../src/liffMode.js";
 
 function makeEvent({ attendance = [], costs = [] } = {}) {
@@ -249,6 +249,13 @@ test("slip parser reads Thai transfer amount and Buddhist date", () => {
     amount: 200,
     date: "2026-07-25",
   });
+});
+
+test("slip recipient accepts only the configured full recipient name", () => {
+  assert.equal(slipRecipientMatches("ผู้รับ\nนาย ณฐกฤต อินนะใจ"), true);
+  assert.equal(slipRecipientMatches("ไปยัง ณฐกฤต\nอินนะใจ"), true);
+  assert.equal(slipRecipientMatches("ผู้รับ นาย สมชาย ใจดี"), false);
+  assert.equal(slipRecipientMatches("ผู้รับ ณฐกฤต อ."), false);
 });
 
 test("LIFF payment mode overrides the signup mode from the configured endpoint", () => {

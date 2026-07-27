@@ -584,6 +584,31 @@ async function handlePaymentLiffRequest(payload: any) {
       });
     }
 
+    const expectedAmount = (payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const transferredAmount = finiteNumber(slip.amount);
+    const transferredOn = isoDateValue(slip.transferredOn);
+    const confidence = finiteNumber(slip.confidence);
+    if (!slipRecipientMatches(slip.text)) {
+      return json({
+        error: "บัญชีผู้รับไม่ถูกต้อง กรุณาโอนไปยัง นาย ณฐกฤต อินนะใจ เท่านั้น",
+      }, 422);
+    }
+    if (transferredAmount === null) {
+      return json({
+        error: `ระบบอ่านยอดเงินจากสลิปไม่ชัด กรุณาส่งสลิปใหม่ โดยยอดที่ต้องชำระคือ ${expectedAmount} บาท`,
+      }, 422);
+    }
+    if (transferredAmount < expectedAmount - 0.009) {
+      return json({
+        error: `ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากน้อยกว่ายอดที่ต้องจ่ายจริง (ต้องชำระ ${expectedAmount} บาท แต่สลิปเป็น ${transferredAmount} บาท)`,
+      }, 422);
+    }
+    if (transferredAmount > expectedAmount + 0.009) {
+      return json({
+        error: `ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากมากกว่ายอดที่ต้องจ่ายจริง (ต้องชำระ ${expectedAmount} บาท แต่สลิปเป็น ${transferredAmount} บาท)`,
+      }, 422);
+    }
+
     const { data: replacedSlips, error: replacedSlipError } = await admin.from("payment_slips")
       .select("id, storage_path")
       .eq("club_id", clubId)
@@ -592,23 +617,17 @@ async function handlePaymentLiffRequest(payload: any) {
       .overlaps("payment_ids", paymentIds);
     if (replacedSlipError) throw replacedSlipError;
 
-    const expectedAmount = (payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const transferredAmount = finiteNumber(slip.amount);
-    const transferredOn = isoDateValue(slip.transferredOn);
-    const confidence = finiteNumber(slip.confidence);
     const eventDates = (payments || []).map((payment) => {
       const badmintonEvent = Array.isArray(payment.events) ? payment.events[0] : payment.events;
       return String(badmintonEvent?.event_date || "");
     }).filter(Boolean);
     const latestEventDate = [...eventDates].sort().at(-1) || null;
-    const amountPasses = transferredAmount !== null && transferredAmount >= expectedAmount;
     const datePasses = Boolean(transferredOn && latestEventDate && transferredOn >= latestEventDate);
-    const ocrPasses = confidence !== null && confidence >= 35 && transferredAmount !== null && Boolean(transferredOn);
-    const autoPaid = amountPasses && datePasses && ocrPasses;
-    const overpaymentAmount = autoPaid ? Math.max(0, Number(transferredAmount) - expectedAmount) : 0;
+    const ocrPasses = confidence !== null && confidence >= 35 && Boolean(transferredOn);
+    const autoPaid = datePasses && ocrPasses;
+    const overpaymentAmount = 0;
     const reviewReasons = [
       !ocrPasses ? "ระบบอ่านข้อความในสลิปไม่ชัด" : "",
-      transferredAmount !== null && transferredAmount < expectedAmount ? "ยอดโอนน้อยกว่ายอดที่เลือก" : "",
       transferredOn && latestEventDate && transferredOn < latestEventDate ? "วันที่โอนอยู่ก่อนวันที่ตีแบด" : "",
     ].filter(Boolean);
     const slipId = crypto.randomUUID();
@@ -1114,6 +1133,14 @@ function isoDateValue(value: unknown) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
   const date = new Date(`${text}T12:00:00+07:00`);
   return Number.isNaN(date.getTime()) ? null : text;
+}
+
+function slipRecipientMatches(value: unknown) {
+  const normalized = String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^ก-๙a-z0-9]/g, "");
+  return normalized.includes("ณฐกฤตอินนะใจ");
 }
 
 function decodeDataUrl(value: string) {
