@@ -16,11 +16,36 @@ const THAI_MONTHS = new Map([
 export const PAYMENT_RECIPIENT_NAME = "นาย ณฐกฤต อินนะใจ";
 
 export function slipRecipientMatches(text) {
+  return classifySlipRecipient(text) === "match";
+}
+
+export function classifySlipRecipient(text) {
+  const source = String(text || "").normalize("NFKC");
+  const normalized = normalizeRecipientText(source);
+  if (normalized.includes("ณฐกฤตอินนะใจ")) return "match";
+
+  const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const recipientMarker = /(บัญชีผู้รับ|ผู้รับ|ไปยัง|recipient|receiver|transfer(?:red)?\s+to)/i;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!recipientMarker.test(lines[index])) continue;
+    const context = lines.slice(index, index + 3).join(" ").replace(recipientMarker, " ");
+    const normalizedContext = normalizeRecipientText(context);
+    if (normalizedContext.includes("ณฐกฤตอินนะใจ")) return "match";
+    if (normalizedContext.includes("ณฐกฤต") || normalizedContext.includes("อินนะใจ")) return "unclear";
+    if (/(นาย|นางสาว|นาง|น\.?\s*ส\.?|คุณ|บริษัท|ห้างหุ้นส่วน)/i.test(context)
+      && (context.match(/[ก-๙]/g) || []).length >= 7) {
+      return "mismatch";
+    }
+  }
+  return "unclear";
+}
+
+function normalizeRecipientText(text) {
   const normalized = String(text || "")
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[^ก-๙a-z0-9]/g, "");
-  return normalized.includes("ณฐกฤตอินนะใจ");
+  return normalized;
 }
 
 export function parseSlipText(text) {

@@ -588,22 +588,18 @@ async function handlePaymentLiffRequest(payload: any) {
     const transferredAmount = finiteNumber(slip.amount);
     const transferredOn = isoDateValue(slip.transferredOn);
     const confidence = finiteNumber(slip.confidence);
-    if (!slipRecipientMatches(slip.text)) {
+    const recipientStatus = classifySlipRecipient(slip.text);
+    if (recipientStatus === "mismatch") {
       return json({
         error: "บัญชีผู้รับไม่ถูกต้อง กรุณาโอนไปยัง นาย ณฐกฤต อินนะใจ เท่านั้น",
       }, 422);
     }
-    if (transferredAmount === null) {
-      return json({
-        error: `ระบบอ่านยอดเงินจากสลิปไม่ชัด กรุณาส่งสลิปใหม่ โดยยอดที่ต้องชำระคือ ${expectedAmount} บาท`,
-      }, 422);
-    }
-    if (transferredAmount < expectedAmount - 0.009) {
+    if (transferredAmount !== null && transferredAmount < expectedAmount - 0.009) {
       return json({
         error: `ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากน้อยกว่ายอดที่ต้องจ่ายจริง (ต้องชำระ ${expectedAmount} บาท แต่สลิปเป็น ${transferredAmount} บาท)`,
       }, 422);
     }
-    if (transferredAmount > expectedAmount + 0.009) {
+    if (transferredAmount !== null && transferredAmount > expectedAmount + 0.009) {
       return json({
         error: `ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากมากกว่ายอดที่ต้องจ่ายจริง (ต้องชำระ ${expectedAmount} บาท แต่สลิปเป็น ${transferredAmount} บาท)`,
       }, 422);
@@ -623,11 +619,18 @@ async function handlePaymentLiffRequest(payload: any) {
     }).filter(Boolean);
     const latestEventDate = [...eventDates].sort().at(-1) || null;
     const datePasses = Boolean(transferredOn && latestEventDate && transferredOn >= latestEventDate);
-    const ocrPasses = confidence !== null && confidence >= 35 && Boolean(transferredOn);
+    const ocrPasses = confidence !== null
+      && confidence >= 35
+      && Boolean(transferredOn)
+      && transferredAmount !== null
+      && recipientStatus === "match";
     const autoPaid = datePasses && ocrPasses;
     const overpaymentAmount = 0;
     const reviewReasons = [
-      !ocrPasses ? "ระบบอ่านข้อความในสลิปไม่ชัด" : "",
+      recipientStatus === "unclear" ? "ระบบอ่านชื่อบัญชีผู้รับไม่ชัด" : "",
+      transferredAmount === null ? "ระบบอ่านยอดเงินไม่ชัด" : "",
+      !transferredOn ? "ระบบอ่านวันที่โอนไม่ชัด" : "",
+      confidence === null || confidence < 35 ? "ความชัดเจนของข้อความในสลิปต่ำ" : "",
       transferredOn && latestEventDate && transferredOn < latestEventDate ? "วันที่โอนอยู่ก่อนวันที่ตีแบด" : "",
     ].filter(Boolean);
     const slipId = crypto.randomUUID();
@@ -1135,12 +1138,32 @@ function isoDateValue(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : text;
 }
 
-function slipRecipientMatches(value: unknown) {
-  const normalized = String(value || "")
+function classifySlipRecipient(value: unknown) {
+  const source = String(value || "").normalize("NFKC");
+  const normalized = normalizeRecipientText(source);
+  if (normalized.includes("ณฐกฤตอินนะใจ")) return "match";
+
+  const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const recipientMarker = /(บัญชีผู้รับ|ผู้รับ|ไปยัง|recipient|receiver|transfer(?:red)?\s+to)/i;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!recipientMarker.test(lines[index])) continue;
+    const context = lines.slice(index, index + 3).join(" ").replace(recipientMarker, " ");
+    const normalizedContext = normalizeRecipientText(context);
+    if (normalizedContext.includes("ณฐกฤตอินนะใจ")) return "match";
+    if (normalizedContext.includes("ณฐกฤต") || normalizedContext.includes("อินนะใจ")) return "unclear";
+    if (/(นาย|นางสาว|นาง|น\.?\s*ส\.?|คุณ|บริษัท|ห้างหุ้นส่วน)/i.test(context)
+      && (context.match(/[ก-๙]/g) || []).length >= 7) {
+      return "mismatch";
+    }
+  }
+  return "unclear";
+}
+
+function normalizeRecipientText(value: unknown) {
+  return String(value || "")
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[^ก-๙a-z0-9]/g, "");
-  return normalized.includes("ณฐกฤตอินนะใจ");
 }
 
 function decodeDataUrl(value: string) {

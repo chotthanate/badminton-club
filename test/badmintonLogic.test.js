@@ -14,7 +14,7 @@ import {
   totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
-import { parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
+import { classifySlipRecipient, parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
 import { getLiffMode } from "../src/liffMode.js";
 
 function makeEvent({ attendance = [], costs = [] } = {}) {
@@ -256,6 +256,9 @@ test("slip recipient accepts only the configured full recipient name", () => {
   assert.equal(slipRecipientMatches("ไปยัง ณฐกฤต\nอินนะใจ"), true);
   assert.equal(slipRecipientMatches("ผู้รับ นาย สมชาย ใจดี"), false);
   assert.equal(slipRecipientMatches("ผู้รับ ณฐกฤต อ."), false);
+  assert.equal(classifySlipRecipient("ผู้รับ\nนาย สมชาย ใจดี"), "mismatch");
+  assert.equal(classifySlipRecipient("ผู้รับ\nณฐกฤต อ."), "unclear");
+  assert.equal(classifySlipRecipient("ข้อความในสลิปอ่านไม่ออก"), "unclear");
 });
 
 test("LIFF payment mode overrides the signup mode from the configured endpoint", () => {
