@@ -179,6 +179,69 @@ test("calculateSettlement gives equal open balances to players with equal hours 
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [227, 227]);
 });
 
+test("time-segmented billing charges a court extension only to players still present", () => {
+  const result = calculateSettlement({
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    endTime: "01:00",
+    courts: [{ startsAt: "21:00", endsAt: "01:00" }],
+    courtHourlyRate: 200,
+    shuttlecockCount: 0,
+    shuttlecockUnitPrice: 95,
+    extraCosts: [],
+    attendance: [
+      { memberId: "left", name: "แหม่ม", arrived: true, arrivedAt: "21:00", leftAt: "00:00", playedMinutes: 180, billingPercentage: 100 },
+      { memberId: "stayed", name: "เปี๊ยก", arrived: true, arrivedAt: "21:00", leftAt: "01:00", playedMinutes: 240, billingPercentage: 100 },
+    ],
+  });
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [300, 500]);
+});
+
+test("time-segmented billing is independent of which equal player was finalized first", () => {
+  const base = {
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    courts: [{ startsAt: "21:00", endsAt: "00:00" }],
+    courtHourlyRate: 200,
+    shuttlecockCount: 0,
+    shuttlecockUnitPrice: 95,
+    extraCosts: [],
+  };
+  const result = calculateSettlement({
+    ...base,
+    attendance: [
+      { memberId: "locked", name: "คนสรุปก่อน", arrived: true, arrivedAt: "21:00", leftAt: "00:00", playedMinutes: 180, billingPercentage: 100, billingFinalized: true, billedAmount: 300, lockedSharedAmount: 300, lockedExtraAmount: 0 },
+      { memberId: "open", name: "คนสรุปทีหลัง", arrived: true, arrivedAt: "21:00", leftAt: "00:00", playedMinutes: 180, billingPercentage: 100 },
+    ],
+  });
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [300, 300]);
+});
+
+test("shuttlecock checkpoints charge later shuttlecocks only to players still present", () => {
+  const result = calculateSettlement({
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    endTime: "01:00",
+    courts: [],
+    courtHourlyRate: 200,
+    shuttlecockCount: 8,
+    shuttlecockUnitPrice: 95,
+    shuttlecockCheckpoints: [
+      { time: "00:00", cumulativeCount: 6 },
+      { time: "01:00", cumulativeCount: 8 },
+    ],
+    extraCosts: [],
+    attendance: [
+      { memberId: "left", name: "กลับเที่ยงคืน", arrived: true, arrivedAt: "21:00", leftAt: "00:00", playedMinutes: 180, billingPercentage: 100 },
+      { memberId: "stayed", name: "อยู่ต่อ", arrived: true, arrivedAt: "21:00", leftAt: "01:00", playedMinutes: 240, billingPercentage: 100 },
+    ],
+  });
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [285, 475]);
+});
+
 test("buildLineSummary lists personal items instead of a generic extras total", () => {
   const summary = buildLineSummary(makeEvent({
     costs: [{ amount: 100 }],

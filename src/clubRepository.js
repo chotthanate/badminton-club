@@ -113,7 +113,7 @@ export async function loadDashboard(clubId, eventId = null) {
     };
   }
 
-  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult] = await Promise.all([
+  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult] = await Promise.all([
     membersPromise,
     client().from("event_courts").select("*").eq("event_id", event.id).order("position").order("created_at"),
     client().from("signups").select("*").eq("event_id", event.id).order("created_at"),
@@ -125,9 +125,10 @@ export async function loadDashboard(clubId, eventId = null) {
     venuesPromise,
     extraItemsPromise,
     client().from("member_extra_charges").select("*").eq("event_id", event.id).order("created_at"),
+    client().from("shuttlecock_checkpoints").select("*").eq("event_id", event.id).order("checkpoint_time"),
   ]);
 
-  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult]
+  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult]
     .forEach((result) => throwIfError(result.error));
 
   return {
@@ -144,6 +145,7 @@ export async function loadDashboard(clubId, eventId = null) {
     venues: venuesResult.data || [],
     extraItems: extraItemsResult.data || [],
     memberExtras: memberExtrasResult.data || [],
+    shuttlecockCheckpoints: shuttlecockCheckpointsResult.data || [],
   };
 }
 
@@ -171,6 +173,7 @@ export async function createEvent({
       court_hourly_rate: Math.max(0, Number(courtHourlyRate) || 0),
       shuttlecock_unit_price: Math.max(0, Number(shuttlecockUnitPrice) || 0),
       status: "draft",
+      billing_model: "time_segmented",
       created_by: userId,
     })
     .select("*")
@@ -420,6 +423,87 @@ export async function updateAttendance({ clubId, eventId, memberId, patch }) {
     member_id: memberId,
     ...patch,
   }, { onConflict: "event_id,member_id" });
+  throwIfError(error);
+}
+
+export async function upsertShuttlecockCheckpoint({ clubId, eventId, time, cumulativeCount, userId }) {
+  const count = Math.max(0, Number(cumulativeCount) || 0);
+  const checkpointTime = `${String(time).slice(0, 5)}:00`;
+  const [checkpointResult, eventResult] = await Promise.all([
+    client().from("shuttlecock_checkpoints").select("checkpoint_time, cumulative_count").eq("event_id", eventId),
+    client().from("events").select("starts_at").eq("id", eventId).single(),
+  ]);
+  throwIfError(checkpointResult.error);
+  throwIfError(eventResult.error);
+  const checkpoints = checkpointResult.data || [];
+  const eventStart = eventResult.data.starts_at.slice(0, 5);
+  const ordered = [...checkpoints.filter((checkpoint) => String(checkpoint.checkpoint_time).slice(0, 5) !== String(time).slice(0, 5)), { checkpoint_time: checkpointTime, cumulative_count: count }]
+    .sort((left, right) => timeOnEventTimeline(String(left.checkpoint_time).slice(0, 5), eventStart)
+      - timeOnEventTimeline(String(right.checkpoint_time).slice(0, 5), eventStart));
+  let previous = 0;
+  for (const checkpoint of ordered) {
+    const next = Number(checkpoint.cumulative_count) || 0;
+    if (next < previous) throw new Error("จำนวนลูกสะสมต้องไม่น้อยกว่าจุดเวลาก่อนหน้า");
+    previous = next;
+  }
+  const { error } = await client().from("shuttlecock_checkpoints").upsert({
+    club_id: clubId,
+    event_id: eventId,
+    checkpoint_time: checkpointTime,
+    cumulative_count: count,
+    created_by: userId,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "event_id,checkpoint_time" });
+  throwIfError(error);
+  const maxCount = Math.max(count, ...(checkpoints || []).map((checkpoint) => Number(checkpoint.cumulative_count) || 0));
+  await updateEvent(eventId, { shuttlecock_count: maxCount });
+}
+
+export async function removeShuttlecockCheckpoint(checkpointId, eventId) {
+  const { error } = await client().from("shuttlecock_checkpoints").delete().eq("id", checkpointId);
+  throwIfError(error);
+  const { data, error: listError } = await client().from("shuttlecock_checkpoints")
+    .select("cumulative_count")
+    .eq("event_id", eventId);
+  throwIfError(listError);
+  await updateEvent(eventId, {
+    shuttlecock_count: Math.max(0, ...(data || []).map((row) => Number(row.cumulative_count) || 0)),
+  });
+}
+
+export async function listOutstandingPayments(clubId) {
+  const { data: payments, error: paymentError } = await client().from("payments")
+    .select("id, event_id, member_id, amount, billed_at, payment_status")
+    .eq("club_id", clubId)
+    .not("billed_at", "is", null)
+    .is("paid_at", null)
+    .order("billed_at", { ascending: true });
+  throwIfError(paymentError);
+  if (!payments?.length) return [];
+  const eventIds = [...new Set(payments.map((row) => row.event_id))];
+  const memberIds = [...new Set(payments.map((row) => row.member_id))];
+  const [eventsResult, membersResult] = await Promise.all([
+    client().from("events").select("id, event_date, venue, status").in("id", eventIds),
+    client().from("club_members").select("id, nickname, display_name, payment_exempt").in("id", memberIds),
+  ]);
+  throwIfError(eventsResult.error);
+  throwIfError(membersResult.error);
+  const events = new Map((eventsResult.data || []).map((row) => [row.id, row]));
+  const members = new Map((membersResult.data || []).map((row) => [row.id, row]));
+  return payments.map((payment) => ({
+    ...payment,
+    event: events.get(payment.event_id),
+    member: members.get(payment.member_id),
+  })).filter((row) => row.event && row.member && !row.member.payment_exempt);
+}
+
+export async function markOutstandingPaymentPaid({ paymentId, paid, userId }) {
+  const { error } = await client().from("payments").update({
+    paid_at: paid ? new Date().toISOString() : null,
+    payment_status: paid ? "paid" : "awaiting",
+    paid_source: paid ? "admin" : null,
+    recorded_by: userId,
+  }).eq("id", paymentId);
   throwIfError(error);
 }
 

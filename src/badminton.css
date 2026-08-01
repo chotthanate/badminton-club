@@ -3454,6 +3454,243 @@
   font-size: 20px;
 }
 
+/* Time-based checkout and outstanding-payment workspace. */
+.badminton-attendance-row.has-left {
+  border-color: #cfd5cf;
+  background: #f1f3f1;
+  box-shadow: inset 4px 0 #9aa39b;
+}
+
+.badminton-attendance-row.has-left .badminton-player-controls,
+.badminton-attendance-row.has-left .badminton-player-name span {
+  opacity: 0.76;
+}
+
+.badminton-attendance-row.is-billed:not(.is-paid) {
+  border-color: #e4ca7d;
+  background: #fff9e6;
+  box-shadow: inset 4px 0 #d8b752;
+}
+
+.badminton-attendance-row.is-paid {
+  border-color: #9dd9bc;
+  background: #e9f7ef;
+  box-shadow: inset 4px 0 #159a69;
+}
+
+.badminton-player-cost-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.78);
+  font-style: normal;
+}
+
+.badminton-player-cost-status span {
+  color: #667067;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-player-cost-status strong {
+  color: #176f50;
+  font-size: 14px;
+  text-align: right;
+}
+
+.badminton-shuttle-checkpoints {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d6e0d4;
+  border-radius: 13px;
+  background: #f8faf7;
+}
+
+.badminton-checkpoint-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.badminton-checkpoint-heading span,
+.badminton-checkpoint-list small {
+  color: #657067;
+  font-size: 12px;
+}
+
+.badminton-checkpoint-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.badminton-checkpoint-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.badminton-checkpoint-form label span {
+  color: #657067;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.badminton-checkpoint-form select,
+.badminton-checkpoint-form input,
+.badminton-checkpoint-form button {
+  min-width: 0;
+  min-height: 46px;
+}
+
+.badminton-checkpoint-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.badminton-checkpoint-list > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  border: 1px solid #cad8c7;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.badminton-checkpoint-list button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #b5362c;
+}
+
+.badminton-payment-subtabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 4px;
+  border: 1px solid #d5dfd2;
+  border-radius: 12px;
+  background: #f3f6f2;
+}
+
+.badminton-payment-subtabs button {
+  min-height: 46px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #637064;
+  font: inherit;
+  font-weight: 900;
+}
+
+.badminton-payment-subtabs button.is-active {
+  background: #fff;
+  color: #0f7a52;
+  box-shadow: 0 3px 10px rgba(31, 57, 37, 0.08);
+}
+
+.badminton-payment-subtabs span {
+  display: inline-grid;
+  min-width: 22px;
+  min-height: 22px;
+  place-items: center;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: #dff1e5;
+  font-size: 11px;
+}
+
+.badminton-outstanding-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.badminton-outstanding-list details {
+  overflow: hidden;
+  border: 1px solid #d9e1d6;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.badminton-outstanding-list summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.badminton-outstanding-list summary span,
+.badminton-outstanding-list article span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.badminton-outstanding-list small {
+  overflow: hidden;
+  color: #687169;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-outstanding-list details > div {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.badminton-outstanding-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 9px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 9px;
+  background: #f5f7f4;
+}
+
+.badminton-outstanding-list article button {
+  min-height: 42px;
+  padding: 8px 11px;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .badminton-checkpoint-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .badminton-checkpoint-form button {
+    grid-column: 1 / -1;
+  }
+
+  .badminton-outstanding-list article {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .badminton-outstanding-list article button {
+    grid-column: 1 / -1;
+  }
+}
+
 .badminton-calculated-amount small {
   grid-column: 1 / -1;
   color: #7a847b;

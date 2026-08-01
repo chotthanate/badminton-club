@@ -41,7 +41,9 @@ import {
   finishEvent,
   getPaymentSlipImageUrl,
   listClubEvents,
+  listOutstandingPayments,
   loadDashboard,
+  markOutstandingPaymentPaid,
   recordAudit,
   replaceEventCourts,
   resetTestClub,
@@ -51,6 +53,7 @@ import {
   removeExtraCatalogItem,
   removeMemberExtraCharge,
   removeParticipant,
+  removeShuttlecockCheckpoint,
   setPayment,
   updateAttendance,
   updateClubMember,
@@ -62,6 +65,7 @@ import {
   updateExpense,
   updateSignup,
   updateSignupArrival,
+  upsertShuttlecockCheckpoint,
 } from "./clubRepository.js";
 import {
   baht,
@@ -187,7 +191,7 @@ function AdminDashboard({ session }) {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [eventSummaries, setEventSummaries] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState(null);
-  const [previousOutstanding, setPreviousOutstanding] = useState({ count: 0, total: 0 });
+  const [previousOutstanding, setPreviousOutstanding] = useState({ count: 0, total: 0, rows: [] });
   const [adminContexts, setAdminContexts] = useState([]);
   const selectedClubIdRef = useRef(null);
   const selectedEventIdRef = useRef(null);
@@ -210,7 +214,7 @@ function AdminDashboard({ session }) {
         setEventSummaries([]);
         setSelectedEventId(null);
         selectedEventIdRef.current = null;
-        setPreviousOutstanding({ count: 0, total: 0 });
+        setPreviousOutstanding({ count: 0, total: 0, rows: [] });
         return;
       }
       const nextEvents = await listClubEvents(nextContext.club_id);
@@ -219,13 +223,12 @@ function AdminDashboard({ session }) {
         ? requestedEventId
         : nextEvents[0]?.id || null;
       const nextDashboard = await loadDashboard(nextContext.club_id, targetEventId);
-      const currentIndex = nextEvents.findIndex((event) => event.id === targetEventId);
-      const previousEventIds = currentIndex >= 0
-        ? nextEvents.slice(currentIndex + 1).filter((event) => event.status === "closed").map((event) => event.id)
-        : [];
-      const nextOutstanding = silent
-        ? previousOutstanding
-        : await calculatePreviousOutstanding(nextContext.club_id, previousEventIds);
+      const outstandingRows = await listOutstandingPayments(nextContext.club_id);
+      const nextOutstanding = {
+        count: outstandingRows.length,
+        total: outstandingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+        rows: outstandingRows,
+      };
       setEventSummaries(nextEvents);
       setSelectedEventId(targetEventId);
       selectedEventIdRef.current = targetEventId;
@@ -307,6 +310,7 @@ function AdminDashboard({ session }) {
 
   if (loading && !dashboard) return <LoadingScreen label="กำลังโหลดหลังบ้าน" />;
   if (!context) return <ClubSetup session={session} onCreated={refresh} error={error} />;
+  if (!dashboard) return <main className="badminton-app badminton-auth-page"><section className="badminton-auth-card"><h1>โหลดข้อมูลไม่สำเร็จ</h1><p>{error || "กรุณาลองโหลดข้อมูลอีกครั้ง"}</p><button className="badminton-primary" onClick={() => refresh()} type="button"><RefreshCw size={18} /> ลองใหม่</button></section></main>;
 
   const appEvent = dashboard.event ? mapDashboardToEvent(dashboard) : null;
   const settlement = appEvent ? calculateSettlement(appEvent) : null;
@@ -391,7 +395,7 @@ function AdminDashboard({ session }) {
               />
             ) : null}
 
-            {activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} /> : null}
+            {activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} settlement={settlement} /> : null}
             {activeTab === "payments" ? <SettlementPanel event={appEvent} mutate={mutate} previousOutstanding={previousOutstanding} session={session} settlement={settlement} /> : null}
             {activeTab === "history" ? <AuditPanel actions={appEvent.actions} /> : null}
           </>
@@ -721,6 +725,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [editingMember, setEditingMember] = useState(null);
   const [memberEdit, setMemberEdit] = useState({ nickname: "", displayName: "", paymentExempt: false });
   const [pendingCheckIn, setPendingCheckIn] = useState(null);
+  const [pendingDeparture, setPendingDeparture] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sortMode, setSortMode] = useState("signup");
   const [exemptName, setExemptName] = useState("");
@@ -982,6 +987,20 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           }
 
           function updateDeparture(nextDeparture) {
+            const exactCheckpoint = (event.shuttlecockCheckpoints || []).find((item) => item.time === nextDeparture);
+            if (event.billingModel === "time_segmented" && nextDeparture && !exactCheckpoint) {
+              const latestCount = (event.shuttlecockCheckpoints || [])
+                .filter((item) => timePosition(item.time, event.startTime) <= timePosition(nextDeparture, event.startTime))
+                .reduce((maximum, item) => Math.max(maximum, Number(item.cumulativeCount) || 0), 0);
+              setPendingDeparture({
+                memberId: member.id,
+                participantName,
+                plannedArrival,
+                leftAt: nextDeparture,
+                cumulativeCount: String(latestCount || event.shuttlecockCount || 0),
+              });
+              return null;
+            }
             return mutate(() => updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: true, arrived_at: plannedArrival, left_at: nextDeparture || null } }), `ปรับเวลากลับของ ${participantName} แล้ว`);
           }
 
@@ -1071,14 +1090,15 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           }
 
           return (
-            <article className={`badminton-attendance-row ${checkedIn ? "is-checked-in" : ""}`} key={member.id}>
+            <article className={`badminton-attendance-row ${checkedIn ? "is-checked-in" : ""} ${leftAt ? "has-left" : ""} ${settlementRow?.billingFinalized ? "is-billed" : ""} ${settlementRow?.paid && !settlementRow?.paymentExempt ? "is-paid" : ""}`} key={member.id}>
               <div className="badminton-player-identity">
                 <label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label>
                 <b className="badminton-player-index">{playerIndex + 1}.</b>
                 <div className="badminton-player-name"><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}</div>
                 <button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button>
-                <em className={settlementRow?.locked ? "is-locked" : ""}><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select><span>{formatPlayedDuration(playedMinutes)}</span><b>{settlementRow?.locked ? `ล็อกยอดแล้ว ${baht(due)} บาท` : `≈ ${baht(due)} บาท`}</b></em>
+                <em className={settlementRow?.locked ? "is-locked" : ""}><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select><span>{formatPlayedDuration(playedMinutes)}</span></em>
               </div>
+              <div className="badminton-player-cost-status"><span>{leftAt ? `กลับแล้ว ${leftAt} น.` : checkedIn ? "กำลังเล่น" : "ยังไม่เช็กชื่อ"}</span><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)} บาท` : settlementRow?.billingFinalized ? `ยอดเรียกเก็บ ${baht(due)} บาท` : leftAt ? `ยอดคำนวณ ${baht(due)} บาท` : `ประมาณ ${baht(due)} บาท`}</strong></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
@@ -1094,15 +1114,27 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       {editingMember ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}><div className="badminton-modal-title"><div><p className="badminton-kicker">ข้อมูลสมาชิกเดิม</p><h2>แก้ไขรายชื่อ</h2></div><button aria-label="ปิดหน้าต่างแก้ไขชื่อ" onClick={() => setEditingMember(null)} type="button"><X size={19} /></button></div><label>ชื่อเล่น<input autoFocus maxLength="40" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, nickname: changeEvent.target.value })} required value={memberEdit.nickname} /></label><label>ชื่อ LINE<input maxLength="80" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, displayName: changeEvent.target.value })} required value={memberEdit.displayName} /></label>{editingMember.line_user_id ? <p className="badminton-member-sync-note">คนนี้เชื่อมกับ LINE แล้ว หากเปลี่ยนชื่อ LINE ระบบจะอัปเดตชื่อใหม่อัตโนมัติเมื่อสมาชิกเข้าหน้าลงชื่อครั้งถัดไป โดยประวัติและยอดค้างยังเป็นคนเดิม</p> : <p className="badminton-member-sync-note">สมาชิกที่เพิ่มเองยังไม่เชื่อมกับบัญชี LINE การแก้ชื่อตรงนี้จะไม่กระทบประวัติและยอดค้างเดิม</p>}<button className="badminton-primary" type="submit"><Save size={17} /> บันทึกชื่อ</button></form></div> : null}
       {customChargeFor ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal" onSubmit={addCustomCharge}><div className="badminton-modal-title"><div><p className="badminton-kicker">ค่าใช้จ่ายเฉพาะคน</p><h2>เพิ่มรายการให้ {customChargeFor.name}</h2></div><button aria-label="ปิดหน้าต่าง" onClick={() => setCustomChargeFor(null)} type="button"><X size={19} /></button></div><label>ชื่อรายการ<input autoFocus maxLength="80" onChange={(changeEvent) => setCustomCharge({ ...customCharge, name: changeEvent.target.value })} placeholder="เช่น ค่าเอ็นไม้" required value={customCharge.name} /></label><label>ราคา (บาท)<input min="0" onChange={(changeEvent) => setCustomCharge({ ...customCharge, price: changeEvent.target.value })} placeholder="0" required type="number" value={customCharge.price} /></label><button className="badminton-primary" type="submit"><Plus size={17} /> เพิ่มค่าใช้จ่าย</button></form></div> : null}
       {pendingCheckIn ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ยืนยันเวลาเช็กชื่อ" aria-modal="true" className="badminton-custom-charge-modal badminton-check-in-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เช็กชื่อผู้เล่น</p><h2>{pendingCheckIn.participantName} มาถึงแล้ว</h2></div><button aria-label="ปิด" onClick={() => setPendingCheckIn(null)} type="button"><X size={19} /></button></div><p>ลงชื่อไว้เวลา <strong>{pendingCheckIn.plannedArrival} น.</strong> ตอนนี้ประมาณ <strong>{pendingCheckIn.suggestedArrival} น.</strong></p><div className="badminton-check-in-actions"><button className="badminton-secondary" onClick={() => completeCheckIn(pendingCheckIn, false)} type="button">ใช้เวลาเดิม {pendingCheckIn.plannedArrival}</button><button className="badminton-primary" onClick={() => completeCheckIn(pendingCheckIn, true)} type="button">ปรับเป็น {pendingCheckIn.suggestedArrival}</button></div></div></div> : null}
+      {pendingDeparture ? <div className="badminton-modal-backdrop" role="presentation"><form aria-label="บันทึกเวลากลับและจำนวนลูกแบด" className="badminton-custom-charge-modal" onSubmit={async (submitEvent) => {
+        submitEvent.preventDefault();
+        const affectedLocked = settlement.rows.filter((entry) => entry.billingFinalized && entry.leftAt === pendingDeparture.leftAt);
+        if (affectedLocked.length && !window.confirm(`เวลา ${pendingDeparture.leftAt} มี ${affectedLocked.length} คนที่สรุปยอดแล้ว ยอดเหล่านั้นจะไม่ถูกเปลี่ยนอัตโนมัติ แต่คนที่ยังไม่สรุปจะคำนวณใหม่ ดำเนินการต่อไหม?`)) return;
+        const saved = await mutate(async () => {
+          await upsertShuttlecockCheckpoint({ clubId: event.clubId, eventId: event.id, time: pendingDeparture.leftAt, cumulativeCount: pendingDeparture.cumulativeCount, userId: session.user.id });
+          await updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: pendingDeparture.memberId, patch: { arrived: true, arrived_at: pendingDeparture.plannedArrival, left_at: pendingDeparture.leftAt } });
+          await recordAudit({ clubId: event.clubId, eventId: event.id, userId: session.user.id, action: `${pendingDeparture.participantName} กลับ ${pendingDeparture.leftAt} · ลูกแบดสะสม ${pendingDeparture.cumulativeCount} ลูก` });
+        }, `บันทึกเวลาคืนสนามของ ${pendingDeparture.participantName} แล้ว`);
+        if (saved) setPendingDeparture(null);
+      }}><div className="badminton-modal-title"><div><p className="badminton-kicker">ผู้เล่นกลับก่อน</p><h2>{pendingDeparture.participantName} · {pendingDeparture.leftAt} น.</h2></div><button aria-label="ปิด" onClick={() => setPendingDeparture(null)} type="button"><X size={19} /></button></div><p>ตอนเวลานี้ใช้ลูกแบดสะสมไปทั้งหมดกี่ลูก?</p><label>จำนวนลูกแบดสะสม<input autoFocus min="0" onChange={(changeEvent) => setPendingDeparture({ ...pendingDeparture, cumulativeCount: changeEvent.target.value })} required type="number" value={pendingDeparture.cumulativeCount} /></label><small className="badminton-settings-help">ถ้ามีคนกลับเวลาเดียวกัน ระบบจะใช้ข้อมูลจุดนี้ร่วมกัน ไม่ต้องกรอกซ้ำ</small><button className="badminton-primary" type="submit"><Check size={17} /> บันทึกเวลากลับ</button></form></div> : null}
     </section>
   );
 }
 
-function PricingPanel({ event, mutate, session }) {
+function PricingPanel({ event, mutate, session, settlement }) {
   const [editingCourt, setEditingCourt] = useState(false);
   const [editingShuttle, setEditingShuttle] = useState(false);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
+  const [checkpoint, setCheckpoint] = useState({ time: event.endTime, count: String(event.shuttlecockCount || 0) });
   const courtHours = totalCourtHours(event.courts);
   const courtCost = courtHours * event.courtHourlyRate;
   const shuttleCost = event.shuttlecockCount * event.shuttlecockUnitPrice;
@@ -1130,6 +1162,31 @@ function PricingPanel({ event, mutate, session }) {
           </div>
         </article>
       </div>
+      {event.billingModel === "time_segmented" ? (
+        <div className="badminton-shuttle-checkpoints">
+          <div className="badminton-checkpoint-heading"><div><strong>บันทึกลูกแบดตามเวลา</strong><span>ใส่จำนวนลูกสะสม ณ เวลานั้น ระบบจะใช้จุดเดียวกันกับทุกคนที่กลับเวลาเดียวกัน</span></div></div>
+          <form className="badminton-checkpoint-form" onSubmit={(submitEvent) => {
+            submitEvent.preventDefault();
+            const existing = (event.shuttlecockCheckpoints || []).find((item) => item.time === checkpoint.time);
+            const lockedCount = settlement.rows.filter((row) => row.billingFinalized).length;
+            if (lockedCount && (!existing || Number(existing.cumulativeCount) !== Number(checkpoint.count)) && !window.confirm(`มีผู้เล่น ${lockedCount} คนที่สรุปยอดแล้ว ยอดเหล่านั้นจะไม่เปลี่ยนอัตโนมัติ แต่ยอดที่ยังไม่สรุปจะคำนวณใหม่ ดำเนินการต่อไหม?`)) return;
+            mutate(() => upsertShuttlecockCheckpoint({
+              clubId: event.clubId,
+              eventId: event.id,
+              time: checkpoint.time,
+              cumulativeCount: checkpoint.count,
+              userId: session.user.id,
+            }), `บันทึกลูกแบดสะสม ${checkpoint.count} ลูก เวลา ${checkpoint.time} แล้ว`);
+          }}>
+            <label><span>เวลา</span><select value={checkpoint.time} onChange={(changeEvent) => setCheckpoint({ ...checkpoint, time: changeEvent.target.value })}>{buildTimeOptions(event.startTime, event.endTime).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
+            <label><span>จำนวนสะสม</span><input min="0" required type="number" value={checkpoint.count} onChange={(changeEvent) => setCheckpoint({ ...checkpoint, count: changeEvent.target.value })} /></label>
+            <button className="badminton-secondary" type="submit"><Plus size={16} /> บันทึก</button>
+          </form>
+          <div className="badminton-checkpoint-list">
+            {(event.shuttlecockCheckpoints || []).length ? event.shuttlecockCheckpoints.map((item) => <span key={item.id}><strong>{item.time}</strong> {item.cumulativeCount} ลูก<button aria-label={`ลบจุดบันทึกเวลา ${item.time}`} onClick={() => { const lockedCount = settlement.rows.filter((row) => row.billingFinalized).length; const message = lockedCount ? `มีผู้เล่น ${lockedCount} คนที่สรุปยอดแล้ว ยอดเหล่านั้นจะไม่เปลี่ยน แต่คนที่ยังไม่สรุปจะคำนวณใหม่\n\nลบข้อมูลลูกแบดเวลา ${item.time} ใช่ไหม?` : `ลบข้อมูลลูกแบดเวลา ${item.time} ใช่ไหม?`; if (window.confirm(message)) mutate(() => removeShuttlecockCheckpoint(item.id, event.id), "ลบจุดบันทึกลูกแบดแล้ว"); }} type="button"><X size={14} /></button></span>) : <small>ยังไม่มีจุดบันทึก ระบบจะใช้จำนวนสุดท้ายตอนจบรอบ</small>}
+          </div>
+        </div>
+      ) : null}
       <div className="badminton-other-expenses">
         <strong>ค่าใช้จ่ายอื่น</strong>
         <div className="badminton-expense-list">
@@ -1150,9 +1207,22 @@ function PricingPanel({ event, mutate, session }) {
 function SettlementPanel({ event, mutate, previousOutstanding, session, settlement }) {
   const [copied, setCopied] = useState(false);
   const [billDraft, setBillDraft] = useState(null);
+  const [paymentView, setPaymentView] = useState("current");
   const lineSummary = useMemo(() => buildLineSummary(event), [event]);
   const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
-  const combinedTotal = settlement.totalCost + previousOutstanding.total;
+  const previousRows = (previousOutstanding.rows || []).filter((row) => row.event_id !== event.id);
+  const previousTotal = previousRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const combinedTotal = settlement.totalCost + previousTotal;
+  const outstandingGroups = useMemo(() => {
+    const grouped = new Map();
+    (previousOutstanding.rows || []).forEach((row) => {
+      const current = grouped.get(row.member_id) || { member: row.member, rows: [], total: 0 };
+      current.rows.push(row);
+      current.total += Number(row.amount || 0);
+      grouped.set(row.member_id, current);
+    });
+    return [...grouped.values()].sort((left, right) => left.member.nickname?.localeCompare(right.member.nickname || "", "th"));
+  }, [previousOutstanding.rows]);
 
   async function copySummary() {
     await navigator.clipboard.writeText(lineSummary);
@@ -1269,13 +1339,41 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
     }
   }
 
+  function settleOutstanding(row) {
+    const name = memberName(row.member);
+    if (!window.confirm(`ยืนยันว่า ${name} จ่ายรอบ ${formatRoundOption(row.event.event_date)} จำนวน ${baht(row.amount)} บาทแล้ว?`)) return;
+    mutate(async () => {
+      await markOutstandingPaymentPaid({ paymentId: row.id, paid: true, userId: session.user.id });
+      await recordAudit({
+        clubId: event.clubId,
+        eventId: row.event_id,
+        userId: session.user.id,
+        action: `รับเงินยอดค้าง ${name} จำนวน ${baht(row.amount)} บาท`,
+        details: { payment_id: row.id, member_id: row.member_id },
+      });
+    }, `รับเงินยอดค้างของ ${name} แล้ว`);
+  }
+
+  if (paymentView === "outstanding") {
+    return (
+      <section className="badminton-card badminton-settlement-card" id="settlement">
+        <div className="badminton-payment-subtabs" role="tablist"><button onClick={() => setPaymentView("current")} role="tab" type="button">รอบนี้</button><button className="is-active" role="tab" type="button">ยอดค้าง <span>{previousOutstanding.count}</span></button></div>
+        <div className="badminton-card-title"><WalletCards size={20} /><div><h2>คนที่ค้างจ่าย</h2><p>{outstandingGroups.length} คน · {previousOutstanding.count} รอบ</p></div><strong>{baht(previousOutstanding.total)} บาท</strong></div>
+        <div className="badminton-outstanding-list">
+          {outstandingGroups.length ? outstandingGroups.map((group) => <details key={group.member.id}><summary><span><strong>{memberName(group.member)}</strong><small>{group.rows.length} รอบ</small></span><b>{baht(group.total)} บาท</b></summary><div>{group.rows.map((row) => <article key={row.id}><span><strong>{formatRoundOption(row.event.event_date)}</strong><small>{row.event.venue}</small></span><b>{baht(row.amount)} บาท</b><button className="badminton-primary" onClick={() => settleOutstanding(row)} type="button"><Check size={15} /> จ่ายรอบนี้แล้ว</button></article>)}</div></details>) : <div className="badminton-empty"><Check size={20} /> ไม่มีใครค้างจ่าย</div>}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="badminton-card badminton-settlement-card" id="settlement">
+      <div className="badminton-payment-subtabs" role="tablist"><button className="is-active" role="tab" type="button">รอบนี้</button><button onClick={() => setPaymentView("outstanding")} role="tab" type="button">ยอดค้าง <span>{previousOutstanding.count}</span></button></div>
       <div className="badminton-payment-workspace">
         <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div></div>
         <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
           <div className="badminton-current-round-total"><span>ยอดรอบนี้</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
-          <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousOutstanding.total)} บาท</strong></div>
+          <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousTotal)} บาท</strong></div>
           <div className="badminton-summary-grand-total"><span>รวมทั้งหมด</span><strong>{baht(combinedTotal)} บาท</strong></div>
           <div className="badminton-round-payment-status">
             <Check size={16} />
@@ -1421,6 +1519,12 @@ function mapDashboardToEvent(dashboard) {
     courtHourlyRate,
     shuttlecockCount,
     shuttlecockUnitPrice,
+    billingModel: dashboard.event.billing_model || "legacy",
+    shuttlecockCheckpoints: (dashboard.shuttlecockCheckpoints || []).map((checkpoint) => ({
+      id: checkpoint.id,
+      time: checkpoint.checkpoint_time?.slice(0, 5),
+      cumulativeCount: Number(checkpoint.cumulative_count) || 0,
+    })),
     members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, role: member.role, lineUserId: member.line_user_id, active: member.active, paymentExempt: Boolean(member.payment_exempt) })),
     signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note, createdAt: row.created_at })),
     attendance,
