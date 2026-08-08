@@ -219,6 +219,60 @@ test("time-segmented billing is independent of which equal player was finalized 
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [300, 300]);
 });
 
+test("a finalized time-segmented bill never changes when another player or court is edited", () => {
+  const lockedPlayer = {
+    memberId: "locked",
+    name: "กลับก่อน",
+    arrived: true,
+    arrivedAt: "21:00",
+    leftAt: "23:00",
+    playedMinutes: 120,
+    billingPercentage: 100,
+    billingFinalized: true,
+    billedAmount: 186,
+    calculatedAmount: 186,
+    lockedSharedAmount: 176,
+    lockedExtraAmount: 10,
+    extraCharges: [{ name: "น้ำ", unitPrice: 10, quantity: 1 }],
+  };
+  const base = {
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    endTime: "00:00",
+    courts: [{ startsAt: "21:00", endsAt: "00:00" }],
+    courtHourlyRate: 200,
+    shuttlecockCount: 6,
+    shuttlecockUnitPrice: 95,
+    shuttlecockCheckpoints: [{ time: "23:00", cumulativeCount: 4 }],
+    extraCosts: [],
+  };
+
+  const before = calculateSettlement({
+    ...base,
+    attendance: [
+      lockedPlayer,
+      { memberId: "other", name: "อีกคน", arrived: true, arrivedAt: "21:00", leftAt: "00:00", billingPercentage: 100 },
+    ],
+  });
+  const after = calculateSettlement({
+    ...base,
+    endTime: "01:00",
+    courts: [
+      { startsAt: "21:00", endsAt: "01:00" },
+      { startsAt: "23:00", endsAt: "01:00" },
+    ],
+    shuttlecockCount: 10,
+    attendance: [
+      lockedPlayer,
+      { memberId: "other", name: "อีกคน", arrived: true, arrivedAt: "22:00", leftAt: "01:00", billingPercentage: 50 },
+      { memberId: "new", name: "เพิ่มทีหลัง", arrived: true, arrivedAt: "23:30", leftAt: "01:00", billingPercentage: 100 },
+    ],
+  });
+
+  assert.equal(before.rows.find((row) => row.memberId === "locked").roundedDue, 186);
+  assert.equal(after.rows.find((row) => row.memberId === "locked").roundedDue, 186);
+});
+
 test("shuttlecock checkpoints charge later shuttlecocks only to players still present", () => {
   const result = calculateSettlement({
     ...makeEvent(),

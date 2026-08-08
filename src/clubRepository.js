@@ -94,7 +94,7 @@ export async function loadDashboard(clubId, eventId = null) {
 
   const membersPromise = client()
     .from("club_members")
-    .select("id, display_name, nickname, role, active, line_user_id, payment_exempt")
+    .select("id, display_name, nickname, aliases, role, active, line_user_id, payment_exempt, created_at")
     .eq("club_id", clubId)
     .eq("active", true)
     .order("created_at");
@@ -360,11 +360,34 @@ async function invokeLineBot(body) {
 }
 
 export async function addLineMember({ clubId, displayName, lineUserId = null }) {
+  const cleanName = displayName.trim();
+  const normalizedName = normalizeStoredMemberName(cleanName);
+  const { data: existingMembers, error: existingError } = await client().from("club_members")
+    .select("id, display_name, nickname, aliases, line_user_id")
+    .eq("club_id", clubId)
+    .eq("active", true)
+    .neq("role", "admin");
+  throwIfError(existingError);
+  const existing = (existingMembers || []).find((member) =>
+    [member.nickname, member.display_name, ...(member.aliases || [])]
+      .some((value) => normalizeStoredMemberName(value) === normalizedName));
+  if (existing) {
+    if (lineUserId?.trim() && !existing.line_user_id) {
+      const { data, error } = await client().from("club_members")
+        .update({ line_user_id: lineUserId.trim() })
+        .eq("id", existing.id)
+        .select("id, display_name, nickname, aliases, line_user_id")
+        .single();
+      throwIfError(error);
+      return data;
+    }
+    return existing;
+  }
   const { data, error } = await client().from("club_members")
     .insert({
       club_id: clubId,
-      display_name: displayName.trim(),
-      nickname: displayName.trim(),
+      display_name: cleanName,
+      nickname: cleanName,
       line_user_id: lineUserId?.trim() || null,
       role: "member",
     })
@@ -375,14 +398,34 @@ export async function addLineMember({ clubId, displayName, lineUserId = null }) 
 }
 
 export async function updateClubMember(memberId, { nickname, displayName, paymentExempt = false }) {
+  const { data: current, error: currentError } = await client().from("club_members")
+    .select("nickname, display_name, aliases")
+    .eq("id", memberId)
+    .single();
+  throwIfError(currentError);
+  const aliases = [...new Set([
+    ...(current.aliases || []),
+    current.nickname,
+    current.display_name,
+  ].map((value) => String(value || "").trim()).filter(Boolean))];
   const { error } = await client().from("club_members")
     .update({
       nickname: nickname.trim(),
       display_name: displayName.trim(),
+      aliases,
       payment_exempt: Boolean(paymentExempt),
     })
     .eq("id", memberId);
   throwIfError(error);
+}
+
+export async function mergeClubMembers({ sourceMemberId, targetMemberId }) {
+  const { data, error } = await client().rpc("merge_club_members", {
+    source_member_id: sourceMemberId,
+    target_member_id: targetMemberId,
+  });
+  throwIfError(error);
+  return data;
 }
 
 export async function removeParticipant({ eventId, memberId }) {
@@ -739,4 +782,9 @@ export async function recordAudit({ clubId, eventId = null, userId, action, deta
     details,
   });
   throwIfError(error);
+}
+
+function normalizeStoredMemberName(value) {
+  return String(value || "").toLocaleLowerCase("th")
+    .replace(/[\s._\-®©™]+/g, "");
 }

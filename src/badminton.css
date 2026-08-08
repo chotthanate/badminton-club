@@ -3502,6 +3502,108 @@
   text-align: right;
 }
 
+.badminton-participants-card .badminton-attendance-row {
+  gap: 6px;
+}
+
+.badminton-player-cost-status {
+  gap: 6px;
+  padding: 5px 8px;
+}
+
+.badminton-player-billing-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.badminton-player-billing-meta select {
+  width: 66px;
+  min-width: 66px;
+  min-height: 30px;
+  padding: 0 4px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badminton-player-billing-meta small {
+  color: #637064;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.badminton-player-billing-meta strong {
+  white-space: nowrap;
+}
+
+.badminton-duplicate-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.badminton-duplicate-suggestions button {
+  min-height: 34px;
+  padding: 5px 9px;
+  border: 1px solid #d8c36d;
+  border-radius: 8px;
+  background: #fff9df;
+  color: #6d570d;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.badminton-member-merge-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 7px;
+}
+
+.badminton-member-merge-form label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  color: #637064;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.badminton-member-merge-form select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  font-size: 12px;
+}
+
+.badminton-member-merge-form > button {
+  grid-column: 1 / -1;
+  min-height: 42px;
+}
+
+@media (max-width: 430px) {
+  .badminton-player-cost-status {
+    align-items: flex-start;
+  }
+
+  .badminton-player-billing-meta {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .badminton-member-merge-form {
+    grid-template-columns: 1fr;
+  }
+
+  .badminton-member-merge-form > button {
+    grid-column: auto;
+  }
+}
+
 .badminton-shuttle-checkpoints {
   display: grid;
   gap: 12px;

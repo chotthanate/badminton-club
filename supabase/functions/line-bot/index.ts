@@ -770,7 +770,7 @@ async function handleLiffRequest(payload: any) {
     }
 
     const { data: existingMember } = await admin.from("club_members")
-      .select("id, display_name, nickname")
+      .select("id, display_name, nickname, aliases")
       .eq("club_id", clubId)
       .eq("line_user_id", identity.sub)
       .maybeSingle();
@@ -926,17 +926,18 @@ async function handleLiffRequest(payload: any) {
 
 async function findOrCreateGuestMember(admin: any, clubId: string, guestName: string) {
   const { data: guestMembers, error: guestError } = await admin.from("club_members")
-    .select("id, nickname, display_name")
+    .select("id, nickname, display_name, aliases, line_user_id")
     .eq("club_id", clubId)
-    .is("line_user_id", null);
+    .eq("active", true)
+    .eq("role", "member");
   if (guestError) throw guestError;
 
   const normalizedGuestName = normalizeMemberName(guestName);
-  const existingGuest = (guestMembers || []).find((member: any) =>
-    normalizeMemberName(member.nickname) === normalizedGuestName
-    || normalizeMemberName(member.display_name) === normalizedGuestName
+  const exactMatches = (guestMembers || []).filter((member: any) =>
+    [member.nickname, member.display_name, ...(member.aliases || [])]
+      .some((value) => normalizeMemberName(value) === normalizedGuestName)
   );
-  if (existingGuest?.id) return existingGuest.id;
+  if (exactMatches.length === 1) return exactMatches[0].id;
 
   const { data: newGuest, error: insertError } = await admin.from("club_members").insert({
     club_id: clubId,
@@ -951,7 +952,9 @@ async function findOrCreateGuestMember(admin: any, clubId: string, guestName: st
 }
 
 function normalizeMemberName(value: unknown) {
-  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("th-TH");
+  return String(value || "")
+    .toLocaleLowerCase("th-TH")
+    .replace(/[\s._\-®©™]+/g, "");
 }
 
 async function upsertLiffMember(
@@ -963,6 +966,32 @@ async function upsertLiffMember(
   existingMember: any,
 ) {
   if (!existingMember?.id) {
+    const { data: candidates, error: candidateError } = await admin.from("club_members")
+      .select("id, display_name, nickname, aliases")
+      .eq("club_id", clubId)
+      .eq("active", true)
+      .eq("role", "member")
+      .is("line_user_id", null);
+    if (candidateError) throw candidateError;
+    const identityKeys = new Set([normalizeMemberName(displayName), normalizeMemberName(nickname)].filter(Boolean));
+    const exactMatches = (candidates || []).filter((member: any) =>
+      [member.nickname, member.display_name, ...(member.aliases || [])]
+        .some((value) => identityKeys.has(normalizeMemberName(value)))
+    );
+    if (exactMatches.length === 1) {
+      const matched = exactMatches[0];
+      const aliases = [...new Set([
+        ...(matched.aliases || []),
+        matched.nickname,
+        matched.display_name,
+      ].map((value) => String(value || "").trim()).filter(Boolean))];
+      const { error } = await admin.from("club_members")
+        .update({ display_name: displayName, nickname, line_user_id: lineUserId, aliases })
+        .eq("id", matched.id);
+      if (error) throw error;
+      return matched.id;
+    }
+
     const { data: newMember, error } = await admin.from("club_members").insert({
       club_id: clubId,
       display_name: displayName,
@@ -975,8 +1004,13 @@ async function upsertLiffMember(
   }
 
   if (existingMember.display_name !== displayName || existingMember.nickname !== nickname) {
+    const aliases = [...new Set([
+      ...(existingMember.aliases || []),
+      existingMember.nickname,
+      existingMember.display_name,
+    ].map((value) => String(value || "").trim()).filter(Boolean))];
     const { error } = await admin.from("club_members")
-      .update({ display_name: displayName, nickname })
+      .update({ display_name: displayName, nickname, aliases })
       .eq("id", existingMember.id);
     if (error) throw error;
   }

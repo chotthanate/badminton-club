@@ -6,7 +6,7 @@ export function rankMemberSuggestions(members, query) {
   const normalizedQuery = normalizeMemberSearch(query);
   return members
     .map((member) => {
-      const fields = [member.nickname, member.display_name]
+      const fields = [member.nickname, member.display_name, ...(member.aliases || [])]
         .map(normalizeMemberSearch)
         .filter(Boolean);
       const score = normalizedQuery
@@ -17,6 +17,36 @@ export function rankMemberSuggestions(members, query) {
     .filter((entry) => Number.isFinite(entry.score))
     .sort((a, b) => a.score - b.score || memberLabel(a.member).localeCompare(memberLabel(b.member), "th"))
     .map((entry) => entry.member);
+}
+
+export function findExactDuplicateMemberGroups(members) {
+  const groups = new Map();
+  members.forEach((member) => {
+    const keys = [...new Set([member.nickname, member.display_name, ...(member.aliases || [])]
+      .map(normalizeMemberSearch)
+      .filter(Boolean))];
+    keys.forEach((key) => {
+      const entries = groups.get(key) || [];
+      if (!entries.some((entry) => entry.id === member.id)) entries.push(member);
+      groups.set(key, entries);
+    });
+  });
+
+  const seen = new Set();
+  return [...groups.values()]
+    .filter((entries) => entries.length > 1)
+    .map((entries) => [...entries].sort(preferredCanonicalMember))
+    .filter((entries) => {
+      const signature = entries.map((member) => member.id).sort().join("|");
+      if (seen.has(signature)) return false;
+      seen.add(signature);
+      return true;
+    });
+}
+
+function preferredCanonicalMember(left, right) {
+  if (Boolean(left.line_user_id) !== Boolean(right.line_user_id)) return left.line_user_id ? -1 : 1;
+  return String(left.created_at || "").localeCompare(String(right.created_at || ""));
 }
 
 function memberSearchScore(value, query) {
