@@ -1482,7 +1482,12 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
         <div className="badminton-payment-subtabs" role="tablist"><button onClick={() => setPaymentView("current")} role="tab" type="button">รอบนี้</button><button className="is-active" role="tab" type="button">ยอดค้าง <span>{previousOutstanding.count}</span></button></div>
         <div className="badminton-card-title"><WalletCards size={20} /><div><h2>คนที่ค้างจ่าย</h2><p>{outstandingGroups.length} คน · {previousOutstanding.count} รอบ</p></div><strong>{baht(previousOutstanding.total)} บาท</strong></div>
         <div className="badminton-outstanding-list">
-          {outstandingGroups.length ? outstandingGroups.map((group) => <details key={group.member.id}><summary><span><strong>{memberName(group.member)}</strong><small>{group.rows.length} รอบ</small></span><b>{baht(group.total)} บาท</b></summary><div>{group.rows.map((row) => <article key={row.id}><span><strong>{formatRoundOption(row.event.event_date)}</strong><small>{row.event.venue}</small></span><b>{baht(row.amount)} บาท</b><button className="badminton-primary" onClick={() => settleOutstanding(row)} type="button"><Check size={15} /> จ่ายรอบนี้แล้ว</button></article>)}</div></details>) : <div className="badminton-empty"><Check size={20} /> ไม่มีใครค้างจ่าย</div>}
+          {outstandingGroups.length ? outstandingGroups.map((group) => {
+            const nickname = memberName(group.member);
+            const lineName = String(group.member.display_name || "").trim();
+            const lineLabel = lineName && lineName !== nickname ? `LINE: ${lineName} · ` : "";
+            return <details key={group.member.id}><summary><span><strong>{nickname}</strong><small>{lineLabel}{group.rows.length} รอบ</small></span><b>{baht(group.total)} บาท</b></summary><div>{group.rows.map((row) => <article key={row.id}><span><strong>{formatRoundOption(row.event.event_date)}</strong><small>{row.event.venue}</small></span><b>{baht(row.amount)} บาท</b><button className="badminton-primary" onClick={() => settleOutstanding(row)} type="button"><Check size={15} /> จ่ายรอบนี้แล้ว</button></article>)}</div></details>;
+          }) : <div className="badminton-empty"><Check size={20} /> ไม่มีใครค้างจ่าย</div>}
         </div>
       </section>
     );
