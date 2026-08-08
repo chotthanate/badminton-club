@@ -3508,7 +3508,13 @@
 
 .badminton-player-cost-status {
   gap: 6px;
+  padding: 2px 8px;
+  background: transparent;
+}
+
+.badminton-player-cost-status.has-departure-status {
   padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .badminton-player-billing-meta {
