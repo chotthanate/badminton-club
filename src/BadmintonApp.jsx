@@ -1080,7 +1080,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       </form>
 
       <div className="badminton-attendance-list">
-        {sortedParticipants.length ? sortedParticipants.map(({ member, attendance: row, arrivalTime }, playerIndex) => {
+        {sortedParticipants.length ? sortedParticipants.map(({ member, attendance: row, arrivalTime, submittedByLineName }, playerIndex) => {
           const participantName = memberName(member);
           const plannedArrival = arrivalTime || event.startTime;
           const leftAt = row?.leftAt || "";
@@ -1215,6 +1215,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                 <b className="badminton-player-index">{playerIndex + 1}.</b>
                 <div className="badminton-player-name"><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}</div>
                 <button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button>
+                {submittedByLineName ? <small className="badminton-signup-attribution" title={`ลงชื่อให้โดย LINE: ${submittedByLineName}`}>ลงชื่อให้โดย LINE: {submittedByLineName}</small> : null}
               </div>
               <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span>กลับ {leftAt}</span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select><small>{formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `ล็อกยอด ${baht(due)}` : leftAt ? `ยอด ${baht(due)}` : `≈ ${baht(due)}`} บาท</strong></div></div>
               <div className="badminton-player-controls">
@@ -1653,7 +1654,7 @@ function mapDashboardToEvent(dashboard) {
       cumulativeCount: Number(checkpoint.cumulative_count) || 0,
     })),
     members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, aliases: member.aliases || [], role: member.role, lineUserId: member.line_user_id, active: member.active, paymentExempt: Boolean(member.payment_exempt), createdAt: member.created_at })),
-    signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note, createdAt: row.created_at })),
+    signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note, createdAt: row.created_at, submittedByLineUserId: row.submitted_by_line_user_id || "", submittedByLineName: row.submitted_by_line_name || "" })),
     attendance,
     paymentSlips: (dashboard.paymentSlips || []).map((slip) => ({
       ...slip,

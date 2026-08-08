@@ -846,12 +846,15 @@ async function handleLiffRequest(payload: any) {
       }
 
       const guestMemberId = await findOrCreateGuestMember(admin, clubId, guestName);
+      const submitterLineName = String(identity.name || existingMember.display_name || submitterName || "สมาชิก LINE").slice(0, 80);
       const { error: signupError } = await admin.from("signups").upsert({
         club_id: clubId,
         event_id: event.id,
         member_id: guestMemberId,
         status: "coming",
         arrival_time: arrivalTime,
+        submitted_by_line_user_id: identity.sub,
+        submitted_by_line_name: submitterLineName,
       }, { onConflict: "event_id,member_id" });
       if (signupError) throw signupError;
 
@@ -862,6 +865,7 @@ async function handleLiffRequest(payload: any) {
         action: `${submitterName || "สมาชิก"} เพิ่ม ${guestName} เวลา ${arrivalTime}`,
         details: {
           line_user_id: identity.sub,
+          line_display_name: submitterLineName,
           guest_member_id: guestMemberId,
           arrival_time: arrivalTime,
           source: "liff_guest",
@@ -905,6 +909,8 @@ async function handleLiffRequest(payload: any) {
       member_id: memberId,
       status,
       arrival_time: arrivalTime,
+      submitted_by_line_user_id: null,
+      submitted_by_line_name: null,
     }, { onConflict: "event_id,member_id" });
     if (signupError) throw signupError;
 
