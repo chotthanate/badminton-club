@@ -34,6 +34,7 @@ import {
   addExtraCatalogItem,
   addLineMember,
   addMemberExtraCharge,
+  addRandomTestPlayers,
   cancelQueueMatch,
   changeAdminPassword,
   claimQueueMatch,
@@ -325,6 +326,28 @@ function AdminDashboard({ session }) {
     setActiveTab("round");
   }
 
+  async function addDemoQueuePlayers() {
+    if (!context?.clubs.is_test || dashboard?.event?.status !== "open") {
+      window.alert("กรุณาเปิดลงชื่อในรอบทดลองก่อนเพิ่มผู้เล่นสุ่ม");
+      return;
+    }
+    if (!window.confirm("เพิ่มผู้เล่นสุ่มคละระดับ 30 คน และเช็กชื่อให้พร้อมเข้าคิวเลยใช่ไหม?")) return;
+    const saved = await mutate(async () => {
+      const addedCount = await addRandomTestPlayers({
+        clubId: context.club_id,
+        eventId: dashboard.event.id,
+        count: 30,
+      });
+      await recordAudit({
+        clubId: context.club_id,
+        eventId: dashboard.event.id,
+        userId: session.user.id,
+        action: `เพิ่มผู้เล่นสุ่มคละระดับ ${addedCount} คนในโหมดทดลอง`,
+      });
+    }, "เพิ่มผู้เล่นสุ่มคละระดับ 30 คนและเช็กชื่อแล้ว");
+    if (saved) setActiveTab("queue");
+  }
+
   if (loading && !dashboard) return <LoadingScreen label="กำลังโหลดหลังบ้าน" />;
   if (!context) return <ClubSetup session={session} onCreated={refresh} error={error} />;
   if (!dashboard) return <main className="badminton-app badminton-auth-page"><section className="badminton-auth-card"><h1>โหลดข้อมูลไม่สำเร็จ</h1><p>{error || "กรุณาลองโหลดข้อมูลอีกครั้ง"}</p><button className="badminton-primary" onClick={() => refresh()} type="button"><RefreshCw size={18} /> ลองใหม่</button></section></main>;
@@ -360,7 +383,7 @@ function AdminDashboard({ session }) {
 
         {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
         {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
-        {context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><button onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div> : null}
+        {context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving || dashboard.event?.status !== "open"} onClick={addDemoQueuePlayers} title={dashboard.event?.status === "open" ? "เพิ่มและเช็กชื่อผู้เล่นสุ่มคละระดับ" : "เปิดลงชื่อในรอบทดลองก่อน"} type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 30 คน</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
 
         {!dashboard.event ? (
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />
@@ -818,7 +841,7 @@ function QueuePanel({ dashboard, event, mutate }) {
       const ready = freshQueue.players.filter((player) => player.status === "waiting" && player.skillLevel).length;
       throw new Error(ready < 4
         ? `มีผู้เล่นพร้อมเข้าคิว ${ready} คน ต้องมีอย่างน้อย 4 คน`
-        : "ยังจัดกลุ่มระดับเดียวกันหรือระดับติดกันไม่ได้ กรุณาตรวจระดับมือของผู้เล่น");
+        : "ยังมีผู้เล่นพร้อมจัดคิวไม่ครบ 4 คน บางคนอาจถูกข้ามคิวชั่วคราว");
     }
     await claimQueueMatch({
       eventId: event.id,
@@ -850,7 +873,7 @@ function QueuePanel({ dashboard, event, mutate }) {
     if (automatic) {
       const replacement = proposeReplacement(remaining, queue.players, queue.matches, nextSequence);
       if (!replacement) {
-        window.alert("ยังไม่มีผู้เล่นระดับใกล้เคียงที่พร้อมแทน กรุณาเลือกคนเอง");
+        window.alert("ยังไม่มีผู้เล่นที่พร้อมแทน กรุณาเลือกคนเอง");
         return;
       }
       incoming = replacement.player;

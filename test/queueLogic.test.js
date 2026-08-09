@@ -7,6 +7,7 @@ import {
   eligibleQueuePlayers,
   proposeQueueMatch,
   proposeReplacement,
+  skillDistanceKey,
 } from "../src/queueLogic.js";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "../src/skillLevels.js";
 
@@ -69,7 +70,31 @@ test("เลือกเล่นข้ามหลายระดับได�
     player("d", "P", { playableSkillLevels: ["BG", "P"] }),
   ];
   assert.equal(compatibilityTier(lineup), 2);
-  assert.equal(compatibilityTier(lineup.map((entry) => entry.skillLevel === "P" ? { ...entry, playableSkillLevels: ["P"] } : entry)), 99);
+  assert.equal(compatibilityTier(lineup.map((entry) => entry.skillLevel === "P" ? { ...entry, playableSkillLevels: ["P"] } : entry)), 4);
+});
+
+test("ถ้าไม่มีระดับที่เข้ากัน ระบบยังจัดให้ครบ 4 คน", () => {
+  const result = proposeQueueMatch([
+    player("anchor", "Rookie-"),
+    player("b", "BG"),
+    player("c", "S"),
+    player("d", "P"),
+  ]);
+  assert.equal(result.tier, 4);
+  assert.equal(result.lineup.length, 4);
+});
+
+test("fallback เลือกสามคนที่ระดับใกล้ anchor ที่สุด", () => {
+  const result = proposeQueueMatch([
+    player("anchor", "Rookie-", { queuedAt: "2026-08-10T09:00:00Z" }),
+    player("b", "BG"),
+    player("c", "N"),
+    player("d", "S"),
+    player("e", "P"),
+  ]);
+  assert.equal(result.tier, 4);
+  assert.deepEqual(result.lineup.map((entry) => entry.memberId).sort(), ["anchor", "b", "c", "d"].sort());
+  assert.deepEqual(skillDistanceKey(result.lineup), [4, 13]);
 });
 
 test("ค่าเริ่มต้นมือ N คือ BG N และ S โดยระดับตัวเองถูกบังคับไว้", () => {

@@ -3,6 +3,7 @@ import {
   defaultPlayableSkillLevels,
   legacyPreferencesForPlayable,
   normalizePlayableSkillLevels,
+  SKILL_LEVELS,
 } from "./skillLevels.js";
 
 function client() {
@@ -67,6 +68,76 @@ export async function resetTestClub(clubId) {
   throwIfError(itemError);
   await seedDefaultExtraItems(clubId);
   await seedTestMembers(clubId);
+}
+
+export async function addRandomTestPlayers({ clubId, eventId, count = 30 }) {
+  const safeCount = Math.max(4, Math.min(60, Math.round(Number(count) || 30)));
+  const [clubResult, eventResult, memberCountResult] = await Promise.all([
+    client().from("clubs").select("id, is_test").eq("id", clubId).single(),
+    client().from("events").select("id, club_id, status, starts_at").eq("id", eventId).single(),
+    client().from("club_members").select("id", { count: "exact", head: true }).eq("club_id", clubId).neq("role", "admin"),
+  ]);
+  throwIfError(clubResult.error);
+  throwIfError(eventResult.error);
+  throwIfError(memberCountResult.error);
+  if (!clubResult.data?.is_test) throw new Error("เพิ่มผู้เล่นสุ่มได้เฉพาะโหมดทดลอง");
+  if (eventResult.data?.club_id !== clubId) throw new Error("รอบทดลองไม่ตรงกับกลุ่มที่เลือก");
+  if (eventResult.data?.status !== "open") throw new Error("กรุณาเปิดลงชื่อในรอบทดลองก่อนเพิ่มผู้เล่นสุ่ม");
+
+  const mixedLevels = Array.from({ length: safeCount }, (_, index) => SKILL_LEVELS[index % SKILL_LEVELS.length]);
+  for (let index = mixedLevels.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [mixedLevels[index], mixedLevels[swapIndex]] = [mixedLevels[swapIndex], mixedLevels[index]];
+  }
+  const firstNumber = Number(memberCountResult.count || 0) + 1;
+  const memberRows = mixedLevels.map((skillLevel, index) => {
+    const playableSkillLevels = defaultPlayableSkillLevels(skillLevel);
+    const legacyPreferences = legacyPreferencesForPlayable(skillLevel, playableSkillLevels);
+    const number = String(firstNumber + index).padStart(2, "0");
+    return {
+      club_id: clubId,
+      display_name: `LINE Random ${number}`,
+      nickname: `ผู้เล่นสุ่ม ${number}`,
+      role: "member",
+      active: true,
+      skill_level: skillLevel,
+      playable_skill_levels: playableSkillLevels,
+      allow_lower_level: legacyPreferences.allowLowerLevel,
+      allow_higher_level: legacyPreferences.allowHigherLevel,
+    };
+  });
+  const { data: members, error: memberError } = await client().from("club_members")
+    .insert(memberRows)
+    .select("id, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level");
+  throwIfError(memberError);
+
+  const arrivalTime = String(eventResult.data.starts_at || "").slice(0, 5);
+  const signupRows = (members || []).map((member) => ({
+    club_id: clubId,
+    event_id: eventId,
+    member_id: member.id,
+    status: "coming",
+    arrival_time: arrivalTime,
+    skill_level_snapshot: member.skill_level,
+    playable_skill_levels_snapshot: member.playable_skill_levels,
+    allow_lower_level_snapshot: member.allow_lower_level,
+    allow_higher_level_snapshot: member.allow_higher_level,
+  }));
+  const attendanceRows = (members || []).map((member) => ({
+    club_id: clubId,
+    event_id: eventId,
+    member_id: member.id,
+    arrived: true,
+    arrived_at: arrivalTime,
+    left_at: null,
+  }));
+  const [signupResult, attendanceResult] = await Promise.all([
+    client().from("signups").insert(signupRows),
+    client().from("attendance").insert(attendanceRows),
+  ]);
+  throwIfError(signupResult.error);
+  throwIfError(attendanceResult.error);
+  return members?.length || 0;
 }
 
 export async function listClubEvents(clubId) {

@@ -95,7 +95,24 @@ export function compatibilityTier(lineup) {
   if (range === 0) return 1;
   if (selectedCompatibility(lineup)) return 2;
   if (range <= 1) return 3;
-  return 99;
+  return 4;
+}
+
+export function skillDistanceKey(lineup) {
+  const levels = lineup.map((player) => skillIndex(player.skillLevel));
+  let pairDistance = 0;
+  for (let leftIndex = 0; leftIndex < levels.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < levels.length; rightIndex += 1) {
+      pairDistance += Math.abs(levels[leftIndex] - levels[rightIndex]);
+    }
+  }
+  return [Math.max(...levels) - Math.min(...levels), pairDistance];
+}
+
+function compatibilitySortKey(candidate) {
+  return candidate.tier === 4
+    ? [candidate.tier, ...candidate.skillDistance, candidate.preferencePenalty]
+    : [candidate.tier, candidate.preferencePenalty, ...candidate.skillDistance];
 }
 
 function pairKey(leftId, rightId) {
@@ -177,12 +194,12 @@ export function proposeQueueMatch(players, matches = [], nextSequence = 1) {
       lineup,
       tier: compatibilityTier(lineup),
       preferencePenalty: compatibilityPreferencePenalty(lineup),
+      skillDistance: skillDistanceKey(lineup),
       score: lineupScore(lineup, repeatStats),
     }))
     .filter((candidate) => candidate.tier < 99);
   if (!candidates.length) return null;
-  candidates.sort((left, right) => left.tier - right.tier
-    || left.preferencePenalty - right.preferencePenalty
+  candidates.sort((left, right) => compareKeys(compatibilitySortKey(left), compatibilitySortKey(right))
     || compareKeys(left.score, right.score));
   const selected = candidates[0];
   const teams = balanceTeams(selected.lineup, matches);
@@ -197,10 +214,10 @@ export function proposeReplacement(remainingPlayers, waitingPlayers, matches = [
       player,
       tier: compatibilityTier([...remainingPlayers, player]),
       preferencePenalty: compatibilityPreferencePenalty([...remainingPlayers, player]),
+      skillDistance: skillDistanceKey([...remainingPlayers, player]),
     }))
     .filter((candidate) => candidate.tier < 99)
-    .sort((left, right) => left.tier - right.tier
-      || left.preferencePenalty - right.preferencePenalty
+    .sort((left, right) => compareKeys(compatibilitySortKey(left), compatibilitySortKey(right))
       || compareKeys(queueFairnessKey(left.player), queueFairnessKey(right.player)));
   if (!candidates.length) return null;
   const player = candidates[0].player;
