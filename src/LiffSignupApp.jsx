@@ -2,17 +2,27 @@ import React, { useEffect, useState } from "react";
 import { Check, Clock3, Edit3, LoaderCircle, MapPin, Plus, X } from "lucide-react";
 import { buildArrivalTimeOptions, getEventIdFromSearch, isLatestEventSearch } from "./liffSignup.js";
 
+const SKILL_LEVELS = ["Rookie-", "Rookie", "BG", "N", "S", "P"];
+
 export default function LiffSignupApp() {
   const [event, setEvent] = useState(null);
   const [profile, setProfile] = useState(null);
   const [nickname, setNickname] = useState("");
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [showNicknameModal, setShowNicknameModal] = useState(false);
+  const [skillLevel, setSkillLevel] = useState("");
+  const [skillDraft, setSkillDraft] = useState("");
+  const [allowLowerLevel, setAllowLowerLevel] = useState(false);
+  const [allowHigherLevel, setAllowHigherLevel] = useState(false);
+  const [skillPreferenceDraft, setSkillPreferenceDraft] = useState({ lower: false, higher: false });
   const [roster, setRoster] = useState({ coming: [] });
   const [savedStatus, setSavedStatus] = useState(null);
   const [savedArrivalTime, setSavedArrivalTime] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestArrivalTime, setGuestArrivalTime] = useState("");
+  const [guestSkill, setGuestSkill] = useState("");
+  const [guestPreferences, setGuestPreferences] = useState({ lower: false, higher: false });
+  const [queueStatus, setQueueStatus] = useState(null);
   const [guestSaving, setGuestSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -45,11 +55,18 @@ export default function LiffSignupApp() {
         const storedNickname = data.profile.nickname || "";
         setNickname(storedNickname);
         setNicknameDraft(storedNickname);
-        setShowNicknameModal(!storedNickname);
+        const storedSkill = data.profile.skillLevel || "";
+        setSkillLevel(storedSkill);
+        setSkillDraft(storedSkill);
+        setAllowLowerLevel(Boolean(data.profile.allowLowerLevel));
+        setAllowHigherLevel(Boolean(data.profile.allowHigherLevel));
+        setSkillPreferenceDraft({ lower: Boolean(data.profile.allowLowerLevel), higher: Boolean(data.profile.allowHigherLevel) });
+        setShowNicknameModal(!storedNickname || !storedSkill);
         setRoster(data.roster || { coming: [] });
         setSavedStatus(data.currentStatus || null);
         setSavedArrivalTime(data.currentArrivalTime || "");
         setGuestArrivalTime(data.event.arrivalTimes?.[0] || data.event.startTime || "");
+        setQueueStatus(data.queue || null);
       } catch (nextError) {
         if (active) setError(nextError.message || "เปิดหน้าลงชื่อไม่สำเร็จ");
       } finally {
@@ -75,6 +92,7 @@ export default function LiffSignupApp() {
         setRoster(data.roster || { coming: [] });
         setSavedStatus(data.currentStatus || null);
         setSavedArrivalTime(data.currentArrivalTime || "");
+        setQueueStatus(data.queue || null);
       } catch {
         // Keep the current screen usable during a temporary refresh failure.
       }
@@ -97,17 +115,22 @@ export default function LiffSignupApp() {
   async function saveNickname(submitEvent) {
     submitEvent.preventDefault();
     const nextNickname = nicknameDraft.trim();
-    if (!nextNickname) {
-      setError("กรุณากรอกชื่อเล่น");
+    if (!nextNickname || !skillDraft) {
+      setError(!nextNickname ? "กรุณากรอกชื่อเล่น" : "กรุณาเลือกระดับมือ");
       return;
     }
     setSaving(true);
     setError("");
     try {
       const idToken = window.liff.getIDToken();
-      const data = await callLiffApi("save_liff_nickname", { eventId: activeEventId, idToken, nickname: nextNickname });
+      const data = await callLiffApi("save_liff_profile", { eventId: activeEventId, idToken, nickname: nextNickname, skillLevel: skillDraft, allowLowerLevel: skillPreferenceDraft.lower, allowHigherLevel: skillPreferenceDraft.higher });
       setNickname(data.nickname);
       setNicknameDraft(data.nickname);
+      setSkillLevel(data.skillLevel);
+      setSkillDraft(data.skillLevel);
+      setAllowLowerLevel(Boolean(data.allowLowerLevel));
+      setAllowHigherLevel(Boolean(data.allowHigherLevel));
+      setSkillPreferenceDraft({ lower: Boolean(data.allowLowerLevel), higher: Boolean(data.allowHigherLevel) });
       setShowNicknameModal(false);
     } catch (nextError) {
       setError(nextError.message || "บันทึกชื่อเล่นไม่สำเร็จ");
@@ -118,8 +141,8 @@ export default function LiffSignupApp() {
 
   async function chooseTime(arrivalTime) {
     if (saving || savedStatus === "coming") return;
-    if (!nickname.trim()) {
-      setNicknameDraft("");
+    if (!nickname.trim() || !skillLevel) {
+      setNicknameDraft(nickname);
       setShowNicknameModal(true);
       return;
     }
@@ -133,6 +156,9 @@ export default function LiffSignupApp() {
         status: "coming",
         arrivalTime,
         nickname: nickname.trim(),
+        skillLevel,
+        allowLowerLevel,
+        allowHigherLevel,
       });
       setSavedStatus("coming");
       setSavedArrivalTime(data.arrivalTime || arrivalTime);
@@ -173,6 +199,10 @@ export default function LiffSignupApp() {
       setShowNicknameModal(true);
       return;
     }
+    if (!guestSkill) {
+      setError("กรุณาเลือกระดับมือของเพื่อน");
+      return;
+    }
     setGuestSaving(true);
     setError("");
     try {
@@ -182,8 +212,13 @@ export default function LiffSignupApp() {
         idToken,
         guestName: nextGuestName,
         arrivalTime: guestArrivalTime,
+        skillLevel: guestSkill,
+        allowLowerLevel: guestPreferences.lower,
+        allowHigherLevel: guestPreferences.higher,
       });
       setGuestName("");
+      setGuestSkill("");
+      setGuestPreferences({ lower: false, higher: false });
       setRoster(data.roster || { coming: [] });
     } catch (nextError) {
       setError(nextError.message || "เพิ่มผู้เล่นไม่สำเร็จ");
@@ -216,7 +251,8 @@ export default function LiffSignupApp() {
       </section>
 
       <section className="liff-answer-card">
-        <div className="liff-signup-as"><span>ลงชื่อเป็น</span><strong>{nickname}</strong><button onClick={() => { setNicknameDraft(nickname); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> แก้ชื่อเล่น</button></div>
+        <div className="liff-signup-as"><span>ลงชื่อเป็น</span><strong>{nickname}</strong>{skillLevel ? <em>{skillLevel}</em> : null}<button onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setSkillPreferenceDraft({ lower: allowLowerLevel, higher: allowHigherLevel }); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> แก้โปรไฟล์</button></div>
+        {queueStatus ? <div className={`liff-queue-status is-${queueStatus.status}`}><span>{queueStatus.status === "playing" ? `กำลังเล่น ${queueStatus.courtName || "ในสนาม"}` : queueStatus.status === "proposed" ? `เตรียมลง ${queueStatus.courtName || "สนามถัดไป"}` : queueStatus.status === "waiting" ? "อยู่ในคิวรอเล่น" : "ออกจากคิวแล้ว"}</span><small>{queueStatus.gamesPlayed} เกม · {queueStatus.minutesPlayed} นาที{queueStatus.team ? ` · ทีม ${queueStatus.team}` : ""}</small></div> : null}
         <div className="liff-answer-heading">
           <div><span>เวลาของคุณ</span><strong>{closed ? "รอบนี้ปิดรับลงเวลาแล้ว" : savedStatus === "coming" ? "ลงเวลาเรียบร้อยแล้ว" : "เลือกเวลาที่จะไป"}</strong></div>
           {savedStatus === "coming" ? <Check className="liff-saved-check" size={24} /> : <Clock3 size={22} />}
@@ -247,6 +283,7 @@ export default function LiffSignupApp() {
             placeholder="ลงชื่อให้เพื่อน"
             value={guestName}
           />
+          <select aria-label="ระดับมือของเพื่อน" onChange={(changeEvent) => { setGuestSkill(changeEvent.target.value); setGuestPreferences({ lower: false, higher: false }); }} value={guestSkill}><option value="">ระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select>
           <select
             aria-label="เวลาที่เพื่อนจะมา"
             onChange={(changeEvent) => setGuestArrivalTime(changeEvent.target.value)}
@@ -254,9 +291,10 @@ export default function LiffSignupApp() {
           >
             {arrivalTimes.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
-          <button aria-label="เพิ่มผู้เล่น" disabled={guestSaving || !guestName.trim() || !guestArrivalTime} type="submit">
+          <button aria-label="เพิ่มผู้เล่น" disabled={guestSaving || !guestName.trim() || !guestArrivalTime || !guestSkill} type="submit">
             {guestSaving ? <LoaderCircle size={18} /> : <Plus size={19} />}
           </button>
+          {guestSkill ? <div className="liff-guest-preferences"><label><input checked={guestPreferences.lower} disabled={SKILL_LEVELS.indexOf(guestSkill) === 0} onChange={(changeEvent) => setGuestPreferences({ ...guestPreferences, lower: changeEvent.target.checked })} type="checkbox" /> เล่นกับมืออ่อนกว่าได้</label><label><input checked={guestPreferences.higher} disabled={SKILL_LEVELS.indexOf(guestSkill) === SKILL_LEVELS.length - 1} onChange={(changeEvent) => setGuestPreferences({ ...guestPreferences, higher: changeEvent.target.checked })} type="checkbox" /> เล่นกับมือสูงกว่าได้</label></div> : null}
         </form>
       ) : null}
 
@@ -268,13 +306,15 @@ export default function LiffSignupApp() {
       {showNicknameModal ? (
         <div className="liff-modal-backdrop" role="presentation">
           <form className="liff-nickname-modal" onSubmit={saveNickname}>
-            <div><p className="badminton-kicker">ครั้งแรกครั้งเดียว</p><h2>ตั้งชื่อเล่นของคุณ</h2><p>ชื่อนี้จะแสดงในรายชื่อผู้เล่นและจำไว้สำหรับครั้งต่อไป</p></div>
+            <div><p className="badminton-kicker">โปรไฟล์สมาชิก</p><h2>{nickname && skillLevel ? "แก้ไขโปรไฟล์" : "ตั้งค่าครั้งแรก"}</h2><p>ระบบจะจำชื่อและระดับไว้ ครั้งต่อไปไม่ต้องกรอกใหม่</p></div>
             <label htmlFor="liff-nickname"><span>ชื่อเล่น</span><input autoFocus id="liff-nickname" maxLength="40" onChange={(changeEvent) => setNicknameDraft(changeEvent.target.value)} placeholder="เช่น บอย, หยก, แนน" required value={nicknameDraft} /></label>
+            <label><span>ระดับมือ</span><select onChange={(changeEvent) => { setSkillDraft(changeEvent.target.value); setSkillPreferenceDraft({ lower: false, higher: false }); }} required value={skillDraft}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
+            {skillDraft ? <div className="liff-skill-preferences"><label><input checked={skillPreferenceDraft.lower} disabled={SKILL_LEVELS.indexOf(skillDraft) === 0} onChange={(changeEvent) => setSkillPreferenceDraft({ ...skillPreferenceDraft, lower: changeEvent.target.checked })} type="checkbox" /> ยินดีเล่นกับมืออ่อนกว่า 1 ระดับ</label><label><input checked={skillPreferenceDraft.higher} disabled={SKILL_LEVELS.indexOf(skillDraft) === SKILL_LEVELS.length - 1} onChange={(changeEvent) => setSkillPreferenceDraft({ ...skillPreferenceDraft, higher: changeEvent.target.checked })} type="checkbox" /> ยินดีเล่นกับมือสูงกว่า 1 ระดับ</label></div> : null}
             <small>ชื่อ LINE ของคุณคือ {profile?.name || "สมาชิก LINE"}</small>
             {error ? <div className="liff-inline-error">{error}</div> : null}
             <div className="liff-modal-actions">
-              {nickname ? <button className="liff-modal-cancel" disabled={saving} onClick={() => { setNicknameDraft(nickname); setShowNicknameModal(false); setError(""); }} type="button">ยกเลิก</button> : null}
-              <button className="liff-modal-save" disabled={saving} type="submit">{saving ? "กำลังบันทึก..." : "บันทึกชื่อเล่น"}</button>
+              {nickname && skillLevel ? <button className="liff-modal-cancel" disabled={saving} onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setShowNicknameModal(false); setError(""); }} type="button">ยกเลิก</button> : null}
+              <button className="liff-modal-save" disabled={saving} type="submit">{saving ? "กำลังบันทึก..." : "บันทึกโปรไฟล์"}</button>
             </div>
           </form>
         </div>
@@ -286,7 +326,7 @@ export default function LiffSignupApp() {
 function RosterGroup({ entries }) {
   return (
     <div className="liff-roster-group is-coming">
-      {entries.length ? <ol>{entries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><b>{index + 1}.</b><strong>{entry.name}</strong><span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
+      {entries.length ? <ol>{entries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><b>{index + 1}.</b><strong>{entry.name}</strong>{entry.skillLevel ? <em>{entry.skillLevel}</em> : null}<span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
     </div>
   );
 }

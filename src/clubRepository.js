@@ -94,7 +94,7 @@ export async function loadDashboard(clubId, eventId = null) {
 
   const membersPromise = client()
     .from("club_members")
-    .select("id, display_name, nickname, aliases, role, active, line_user_id, payment_exempt, created_at")
+    .select("id, display_name, nickname, aliases, role, active, line_user_id, payment_exempt, skill_level, allow_lower_level, allow_higher_level, created_at")
     .eq("club_id", clubId)
     .eq("active", true)
     .order("created_at");
@@ -113,7 +113,7 @@ export async function loadDashboard(clubId, eventId = null) {
     };
   }
 
-  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult] = await Promise.all([
+  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult] = await Promise.all([
     membersPromise,
     client().from("event_courts").select("*").eq("event_id", event.id).order("position").order("created_at"),
     client().from("signups").select("*").eq("event_id", event.id).order("created_at"),
@@ -126,9 +126,12 @@ export async function loadDashboard(clubId, eventId = null) {
     extraItemsPromise,
     client().from("member_extra_charges").select("*").eq("event_id", event.id).order("created_at"),
     client().from("shuttlecock_checkpoints").select("*").eq("event_id", event.id).order("checkpoint_time"),
+    client().from("event_queue_players").select("*").eq("event_id", event.id),
+    client().from("queue_matches").select("*").eq("event_id", event.id).order("sequence", { ascending: false }),
+    client().from("queue_match_players").select("*").eq("event_id", event.id),
   ]);
 
-  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult]
+  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult]
     .forEach((result) => throwIfError(result.error));
 
   return {
@@ -146,6 +149,9 @@ export async function loadDashboard(clubId, eventId = null) {
     extraItems: extraItemsResult.data || [],
     memberExtras: memberExtrasResult.data || [],
     shuttlecockCheckpoints: shuttlecockCheckpointsResult.data || [],
+    queuePlayers: queuePlayersResult.data || [],
+    queueMatches: queueMatchesResult.data || [],
+    queueMatchPlayers: queueMatchPlayersResult.data || [],
   };
 }
 
@@ -359,7 +365,7 @@ async function invokeLineBot(body) {
   return data;
 }
 
-export async function addLineMember({ clubId, displayName, lineUserId = null }) {
+export async function addLineMember({ clubId, displayName, lineUserId = null, skillLevel = null, allowLowerLevel = false, allowHigherLevel = false }) {
   const cleanName = displayName.trim();
   const normalizedName = normalizeStoredMemberName(cleanName);
   const { data: existingMembers, error: existingError } = await client().from("club_members")
@@ -390,6 +396,9 @@ export async function addLineMember({ clubId, displayName, lineUserId = null }) 
       nickname: cleanName,
       line_user_id: lineUserId?.trim() || null,
       role: "member",
+      skill_level: skillLevel,
+      allow_lower_level: Boolean(allowLowerLevel),
+      allow_higher_level: Boolean(allowHigherLevel),
     })
     .select("id, display_name, nickname, line_user_id")
     .single();
@@ -397,7 +406,14 @@ export async function addLineMember({ clubId, displayName, lineUserId = null }) 
   return data;
 }
 
-export async function updateClubMember(memberId, { nickname, displayName, paymentExempt = false }) {
+export async function updateClubMember(memberId, {
+  nickname,
+  displayName,
+  paymentExempt = false,
+  skillLevel,
+  allowLowerLevel,
+  allowHigherLevel,
+}) {
   const { data: current, error: currentError } = await client().from("club_members")
     .select("nickname, display_name, aliases")
     .eq("id", memberId)
@@ -408,19 +424,23 @@ export async function updateClubMember(memberId, { nickname, displayName, paymen
     current.nickname,
     current.display_name,
   ].map((value) => String(value || "").trim()).filter(Boolean))];
-  const { error } = await client().from("club_members")
-    .update({
+  const profilePatch = {
       nickname: nickname.trim(),
       display_name: displayName.trim(),
       aliases,
       payment_exempt: Boolean(paymentExempt),
-    })
+  };
+  if (skillLevel !== undefined) profilePatch.skill_level = skillLevel || null;
+  if (allowLowerLevel !== undefined) profilePatch.allow_lower_level = Boolean(allowLowerLevel);
+  if (allowHigherLevel !== undefined) profilePatch.allow_higher_level = Boolean(allowHigherLevel);
+  const { error } = await client().from("club_members")
+    .update(profilePatch)
     .eq("id", memberId);
   throwIfError(error);
 }
 
 export async function mergeClubMembers({ sourceMemberId, targetMemberId }) {
-  const { data, error } = await client().rpc("merge_club_members", {
+  const { data, error } = await client().rpc("merge_club_members_with_queue", {
     source_member_id: sourceMemberId,
     target_member_id: targetMemberId,
   });
@@ -448,14 +468,94 @@ export async function updateSignupArrival({ eventId, memberId, arrivalTime }) {
   throwIfError(error);
 }
 
-export async function updateSignup({ clubId, eventId, memberId, status, arrivalTime = null }) {
+export async function updateSignup({
+  clubId,
+  eventId,
+  memberId,
+  status,
+  arrivalTime = null,
+  skillLevel,
+  allowLowerLevel,
+  allowHigherLevel,
+}) {
+  let memberProfile = null;
+  if (status === "coming" && skillLevel === undefined) {
+    const { data, error } = await client().from("club_members")
+      .select("skill_level, allow_lower_level, allow_higher_level")
+      .eq("id", memberId)
+      .single();
+    throwIfError(error);
+    memberProfile = data;
+  }
+  const nextSkillLevel = skillLevel === undefined ? memberProfile?.skill_level : skillLevel;
+  if (status === "coming" && !nextSkillLevel) throw new Error("กรุณากำหนดระดับมือของผู้เล่นก่อนเพิ่มเข้ารอบ");
   const { error } = await client().from("signups").upsert({
     club_id: clubId,
     event_id: eventId,
     member_id: memberId,
     status,
     arrival_time: status === "coming" ? arrivalTime : null,
+    skill_level_snapshot: status === "coming" ? nextSkillLevel : null,
+    allow_lower_level_snapshot: status === "coming" ? Boolean(allowLowerLevel === undefined ? memberProfile?.allow_lower_level : allowLowerLevel) : false,
+    allow_higher_level_snapshot: status === "coming" ? Boolean(allowHigherLevel === undefined ? memberProfile?.allow_higher_level : allowHigherLevel) : false,
   }, { onConflict: "event_id,member_id" });
+  throwIfError(error);
+}
+
+export async function ensureEventQueuePlayers({ clubId, eventId }) {
+  const [attendanceResult, signupResult] = await Promise.all([
+    client().from("attendance").select("member_id, arrived, left_at").eq("event_id", eventId).eq("arrived", true).is("left_at", null),
+    client().from("signups").select("member_id, skill_level_snapshot").eq("event_id", eventId).eq("status", "coming").not("skill_level_snapshot", "is", null),
+  ]);
+  throwIfError(attendanceResult.error);
+  throwIfError(signupResult.error);
+  const signedUp = new Set((signupResult.data || []).map((row) => row.member_id));
+  const rows = (attendanceResult.data || [])
+    .filter((row) => signedUp.has(row.member_id))
+    .map((row) => ({ club_id: clubId, event_id: eventId, member_id: row.member_id, status: "waiting" }));
+  if (!rows.length) return;
+  const { error } = await client().from("event_queue_players").upsert(rows, {
+    onConflict: "event_id,member_id",
+    ignoreDuplicates: true,
+  });
+  throwIfError(error);
+}
+
+export async function claimQueueMatch({ eventId, courtId, memberIds, teamAIds }) {
+  const { data, error } = await client().rpc("claim_queue_match_proposal", {
+    target_event_id: eventId,
+    target_court_id: courtId,
+    selected_member_ids: memberIds,
+    team_a_member_ids: teamAIds,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function startQueueMatch(matchId) {
+  const { error } = await client().rpc("start_queue_match", { target_match_id: matchId });
+  throwIfError(error);
+}
+
+export async function finishQueueMatch(matchId) {
+  const { data, error } = await client().rpc("finish_queue_match", { target_match_id: matchId });
+  throwIfError(error);
+  return data;
+}
+
+export async function cancelQueueMatch(matchId) {
+  const { error } = await client().rpc("cancel_queue_match_proposal", { target_match_id: matchId });
+  throwIfError(error);
+}
+
+export async function replaceQueueMatchPlayer({ matchId, outgoingMemberId, incomingMemberId, skipAbsent = true, teamAIds = null }) {
+  const { error } = await client().rpc("replace_queue_match_player", {
+    target_match_id: matchId,
+    outgoing_member_id: outgoingMemberId,
+    incoming_member_id: incomingMemberId,
+    skip_absent: skipAbsent,
+    replacement_team_a_member_ids: teamAIds,
+  });
   throwIfError(error);
 }
 
@@ -658,9 +758,14 @@ async function seedDefaultExtraItems(clubId) {
 
 async function seedTestMembers(clubId) {
   const members = [
-    { club_id: clubId, display_name: "LINE Demo One", nickname: "เมย์ทดลอง", role: "member" },
-    { club_id: clubId, display_name: "LINE Demo Two", nickname: "แจ็คทดลอง", role: "member" },
-    { club_id: clubId, display_name: "LINE Demo Three", nickname: "บอยทดลอง", role: "member" },
+    { club_id: clubId, display_name: "LINE Demo One", nickname: "เมย์ทดลอง", role: "member", skill_level: "BG", allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Two", nickname: "แจ็คทดลอง", role: "member", skill_level: "BG", allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Three", nickname: "บอยทดลอง", role: "member", skill_level: "N", allow_lower_level: true },
+    { club_id: clubId, display_name: "LINE Demo Four", nickname: "แนนทดลอง", role: "member", skill_level: "N", allow_lower_level: true },
+    { club_id: clubId, display_name: "LINE Demo Five", nickname: "เอ็มทดลอง", role: "member", skill_level: "BG", allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Six", nickname: "เก่งทดลอง", role: "member", skill_level: "BG", allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Seven", nickname: "หยกทดลอง", role: "member", skill_level: "N", allow_lower_level: true },
+    { club_id: clubId, display_name: "LINE Demo Eight", nickname: "นิวทดลอง", role: "member", skill_level: "N", allow_lower_level: true },
   ];
   const { error } = await client().from("club_members").insert(members);
   throwIfError(error);

@@ -1715,7 +1715,7 @@
   z-index: 20;
   top: 0;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 4px;
   margin: 0 0 14px;
   padding: 6px;
@@ -4300,6 +4300,370 @@
   font: inherit;
   font-size: 12px;
   font-weight: 900;
+}
+
+/* Member skill profiles and fair court queue */
+.badminton-skill-badge,
+.liff-signup-as > em,
+.liff-roster-group li > em,
+.badminton-queue-teams em,
+.badminton-queue-waiting em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 24px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #e6f5eb;
+  color: #0f7a52;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.badminton-new-player-skill {
+  min-width: 150px;
+  display: grid;
+  gap: 6px;
+}
+
+.badminton-new-player-skill > select,
+.badminton-member-edit-modal select {
+  min-height: 46px;
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid #c7d5c5;
+  border-radius: 9px;
+  background: #fff;
+  color: #172018;
+  font: inherit;
+  font-weight: 800;
+}
+
+.badminton-new-player-skill > div,
+.badminton-skill-preferences,
+.liff-skill-preferences,
+.liff-guest-preferences {
+  display: grid;
+  gap: 6px;
+  color: #536056;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-new-player-skill label,
+.badminton-skill-preferences label,
+.liff-skill-preferences label,
+.liff-guest-preferences label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.badminton-new-player-skill input,
+.badminton-skill-preferences input,
+.liff-skill-preferences input,
+.liff-guest-preferences input {
+  width: 18px;
+  height: 18px;
+  accent-color: #15966a;
+}
+
+.badminton-queue-workspace {
+  display: grid;
+  gap: 12px;
+}
+
+.badminton-queue-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.badminton-queue-summary > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f2f7f1;
+  color: #536056;
+}
+
+.badminton-queue-summary span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.badminton-queue-summary strong {
+  color: #172018;
+  font-size: 17px;
+}
+
+.badminton-queue-courts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.badminton-queue-court {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.badminton-queue-court.is-playing {
+  border-color: #62b985;
+  box-shadow: inset 4px 0 #15966a, 0 10px 28px rgba(37, 58, 40, 0.08);
+}
+
+.badminton-queue-court > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.badminton-queue-court > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.badminton-queue-court > header strong {
+  font-size: 19px;
+}
+
+.badminton-queue-court > header span,
+.badminton-queue-court > header b {
+  color: #637064;
+  font-size: 12px;
+}
+
+.badminton-queue-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.badminton-queue-teams > div {
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+  border-radius: 10px;
+  background: #f4f8f2;
+}
+
+.badminton-queue-teams > div > span {
+  color: #637064;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.badminton-queue-teams > div > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 6px;
+  padding: 7px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.badminton-queue-teams strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-queue-teams button {
+  grid-column: 1 / -1;
+  min-height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: #eef3ed;
+  color: #536056;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.badminton-queue-actions,
+.badminton-queue-playing {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.badminton-queue-actions button,
+.badminton-queue-playing button {
+  min-height: 46px;
+}
+
+.badminton-queue-playing > span {
+  color: #536056;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-queue-waiting ol {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.badminton-queue-waiting li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: #f4f8f2;
+}
+
+.badminton-queue-waiting li > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.badminton-queue-waiting li small {
+  flex: 0 0 auto;
+  color: #637064;
+  font-weight: 800;
+}
+
+.badminton-queue-manual-replace {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.badminton-queue-manual-replace select,
+.badminton-queue-manual-replace button {
+  min-width: 0;
+  min-height: 46px;
+}
+
+.liff-signup-as > em {
+  margin-right: auto;
+}
+
+.liff-signup-as > strong:has(+ em) {
+  margin-right: 0;
+}
+
+.liff-queue-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 13px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: #eef5ed;
+  color: #536056;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.liff-queue-status.is-proposed,
+.liff-queue-status.is-playing {
+  background: #ddf4e5;
+  color: #0f7a52;
+}
+
+.liff-queue-status small {
+  font-weight: 800;
+}
+
+.liff-nickname-modal select {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 12px;
+  border: 1px solid #b9cab8;
+  border-radius: 10px;
+  background: #fbfcf8;
+  color: #172018;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.liff-guest-signup-row {
+  grid-template-columns: minmax(0, 1fr) 90px 92px 44px;
+}
+
+.liff-guest-preferences {
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr 1fr;
+  padding: 5px 4px;
+}
+
+.liff-roster-group li {
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+}
+
+@media (max-width: 560px) {
+  .badminton-tabs button {
+    font-size: 10px;
+  }
+
+  .badminton-queue-summary {
+    gap: 5px;
+  }
+
+  .badminton-queue-summary > div {
+    display: grid;
+    justify-items: center;
+    gap: 3px;
+    padding: 8px 4px;
+    text-align: center;
+  }
+
+  .badminton-queue-courts {
+    grid-template-columns: 1fr;
+  }
+
+  .badminton-new-player-skill {
+    grid-column: 1 / -1;
+  }
+
+  .liff-guest-signup-row {
+    grid-template-columns: minmax(0, 1fr) 88px 44px;
+  }
+
+  .liff-guest-signup-row > input {
+    grid-column: 1 / -1;
+  }
+
+  .liff-guest-preferences {
+    grid-template-columns: 1fr;
+  }
+
+  .liff-roster-group li {
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+  }
+
+  .liff-roster-group li > em {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .liff-roster-group li > span {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
 }
 
 @keyframes badminton-spin {

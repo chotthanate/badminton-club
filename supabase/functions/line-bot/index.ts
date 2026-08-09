@@ -22,7 +22,7 @@ Deno.serve(async (request) => {
     return handlePaymentLiffRequest(payload);
   }
 
-  if (["get_liff_event", "save_liff_nickname", "submit_liff_signup", "submit_liff_guest", "cancel_liff_signup"].includes(payload?.action)) {
+  if (["get_liff_event", "save_liff_nickname", "save_liff_profile", "submit_liff_signup", "submit_liff_guest", "cancel_liff_signup"].includes(payload?.action)) {
     return handleLiffRequest(payload);
   }
 
@@ -770,14 +770,14 @@ async function handleLiffRequest(payload: any) {
     }
 
     const { data: existingMember } = await admin.from("club_members")
-      .select("id, display_name, nickname, aliases")
+      .select("id, display_name, nickname, aliases, skill_level, allow_lower_level, allow_higher_level")
       .eq("club_id", clubId)
       .eq("line_user_id", identity.sub)
       .maybeSingle();
 
     const { data: existingSignup } = existingMember
       ? await admin.from("signups")
-        .select("status, arrival_time")
+        .select("status, arrival_time, skill_level_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
         .eq("event_id", event.id)
         .eq("member_id", existingMember.id)
         .maybeSingle()
@@ -789,11 +789,15 @@ async function handleLiffRequest(payload: any) {
         profile: {
           name: String(identity.name || existingMember?.display_name || "สมาชิก LINE").slice(0, 80),
           nickname: existingMember?.nickname || "",
+          skillLevel: existingMember?.skill_level || "",
+          allowLowerLevel: Boolean(existingMember?.allow_lower_level),
+          allowHigherLevel: Boolean(existingMember?.allow_higher_level),
           picture: identity.picture || null,
         },
         currentStatus: existingSignup?.status === "coming" ? "coming" : null,
         currentArrivalTime: existingSignup?.status === "coming" ? shortTime(existingSignup?.arrival_time) : null,
         roster: await getLiffRoster(admin, event),
+        queue: existingMember?.id ? await getLiffQueueStatus(admin, event.id, existingMember.id) : null,
       });
     }
 
@@ -845,7 +849,8 @@ async function handleLiffRequest(payload: any) {
         return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
       }
 
-      const guestMemberId = await findOrCreateGuestMember(admin, clubId, guestName);
+      const guestSkill = validateSkillProfile(payload);
+      const guestMemberId = await findOrCreateGuestMember(admin, clubId, guestName, guestSkill);
       const submitterLineName = String(identity.name || existingMember.display_name || submitterName || "สมาชิก LINE").slice(0, 80);
       const { error: signupError } = await admin.from("signups").upsert({
         club_id: clubId,
@@ -855,6 +860,9 @@ async function handleLiffRequest(payload: any) {
         arrival_time: arrivalTime,
         submitted_by_line_user_id: identity.sub,
         submitted_by_line_name: submitterLineName,
+        skill_level_snapshot: guestSkill.skillLevel,
+        allow_lower_level_snapshot: guestSkill.allowLowerLevel,
+        allow_higher_level_snapshot: guestSkill.allowHigherLevel,
       }, { onConflict: "event_id,member_id" });
       if (signupError) throw signupError;
 
@@ -885,9 +893,22 @@ async function handleLiffRequest(payload: any) {
     }
     const displayName = String(identity.name || existingMember?.display_name || "สมาชิก LINE").slice(0, 80);
 
-    if (payload.action === "save_liff_nickname") {
-      await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember);
-      return json({ ok: true, nickname });
+    if (payload.action === "save_liff_nickname" || payload.action === "save_liff_profile") {
+      const skill = payload.action === "save_liff_profile" ? validateSkillProfile(payload) : {
+        skillLevel: existingMember?.skill_level || null,
+        allowLowerLevel: Boolean(existingMember?.allow_lower_level),
+        allowHigherLevel: Boolean(existingMember?.allow_higher_level),
+      };
+      const memberId = await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember, skill);
+      if (existingSignup?.status === "coming" && !existingSignup.skill_level_snapshot && skill.skillLevel) {
+        const { error: snapshotError } = await admin.from("signups").update({
+          skill_level_snapshot: skill.skillLevel,
+          allow_lower_level_snapshot: skill.allowLowerLevel,
+          allow_higher_level_snapshot: skill.allowHigherLevel,
+        }).eq("event_id", event.id).eq("member_id", memberId);
+        if (snapshotError) throw snapshotError;
+      }
+      return json({ ok: true, nickname, ...skill });
     }
 
     const status = String(payload.status || "");
@@ -902,7 +923,8 @@ async function handleLiffRequest(payload: any) {
       return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
     }
 
-    const memberId = await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember);
+    const skill = validateSkillProfile(payload);
+    const memberId = await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember, skill);
     const { error: signupError } = await admin.from("signups").upsert({
       club_id: clubId,
       event_id: event.id,
@@ -911,6 +933,9 @@ async function handleLiffRequest(payload: any) {
       arrival_time: arrivalTime,
       submitted_by_line_user_id: null,
       submitted_by_line_name: null,
+      skill_level_snapshot: skill.skillLevel,
+      allow_lower_level_snapshot: skill.allowLowerLevel,
+      allow_higher_level_snapshot: skill.allowHigherLevel,
     }, { onConflict: "event_id,member_id" });
     if (signupError) throw signupError;
 
@@ -930,9 +955,9 @@ async function handleLiffRequest(payload: any) {
   }
 }
 
-async function findOrCreateGuestMember(admin: any, clubId: string, guestName: string) {
+async function findOrCreateGuestMember(admin: any, clubId: string, guestName: string, skill: any) {
   const { data: guestMembers, error: guestError } = await admin.from("club_members")
-    .select("id, nickname, display_name, aliases, line_user_id")
+    .select("id, nickname, display_name, aliases, line_user_id, skill_level")
     .eq("club_id", clubId)
     .eq("active", true)
     .eq("role", "member");
@@ -943,7 +968,15 @@ async function findOrCreateGuestMember(admin: any, clubId: string, guestName: st
     [member.nickname, member.display_name, ...(member.aliases || [])]
       .some((value) => normalizeMemberName(value) === normalizedGuestName)
   );
-  if (exactMatches.length === 1) return exactMatches[0].id;
+  if (exactMatches.length === 1) {
+    const { error: updateError } = await admin.from("club_members").update({
+      skill_level: skill.skillLevel,
+      allow_lower_level: skill.allowLowerLevel,
+      allow_higher_level: skill.allowHigherLevel,
+    }).eq("id", exactMatches[0].id);
+    if (updateError) throw updateError;
+    return exactMatches[0].id;
+  }
 
   const { data: newGuest, error: insertError } = await admin.from("club_members").insert({
     club_id: clubId,
@@ -952,6 +985,9 @@ async function findOrCreateGuestMember(admin: any, clubId: string, guestName: st
     line_user_id: null,
     role: "member",
     active: true,
+    skill_level: skill.skillLevel,
+    allow_lower_level: skill.allowLowerLevel,
+    allow_higher_level: skill.allowHigherLevel,
   }).select("id").single();
   if (insertError) throw insertError;
   return newGuest.id;
@@ -970,6 +1006,7 @@ async function upsertLiffMember(
   displayName: string,
   nickname: string,
   existingMember: any,
+  skill: any = null,
 ) {
   if (!existingMember?.id) {
     const { data: candidates, error: candidateError } = await admin.from("club_members")
@@ -992,7 +1029,7 @@ async function upsertLiffMember(
         matched.display_name,
       ].map((value) => String(value || "").trim()).filter(Boolean))];
       const { error } = await admin.from("club_members")
-        .update({ display_name: displayName, nickname, line_user_id: lineUserId, aliases })
+        .update({ display_name: displayName, nickname, line_user_id: lineUserId, aliases, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
         .eq("id", matched.id);
       if (error) throw error;
       return matched.id;
@@ -1004,19 +1041,20 @@ async function upsertLiffMember(
       nickname,
       line_user_id: lineUserId,
       role: "member",
+      ...(skill?.skillLevel ? { skill_level: skill.skillLevel, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}),
     }).select("id").single();
     if (error) throw error;
     return newMember.id;
   }
 
-  if (existingMember.display_name !== displayName || existingMember.nickname !== nickname) {
+  if (existingMember.display_name !== displayName || existingMember.nickname !== nickname || (skill?.skillLevel && existingMember.skill_level !== skill.skillLevel) || (skill?.skillLevel && (Boolean(existingMember.allow_lower_level) !== skill.allowLowerLevel || Boolean(existingMember.allow_higher_level) !== skill.allowHigherLevel))) {
     const aliases = [...new Set([
       ...(existingMember.aliases || []),
       existingMember.nickname,
       existingMember.display_name,
     ].map((value) => String(value || "").trim()).filter(Boolean))];
     const { error } = await admin.from("club_members")
-      .update({ display_name: displayName, nickname, aliases })
+      .update({ display_name: displayName, nickname, aliases, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
       .eq("id", existingMember.id);
     if (error) throw error;
   }
@@ -1025,7 +1063,7 @@ async function upsertLiffMember(
 
 async function getLiffRoster(admin: any, event: any) {
   const { data: signups, error: signupError } = await admin.from("signups")
-    .select("member_id, status, arrival_time, created_at")
+    .select("member_id, status, arrival_time, skill_level_snapshot, created_at")
     .eq("event_id", event.id)
     .eq("status", "coming")
     .order("created_at");
@@ -1041,12 +1079,56 @@ async function getLiffRoster(admin: any, event: any) {
     member.id,
     String(member.nickname || member.display_name || "สมาชิก").slice(0, 40),
   ]));
-  const coming = (signups || []).reduce((rows: Array<{ name: string; arrivalTime: string | null }>, signup: any) => {
+  const coming = (signups || []).reduce((rows: Array<{ name: string; arrivalTime: string | null; skillLevel: string | null }>, signup: any) => {
     const name = names.get(signup.member_id);
-    if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time) });
+    if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time), skillLevel: signup.skill_level_snapshot || null });
     return rows;
   }, [] as Array<{ name: string; arrivalTime: string | null }>);
   return { coming };
+}
+
+function validateSkillProfile(payload: any) {
+  const levels = ["Rookie-", "Rookie", "BG", "N", "S", "P"];
+  const skillLevel = String(payload.skillLevel || "");
+  const index = levels.indexOf(skillLevel);
+  if (index < 0) throw new Error("กรุณาเลือกระดับมือ");
+  return {
+    skillLevel,
+    allowLowerLevel: index > 0 && Boolean(payload.allowLowerLevel),
+    allowHigherLevel: index < levels.length - 1 && Boolean(payload.allowHigherLevel),
+  };
+}
+
+async function getLiffQueueStatus(admin: any, eventId: string, memberId: string) {
+  const { data: queuePlayer, error } = await admin.from("event_queue_players")
+    .select("status, games_played, minutes_played")
+    .eq("event_id", eventId)
+    .eq("member_id", memberId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!queuePlayer) return null;
+  const { data: activeMatches, error: matchError } = await admin.from("queue_matches")
+    .select("id, court_id")
+    .eq("event_id", eventId)
+    .in("status", ["proposed", "playing"]);
+  if (matchError) throw matchError;
+  const matchIds = (activeMatches || []).map((match: any) => match.id);
+  const { data: matchPlayer, error: playerError } = matchIds.length
+    ? await admin.from("queue_match_players").select("match_id, team").eq("member_id", memberId).in("match_id", matchIds).maybeSingle()
+    : { data: null, error: null };
+  if (playerError) throw playerError;
+  const match = matchPlayer ? (activeMatches || []).find((entry: any) => entry.id === matchPlayer.match_id) : null;
+  const { data: court, error: courtError } = match
+    ? await admin.from("event_courts").select("court_name").eq("id", match.court_id).maybeSingle()
+    : { data: null, error: null };
+  if (courtError) throw courtError;
+  return {
+    status: queuePlayer.status,
+    gamesPlayed: Number(queuePlayer.games_played) || 0,
+    minutesPlayed: Number(queuePlayer.minutes_played) || 0,
+    team: matchPlayer?.team || null,
+    courtName: court?.court_name || null,
+  };
 }
 
 async function verifyLiffIdToken(idToken: string) {
