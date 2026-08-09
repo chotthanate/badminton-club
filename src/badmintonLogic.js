@@ -556,6 +556,36 @@ export function suggestArrivalTimeOnCheck({
   return `${String(roundedAt.getHours()).padStart(2, "0")}:${String(roundedAt.getMinutes()).padStart(2, "0")}`;
 }
 
+export function suggestShuttlecockCheckpointTime({
+  now = new Date(),
+  eventDate,
+  startTime,
+  endTime,
+}) {
+  const dateParts = String(eventDate || "").split("-").map(Number);
+  const startMinutes = parseTime(startTime);
+  const endMinutes = parseTime(endTime);
+  const current = now instanceof Date ? now : new Date(now);
+  if (dateParts.length !== 3 || dateParts.some(Number.isNaN) || startMinutes === null || endMinutes === null || Number.isNaN(current.getTime())) {
+    return endTime || startTime || "00:00";
+  }
+
+  const [year, month, day] = dateParts;
+  const startsAt = new Date(year, month - 1, day, Math.floor(startMinutes / 60), startMinutes % 60);
+  const endsAt = new Date(year, month - 1, day, Math.floor(endMinutes / 60), endMinutes % 60);
+  if (endsAt <= startsAt) endsAt.setDate(endsAt.getDate() + 1);
+
+  if (current >= endsAt) return endTime;
+  const quarterHourMs = 15 * 60 * 1000;
+  const elapsed = Math.max(0, current.getTime() - startsAt.getTime());
+  const nextQuarter = Math.floor(elapsed / quarterHourMs) + 1;
+  const checkpointAt = new Date(Math.min(
+    endsAt.getTime(),
+    startsAt.getTime() + (nextQuarter * quarterHourMs),
+  ));
+  return `${String(checkpointAt.getHours()).padStart(2, "0")}:${String(checkpointAt.getMinutes()).padStart(2, "0")}`;
+}
+
 export function nextFridayIso(now = new Date()) {
   const date = new Date(now);
   const day = date.getDay();

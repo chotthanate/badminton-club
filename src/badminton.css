@@ -1005,20 +1005,122 @@
   color: #0f7a52;
 }
 
-.badminton-shuttle-box > label {
+.badminton-shuttle-counter-head {
   display: grid;
-  grid-template-columns: 1fr 90px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  color: #536056;
-  font-size: 13px;
-  font-weight: 900;
 }
 
-.badminton-shuttle-box > label input {
-  min-height: 38px;
+.badminton-shuttle-counter-head > div {
+  display: grid;
+  gap: 2px;
+}
+
+.badminton-shuttle-counter-head > div:last-child {
+  justify-items: end;
+}
+
+.badminton-shuttle-counter-head span {
+  color: #637064;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-shuttle-counter-head strong {
+  color: #142119;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.badminton-shuttle-counter-head strong small {
+  font-size: 14px;
+}
+
+.badminton-shuttle-counter-head b {
+  font-size: 19px;
+}
+
+.badminton-shuttle-plus-one {
+  width: 100%;
+  min-height: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 12px;
+  border: 1px solid #15976d;
+  border-radius: 11px;
+  background: #15976d;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+  touch-action: manipulation;
+}
+
+.badminton-shuttle-plus-one:disabled,
+.badminton-shuttle-bulk-form button:disabled,
+.badminton-shuttle-total-form button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.badminton-shuttle-bulk-form,
+.badminton-shuttle-total-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+}
+
+.badminton-shuttle-bulk-form label,
+.badminton-shuttle-total-form label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.badminton-shuttle-bulk-form label span,
+.badminton-shuttle-total-form label span {
+  color: #637064;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.badminton-shuttle-bulk-form input,
+.badminton-shuttle-total-form input,
+.badminton-shuttle-bulk-form button,
+.badminton-shuttle-total-form button {
+  min-width: 0;
+  min-height: 44px;
+}
+
+.badminton-shuttle-bulk-form input,
+.badminton-shuttle-total-form input {
   text-align: center;
+}
+
+.badminton-shuttle-bulk-form button {
+  min-width: 90px;
+}
+
+.badminton-shuttle-auto-note {
+  display: block;
+  margin-top: 8px;
+  color: #647168;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.badminton-shuttle-total-form {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #d7e0d4;
+}
+
+.badminton-shuttle-total-form button {
+  min-width: 72px;
 }
 
 .badminton-other-expenses {

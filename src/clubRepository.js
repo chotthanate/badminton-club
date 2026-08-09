@@ -502,6 +502,34 @@ export async function upsertShuttlecockCheckpoint({ clubId, eventId, time, cumul
   await updateEvent(eventId, { shuttlecock_count: maxCount });
 }
 
+export async function incrementEventShuttlecockCount({ eventId, increment, checkpointTime }) {
+  const amount = Number(increment);
+  if (!Number.isInteger(amount) || amount < 1 || amount > 100) {
+    throw new Error("เพิ่มลูกแบดได้ครั้งละ 1 ถึง 100 ลูก");
+  }
+  const { data, error } = await client().rpc("increment_event_shuttlecock_count", {
+    target_event_id: eventId,
+    increment_by: amount,
+    checkpoint_at: `${String(checkpointTime).slice(0, 5)}:00`,
+  });
+  throwIfError(error);
+  return data?.[0] || null;
+}
+
+export async function setEventShuttlecockCount({ eventId, count, checkpointTime }) {
+  const amount = Number(count);
+  if (!Number.isInteger(amount) || amount < 0 || amount > 1000) {
+    throw new Error("จำนวนลูกแบดรวมต้องอยู่ระหว่าง 0 ถึง 1,000 ลูก");
+  }
+  const { data, error } = await client().rpc("set_event_shuttlecock_count", {
+    target_event_id: eventId,
+    replacement_count: amount,
+    checkpoint_at: `${String(checkpointTime).slice(0, 5)}:00`,
+  });
+  throwIfError(error);
+  return data?.[0] || null;
+}
+
 export async function removeShuttlecockCheckpoint(checkpointId, eventId) {
   const { error } = await client().from("shuttlecock_checkpoints").delete().eq("id", checkpointId);
   throwIfError(error);

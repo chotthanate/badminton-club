@@ -40,6 +40,7 @@ import {
   getAdminContexts,
   finishEvent,
   getPaymentSlipImageUrl,
+  incrementEventShuttlecockCount,
   listClubEvents,
   listOutstandingPayments,
   loadDashboard,
@@ -56,6 +57,7 @@ import {
   removeParticipant,
   removeShuttlecockCheckpoint,
   setPayment,
+  setEventShuttlecockCount,
   updateAttendance,
   updateClubMember,
   updateCourt,
@@ -80,6 +82,7 @@ import {
   playedMinutesWithinEvent,
   roundDefaultsForDate,
   suggestArrivalTimeOnCheck,
+  suggestShuttlecockCheckpointTime,
   totalCourtHours,
   weekdayFromIsoDate,
 } from "./badmintonLogic.js";
@@ -1255,14 +1258,86 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 function PricingPanel({ event, mutate, session, settlement }) {
   const [editingCourt, setEditingCourt] = useState(false);
   const [editingShuttle, setEditingShuttle] = useState(false);
+  const [shuttleBatch, setShuttleBatch] = useState("");
+  const [shuttleTotalDraft, setShuttleTotalDraft] = useState(String(event.shuttlecockCount || 0));
+  const [shuttleBusy, setShuttleBusy] = useState(false);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
   const [checkpoint, setCheckpoint] = useState({ time: event.endTime, count: String(event.shuttlecockCount || 0) });
+  const shuttleMutationRef = useRef(false);
   const courtHours = totalCourtHours(event.courts);
   const courtCost = courtHours * event.courtHourlyRate;
   const shuttleCost = event.shuttlecockCount * event.shuttlecockUnitPrice;
   const otherCost = event.extraCosts.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const sharedCost = courtCost + shuttleCost + otherCost;
+
+  useEffect(() => {
+    setShuttleTotalDraft(String(event.shuttlecockCount || 0));
+    setCheckpoint((current) => ({ ...current, count: String(event.shuttlecockCount || 0) }));
+  }, [event.id, event.shuttlecockCount]);
+
+  function currentShuttleCheckpointTime() {
+    return suggestShuttlecockCheckpointTime({
+      eventDate: event.date,
+      startTime: event.startTime,
+      endTime: event.endTime,
+    });
+  }
+
+  async function addShuttlecocks(increment) {
+    const count = Number(increment);
+    if (!Number.isInteger(count) || count < 1 || count > 100) {
+      window.alert("กรุณากรอกจำนวนที่ต้องการเพิ่มตั้งแต่ 1 ถึง 100 ลูก");
+      return;
+    }
+    if (shuttleMutationRef.current) return;
+    shuttleMutationRef.current = true;
+    setShuttleBusy(true);
+    const checkpointTime = currentShuttleCheckpointTime();
+    try {
+      const saved = await mutate(
+        () => incrementEventShuttlecockCount({ eventId: event.id, increment: count, checkpointTime }),
+        `เพิ่มลูกแบด ${count} ลูกแล้ว · บันทึกช่วงเวลา ${checkpointTime}`,
+      );
+      if (saved) setShuttleBatch("");
+    } finally {
+      shuttleMutationRef.current = false;
+      setShuttleBusy(false);
+    }
+  }
+
+  async function saveShuttlecockTotal(submitEvent) {
+    submitEvent.preventDefault();
+    const nextCount = Number(shuttleTotalDraft);
+    const currentCount = Math.max(0, Number(event.shuttlecockCount) || 0);
+    if (!Number.isInteger(nextCount) || nextCount < 0 || nextCount > 1000) {
+      window.alert("จำนวนลูกแบดรวมต้องเป็นเลขเต็มตั้งแต่ 0 ถึง 1,000 ลูก");
+      setShuttleTotalDraft(String(currentCount));
+      return;
+    }
+    if (nextCount === currentCount) return;
+    const lockedCount = settlement.rows.filter((row) => row.billingFinalized).length;
+    const lockedWarning = lockedCount
+      ? `\n\nมีผู้เล่น ${lockedCount} คนที่สรุปยอดแล้ว ยอดเหล่านั้นจะไม่เปลี่ยน แต่คนที่ยังไม่สรุปจะคำนวณใหม่`
+      : "";
+    if (!window.confirm(`ยืนยันแก้จำนวนลูกแบดรวมจาก ${currentCount} เป็น ${nextCount} ลูก?\n\nใช้เมนูนี้เฉพาะกรณีบันทึกยอดผิด${lockedWarning}`)) {
+      setShuttleTotalDraft(String(currentCount));
+      return;
+    }
+    if (shuttleMutationRef.current) return;
+    shuttleMutationRef.current = true;
+    setShuttleBusy(true);
+    const checkpointTime = currentShuttleCheckpointTime();
+    try {
+      await mutate(
+        () => setEventShuttlecockCount({ eventId: event.id, count: nextCount, checkpointTime }),
+        `แก้จำนวนลูกแบดรวมเป็น ${nextCount} ลูกแล้ว`,
+      );
+    } finally {
+      shuttleMutationRef.current = false;
+      setShuttleBusy(false);
+    }
+  }
 
   return (
     <section className="badminton-card badminton-pricing-card">
@@ -1277,8 +1352,17 @@ function PricingPanel({ event, mutate, session, settlement }) {
           </div>
         </article>
         <article className="badminton-price-box badminton-shuttle-box">
-          <label>จำนวนลูกแบด<input defaultValue={event.shuttlecockCount} min="0" type="number" onBlur={(e) => mutate(() => updateEvent(event.id, { shuttlecock_count: Number(e.target.value) }), "อัปเดตจำนวนลูกแบดแล้ว")} /></label>
-          <div className="badminton-price-head"><span>ค่าลูกแบด</span><strong>{baht(shuttleCost)} บาท</strong></div>
+          <div className="badminton-shuttle-counter-head"><div><span>ลูกแบดที่ใช้แล้ว</span><strong>{event.shuttlecockCount}<small> ลูก</small></strong></div><div><span>ค่าลูกแบด</span><b>{baht(shuttleCost)} บาท</b></div></div>
+          <button className="badminton-shuttle-plus-one" disabled={shuttleBusy} onClick={() => addShuttlecocks(1)} type="button"><Plus size={24} /> {shuttleBusy ? "กำลังบันทึก..." : "เพิ่ม 1 ลูก"}</button>
+          <form className="badminton-shuttle-bulk-form" onSubmit={(submitEvent) => { submitEvent.preventDefault(); addShuttlecocks(shuttleBatch); }}>
+            <label><span>เพิ่มหลายลูก</span><input aria-label="จำนวนลูกแบดที่ต้องการเพิ่ม" disabled={shuttleBusy} inputMode="numeric" max="100" min="1" onChange={(changeEvent) => setShuttleBatch(changeEvent.target.value)} placeholder="เช่น 12" required type="number" value={shuttleBatch} /></label>
+            <button className="badminton-secondary" disabled={shuttleBusy} type="submit"><Plus size={16} /> เพิ่ม</button>
+          </form>
+          <small className="badminton-shuttle-auto-note">ทุกครั้งที่เพิ่ม ระบบจะบันทึกช่วงเวลา 15 นาทีอัตโนมัติ เพื่อไม่คิดค่าลูกย้อนหลังกับคนที่มาทีหลัง</small>
+          <form className="badminton-shuttle-total-form" onSubmit={saveShuttlecockTotal}>
+            <label><span>แก้ยอดรวม</span><input aria-label="แก้จำนวนลูกแบดรวม" disabled={shuttleBusy} inputMode="numeric" max="1000" min="0" onChange={(changeEvent) => setShuttleTotalDraft(changeEvent.target.value)} type="number" value={shuttleTotalDraft} /></label>
+            <button className="badminton-edit-price" disabled={shuttleBusy || Number(shuttleTotalDraft) === Number(event.shuttlecockCount)} type="submit">บันทึก</button>
+          </form>
           <div className="badminton-price-setting">
             {editingShuttle ? <input autoFocus min="0" type="number" defaultValue={event.shuttlecockUnitPrice} onBlur={(e) => { setEditingShuttle(false); mutate(() => updateEventPriceAndDefault({ clubId: event.clubId, eventId: event.id, eventDate: event.date, priceType: "shuttlecock", value: e.target.value }), "แก้ราคาลูกแบดและบันทึกเป็นค่าเริ่มต้นแล้ว"); }} /> : <span>{baht(event.shuttlecockUnitPrice)} บาท/ลูก</span>}
             <button className="badminton-edit-price" onClick={() => setEditingShuttle(true)} type="button">แก้ราคา</button>

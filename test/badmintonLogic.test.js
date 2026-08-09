@@ -11,6 +11,7 @@ import {
   playedMinutesWithinEvent,
   roundDefaultsForDate,
   suggestArrivalTimeOnCheck,
+  suggestShuttlecockCheckpointTime,
   totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
@@ -296,6 +297,28 @@ test("shuttlecock checkpoints charge later shuttlecocks only to players still pr
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [285, 475]);
 });
 
+test("shuttlecock checkpoints do not charge late arrivals for earlier shuttlecocks", () => {
+  const result = calculateSettlement({
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    courts: [],
+    courtHourlyRate: 200,
+    shuttlecockCount: 4,
+    shuttlecockUnitPrice: 95,
+    shuttlecockCheckpoints: [
+      { time: "22:00", cumulativeCount: 3 },
+      { time: "00:00", cumulativeCount: 4 },
+    ],
+    extraCosts: [],
+    attendance: [
+      { memberId: "early", name: "มาเร็ว", arrived: true, arrivedAt: "21:00", leftAt: "22:00", playedMinutes: 60, billingPercentage: 100 },
+      { memberId: "late", name: "มาห้าทุ่ม", arrived: true, arrivedAt: "23:00", leftAt: "00:00", playedMinutes: 60, billingPercentage: 100 },
+    ],
+  });
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [285, 95]);
+});
+
 test("buildLineSummary lists personal items instead of a generic extras total", () => {
   const summary = buildLineSummary(makeEvent({
     costs: [{ amount: 100 }],
@@ -417,6 +440,36 @@ test("suggestArrivalTimeOnCheck supports a session after midnight", () => {
     endTime: "01:00",
     plannedArrival: "23:30",
   }), "00:15");
+});
+
+test("suggestShuttlecockCheckpointTime records additions in the next quarter-hour", () => {
+  assert.equal(suggestShuttlecockCheckpointTime({
+    now: new Date(2026, 6, 24, 21, 7),
+    eventDate: "2026-07-24",
+    startTime: "21:00",
+    endTime: "00:00",
+  }), "21:15");
+  assert.equal(suggestShuttlecockCheckpointTime({
+    now: new Date(2026, 6, 24, 23, 58),
+    eventDate: "2026-07-24",
+    startTime: "21:00",
+    endTime: "00:00",
+  }), "00:00");
+});
+
+test("suggestShuttlecockCheckpointTime uses the first interval before play and the end after play", () => {
+  assert.equal(suggestShuttlecockCheckpointTime({
+    now: new Date(2026, 6, 24, 20, 0),
+    eventDate: "2026-07-24",
+    startTime: "21:00",
+    endTime: "00:00",
+  }), "21:15");
+  assert.equal(suggestShuttlecockCheckpointTime({
+    now: new Date(2026, 6, 25, 0, 30),
+    eventDate: "2026-07-24",
+    startTime: "21:00",
+    endTime: "00:00",
+  }), "00:00");
 });
 
 test("roundDefaultsForDate uses the requested Friday and Saturday court presets", () => {
