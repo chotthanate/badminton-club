@@ -1,4 +1,6 @@
-export const SKILL_LEVELS = ["Rookie-", "Rookie", "BG", "N", "S", "P"];
+import { SKILL_LEVELS, normalizePlayableSkillLevels } from "./skillLevels.js";
+
+export { SKILL_LEVELS };
 
 export function skillIndex(level) {
   return SKILL_LEVELS.indexOf(level);
@@ -48,24 +50,51 @@ function skillRange(lineup) {
   return Math.max(...levels) - Math.min(...levels);
 }
 
-function isMutualAdjacentLineup(lineup) {
-  const levels = lineup.map((player) => skillIndex(player.skillLevel));
-  const lowest = Math.min(...levels);
-  const highest = Math.max(...levels);
-  if (highest - lowest !== 1) return false;
-  return lineup.every((player) => {
-    const level = skillIndex(player.skillLevel);
-    if (level === lowest) return Boolean(player.allowHigherLevel);
-    if (level === highest) return Boolean(player.allowLowerLevel);
-    return true;
-  });
+function playableLevels(player) {
+  return new Set(normalizePlayableSkillLevels(player.skillLevel, player.playableSkillLevels, {
+    allowLowerLevel: player.allowLowerLevel,
+    allowHigherLevel: player.allowHigherLevel,
+  }));
+}
+
+function pairCompatibility(left, right) {
+  const leftIndex = skillIndex(left.skillLevel);
+  const rightIndex = skillIndex(right.skillLevel);
+  if (leftIndex === rightIndex) return { accepted: true, mutual: true };
+  const stronger = leftIndex > rightIndex ? left : right;
+  const weaker = stronger === left ? right : left;
+  return {
+    accepted: playableLevels(stronger).has(weaker.skillLevel),
+    mutual: playableLevels(weaker).has(stronger.skillLevel),
+  };
+}
+
+function selectedCompatibility(lineup) {
+  for (let leftIndex = 0; leftIndex < lineup.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < lineup.length; rightIndex += 1) {
+      if (!pairCompatibility(lineup[leftIndex], lineup[rightIndex]).accepted) return false;
+    }
+  }
+  return true;
+}
+
+export function compatibilityPreferencePenalty(lineup) {
+  let penalty = 0;
+  for (let leftIndex = 0; leftIndex < lineup.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < lineup.length; rightIndex += 1) {
+      const left = lineup[leftIndex];
+      const right = lineup[rightIndex];
+      if (left.skillLevel !== right.skillLevel && !pairCompatibility(left, right).mutual) penalty += 1;
+    }
+  }
+  return penalty;
 }
 
 export function compatibilityTier(lineup) {
   const range = skillRange(lineup);
   if (range === 0) return 1;
-  if (range === 1 && isMutualAdjacentLineup(lineup)) return 2;
-  if (range === 1) return 3;
+  if (selectedCompatibility(lineup)) return 2;
+  if (range <= 1) return 3;
   return 99;
 }
 
@@ -147,11 +176,14 @@ export function proposeQueueMatch(players, matches = [], nextSequence = 1) {
     .map((lineup) => ({
       lineup,
       tier: compatibilityTier(lineup),
+      preferencePenalty: compatibilityPreferencePenalty(lineup),
       score: lineupScore(lineup, repeatStats),
     }))
     .filter((candidate) => candidate.tier < 99);
   if (!candidates.length) return null;
-  candidates.sort((left, right) => left.tier - right.tier || compareKeys(left.score, right.score));
+  candidates.sort((left, right) => left.tier - right.tier
+    || left.preferencePenalty - right.preferencePenalty
+    || compareKeys(left.score, right.score));
   const selected = candidates[0];
   const teams = balanceTeams(selected.lineup, matches);
   return { ...teams, lineup: selected.lineup, tier: selected.tier };
@@ -161,9 +193,14 @@ export function proposeReplacement(remainingPlayers, waitingPlayers, matches = [
   const occupiedIds = new Set(remainingPlayers.map((player) => player.memberId));
   const candidates = eligibleQueuePlayers(waitingPlayers, nextSequence)
     .filter((player) => !occupiedIds.has(player.memberId))
-    .map((player) => ({ player, tier: compatibilityTier([...remainingPlayers, player]) }))
+    .map((player) => ({
+      player,
+      tier: compatibilityTier([...remainingPlayers, player]),
+      preferencePenalty: compatibilityPreferencePenalty([...remainingPlayers, player]),
+    }))
     .filter((candidate) => candidate.tier < 99)
     .sort((left, right) => left.tier - right.tier
+      || left.preferencePenalty - right.preferencePenalty
       || compareKeys(queueFairnessKey(left.player), queueFairnessKey(right.player)));
   if (!candidates.length) return null;
   const player = candidates[0].player;

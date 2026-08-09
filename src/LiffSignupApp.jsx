@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Check, Clock3, Edit3, LoaderCircle, MapPin, Plus, X } from "lucide-react";
 import { buildArrivalTimeOptions, getEventIdFromSearch, isLatestEventSearch } from "./liffSignup.js";
-
-const SKILL_LEVELS = ["Rookie-", "Rookie", "BG", "N", "S", "P"];
+import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
+import { defaultPlayableSkillLevels, normalizePlayableSkillLevels, SKILL_LEVELS } from "./skillLevels.js";
 
 export default function LiffSignupApp() {
   const [event, setEvent] = useState(null);
@@ -12,16 +12,15 @@ export default function LiffSignupApp() {
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [skillLevel, setSkillLevel] = useState("");
   const [skillDraft, setSkillDraft] = useState("");
-  const [allowLowerLevel, setAllowLowerLevel] = useState(false);
-  const [allowHigherLevel, setAllowHigherLevel] = useState(false);
-  const [skillPreferenceDraft, setSkillPreferenceDraft] = useState({ lower: false, higher: false });
+  const [playableSkillLevels, setPlayableSkillLevels] = useState([]);
+  const [playableSkillLevelsDraft, setPlayableSkillLevelsDraft] = useState([]);
   const [roster, setRoster] = useState({ coming: [] });
   const [savedStatus, setSavedStatus] = useState(null);
   const [savedArrivalTime, setSavedArrivalTime] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestArrivalTime, setGuestArrivalTime] = useState("");
   const [guestSkill, setGuestSkill] = useState("");
-  const [guestPreferences, setGuestPreferences] = useState({ lower: false, higher: false });
+  const [guestPlayableSkillLevels, setGuestPlayableSkillLevels] = useState([]);
   const [queueStatus, setQueueStatus] = useState(null);
   const [guestSaving, setGuestSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -58,9 +57,12 @@ export default function LiffSignupApp() {
         const storedSkill = data.profile.skillLevel || "";
         setSkillLevel(storedSkill);
         setSkillDraft(storedSkill);
-        setAllowLowerLevel(Boolean(data.profile.allowLowerLevel));
-        setAllowHigherLevel(Boolean(data.profile.allowHigherLevel));
-        setSkillPreferenceDraft({ lower: Boolean(data.profile.allowLowerLevel), higher: Boolean(data.profile.allowHigherLevel) });
+        const storedPlayableLevels = normalizePlayableSkillLevels(storedSkill, data.profile.playableSkillLevels, {
+          allowLowerLevel: data.profile.allowLowerLevel,
+          allowHigherLevel: data.profile.allowHigherLevel,
+        });
+        setPlayableSkillLevels(storedPlayableLevels);
+        setPlayableSkillLevelsDraft(storedPlayableLevels);
         setShowNicknameModal(!storedNickname || !storedSkill);
         setRoster(data.roster || { coming: [] });
         setSavedStatus(data.currentStatus || null);
@@ -123,14 +125,13 @@ export default function LiffSignupApp() {
     setError("");
     try {
       const idToken = window.liff.getIDToken();
-      const data = await callLiffApi("save_liff_profile", { eventId: activeEventId, idToken, nickname: nextNickname, skillLevel: skillDraft, allowLowerLevel: skillPreferenceDraft.lower, allowHigherLevel: skillPreferenceDraft.higher });
+      const data = await callLiffApi("save_liff_profile", { eventId: activeEventId, idToken, nickname: nextNickname, skillLevel: skillDraft, playableSkillLevels: playableSkillLevelsDraft });
       setNickname(data.nickname);
       setNicknameDraft(data.nickname);
       setSkillLevel(data.skillLevel);
       setSkillDraft(data.skillLevel);
-      setAllowLowerLevel(Boolean(data.allowLowerLevel));
-      setAllowHigherLevel(Boolean(data.allowHigherLevel));
-      setSkillPreferenceDraft({ lower: Boolean(data.allowLowerLevel), higher: Boolean(data.allowHigherLevel) });
+      setPlayableSkillLevels(data.playableSkillLevels || defaultPlayableSkillLevels(data.skillLevel));
+      setPlayableSkillLevelsDraft(data.playableSkillLevels || defaultPlayableSkillLevels(data.skillLevel));
       setShowNicknameModal(false);
     } catch (nextError) {
       setError(nextError.message || "บันทึกชื่อเล่นไม่สำเร็จ");
@@ -157,8 +158,7 @@ export default function LiffSignupApp() {
         arrivalTime,
         nickname: nickname.trim(),
         skillLevel,
-        allowLowerLevel,
-        allowHigherLevel,
+        playableSkillLevels,
       });
       setSavedStatus("coming");
       setSavedArrivalTime(data.arrivalTime || arrivalTime);
@@ -213,12 +213,11 @@ export default function LiffSignupApp() {
         guestName: nextGuestName,
         arrivalTime: guestArrivalTime,
         skillLevel: guestSkill,
-        allowLowerLevel: guestPreferences.lower,
-        allowHigherLevel: guestPreferences.higher,
+        playableSkillLevels: guestPlayableSkillLevels,
       });
       setGuestName("");
       setGuestSkill("");
-      setGuestPreferences({ lower: false, higher: false });
+      setGuestPlayableSkillLevels([]);
       setRoster(data.roster || { coming: [] });
     } catch (nextError) {
       setError(nextError.message || "เพิ่มผู้เล่นไม่สำเร็จ");
@@ -251,7 +250,7 @@ export default function LiffSignupApp() {
       </section>
 
       <section className="liff-answer-card">
-        <div className="liff-signup-as"><span>ลงชื่อเป็น</span><strong>{nickname}</strong>{skillLevel ? <em>{skillLevel}</em> : null}<button onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setSkillPreferenceDraft({ lower: allowLowerLevel, higher: allowHigherLevel }); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> แก้โปรไฟล์</button></div>
+        <div className="liff-signup-as"><span>ลงชื่อเป็น</span><strong>{nickname}</strong>{skillLevel ? <em>{skillLevel}</em> : null}<button onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setPlayableSkillLevelsDraft(playableSkillLevels); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> แก้โปรไฟล์</button></div>
         {queueStatus ? <div className={`liff-queue-status is-${queueStatus.status}`}><span>{queueStatus.status === "playing" ? `กำลังเล่น ${queueStatus.courtName || "ในสนาม"}` : queueStatus.status === "proposed" ? `เตรียมลง ${queueStatus.courtName || "สนามถัดไป"}` : queueStatus.status === "waiting" ? "อยู่ในคิวรอเล่น" : "ออกจากคิวแล้ว"}</span><small>{queueStatus.gamesPlayed} เกม · {queueStatus.minutesPlayed} นาที{queueStatus.team ? ` · ทีม ${queueStatus.team}` : ""}</small></div> : null}
         <div className="liff-answer-heading">
           <div><span>เวลาของคุณ</span><strong>{closed ? "รอบนี้ปิดรับลงเวลาแล้ว" : savedStatus === "coming" ? "ลงเวลาเรียบร้อยแล้ว" : "เลือกเวลาที่จะไป"}</strong></div>
@@ -283,7 +282,7 @@ export default function LiffSignupApp() {
             placeholder="ลงชื่อให้เพื่อน"
             value={guestName}
           />
-          <select aria-label="ระดับมือของเพื่อน" onChange={(changeEvent) => { setGuestSkill(changeEvent.target.value); setGuestPreferences({ lower: false, higher: false }); }} value={guestSkill}><option value="">ระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select>
+          <select aria-label="ระดับมือของเพื่อน" onChange={(changeEvent) => { setGuestSkill(changeEvent.target.value); setGuestPlayableSkillLevels(defaultPlayableSkillLevels(changeEvent.target.value)); }} value={guestSkill}><option value="">ระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select>
           <select
             aria-label="เวลาที่เพื่อนจะมา"
             onChange={(changeEvent) => setGuestArrivalTime(changeEvent.target.value)}
@@ -294,7 +293,7 @@ export default function LiffSignupApp() {
           <button aria-label="เพิ่มผู้เล่น" disabled={guestSaving || !guestName.trim() || !guestArrivalTime || !guestSkill} type="submit">
             {guestSaving ? <LoaderCircle size={18} /> : <Plus size={19} />}
           </button>
-          {guestSkill ? <div className="liff-guest-preferences"><label><input checked={guestPreferences.lower} disabled={SKILL_LEVELS.indexOf(guestSkill) === 0} onChange={(changeEvent) => setGuestPreferences({ ...guestPreferences, lower: changeEvent.target.checked })} type="checkbox" /> เล่นกับมืออ่อนกว่าได้</label><label><input checked={guestPreferences.higher} disabled={SKILL_LEVELS.indexOf(guestSkill) === SKILL_LEVELS.length - 1} onChange={(changeEvent) => setGuestPreferences({ ...guestPreferences, higher: changeEvent.target.checked })} type="checkbox" /> เล่นกับมือสูงกว่าได้</label></div> : null}
+          <SkillCompatibilityPicker className="liff-guest-preferences" onChange={setGuestPlayableSkillLevels} skillLevel={guestSkill} value={guestPlayableSkillLevels} />
         </form>
       ) : null}
 
@@ -308,12 +307,12 @@ export default function LiffSignupApp() {
           <form className="liff-nickname-modal" onSubmit={saveNickname}>
             <div><p className="badminton-kicker">โปรไฟล์สมาชิก</p><h2>{nickname && skillLevel ? "แก้ไขโปรไฟล์" : "ตั้งค่าครั้งแรก"}</h2><p>ระบบจะจำชื่อและระดับไว้ ครั้งต่อไปไม่ต้องกรอกใหม่</p></div>
             <label htmlFor="liff-nickname"><span>ชื่อเล่น</span><input autoFocus id="liff-nickname" maxLength="40" onChange={(changeEvent) => setNicknameDraft(changeEvent.target.value)} placeholder="เช่น บอย, หยก, แนน" required value={nicknameDraft} /></label>
-            <label><span>ระดับมือ</span><select onChange={(changeEvent) => { setSkillDraft(changeEvent.target.value); setSkillPreferenceDraft({ lower: false, higher: false }); }} required value={skillDraft}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
-            {skillDraft ? <div className="liff-skill-preferences"><label><input checked={skillPreferenceDraft.lower} disabled={SKILL_LEVELS.indexOf(skillDraft) === 0} onChange={(changeEvent) => setSkillPreferenceDraft({ ...skillPreferenceDraft, lower: changeEvent.target.checked })} type="checkbox" /> ยินดีเล่นกับมืออ่อนกว่า 1 ระดับ</label><label><input checked={skillPreferenceDraft.higher} disabled={SKILL_LEVELS.indexOf(skillDraft) === SKILL_LEVELS.length - 1} onChange={(changeEvent) => setSkillPreferenceDraft({ ...skillPreferenceDraft, higher: changeEvent.target.checked })} type="checkbox" /> ยินดีเล่นกับมือสูงกว่า 1 ระดับ</label></div> : null}
+            <label><span>ระดับมือ</span><select onChange={(changeEvent) => { setSkillDraft(changeEvent.target.value); setPlayableSkillLevelsDraft(defaultPlayableSkillLevels(changeEvent.target.value)); }} required value={skillDraft}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
+            <SkillCompatibilityPicker className="liff-skill-preferences" onChange={setPlayableSkillLevelsDraft} skillLevel={skillDraft} value={playableSkillLevelsDraft} />
             <small>ชื่อ LINE ของคุณคือ {profile?.name || "สมาชิก LINE"}</small>
             {error ? <div className="liff-inline-error">{error}</div> : null}
             <div className="liff-modal-actions">
-              {nickname && skillLevel ? <button className="liff-modal-cancel" disabled={saving} onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setShowNicknameModal(false); setError(""); }} type="button">ยกเลิก</button> : null}
+              {nickname && skillLevel ? <button className="liff-modal-cancel" disabled={saving} onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setPlayableSkillLevelsDraft(playableSkillLevels); setShowNicknameModal(false); setError(""); }} type="button">ยกเลิก</button> : null}
               <button className="liff-modal-save" disabled={saving} type="submit">{saving ? "กำลังบันทึก..." : "บันทึกโปรไฟล์"}</button>
             </div>
           </form>

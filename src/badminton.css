@@ -4317,10 +4317,121 @@
   border-radius: 999px;
   background: #e6f5eb;
   color: #0f7a52;
-  font-size: 11px;
+  font-size: 13px;
   font-style: normal;
   font-weight: 900;
   white-space: nowrap;
+}
+
+/* Compact skill badge and selectable compatible levels. */
+.badminton-attendance-row > .badminton-player-identity {
+  grid-template-columns: 32px auto minmax(0, 1fr) auto 34px;
+}
+
+.badminton-player-identity > .badminton-skill-badge {
+  grid-column: auto;
+  min-width: 30px;
+  max-width: none;
+  width: auto;
+  display: inline-flex;
+  justify-content: center;
+  align-self: center;
+  padding: 2px 7px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.skill-compatibility-picker {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.skill-compatibility-picker legend {
+  margin: 0 0 7px;
+  padding: 0;
+  color: #536056;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.skill-compatibility-picker > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.skill-compatibility-picker label {
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #bfd3c2;
+  border-radius: 9px;
+  background: #f5faf5;
+  color: #176f50;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.skill-compatibility-picker label.is-own-level {
+  border-color: #d4d9d4;
+  background: #ecefed;
+  color: #6f7670;
+  cursor: default;
+}
+
+.skill-compatibility-picker input {
+  width: 17px;
+  height: 17px;
+  min-height: 17px;
+  flex: 0 0 17px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font-size: inherit;
+  accent-color: #15966a;
+}
+
+.badminton-new-player-skill .skill-compatibility-picker {
+  min-width: 250px;
+}
+
+.liff-guest-signup-row > .skill-compatibility-picker {
+  grid-column: 1 / -1;
+  padding-top: 3px;
+}
+
+@media (max-width: 760px) {
+  .badminton-player-name {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .badminton-player-name strong {
+    flex: 0 1 auto;
+    width: auto;
+  }
+
+  .badminton-player-name span {
+    flex: 1 1 auto;
+    width: auto;
+    margin: 0;
+  }
+
+  .badminton-new-player-skill .skill-compatibility-picker {
+    min-width: 0;
+  }
 }
 
 .badminton-new-player-skill {

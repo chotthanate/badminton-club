@@ -1,4 +1,9 @@
 import { supabase } from "./supabase.js";
+import {
+  defaultPlayableSkillLevels,
+  legacyPreferencesForPlayable,
+  normalizePlayableSkillLevels,
+} from "./skillLevels.js";
 
 function client() {
   if (!supabase) throw new Error("ยังไม่ได้ตั้งค่า Supabase");
@@ -94,7 +99,7 @@ export async function loadDashboard(clubId, eventId = null) {
 
   const membersPromise = client()
     .from("club_members")
-    .select("id, display_name, nickname, aliases, role, active, line_user_id, payment_exempt, skill_level, allow_lower_level, allow_higher_level, created_at")
+    .select("id, display_name, nickname, aliases, role, active, line_user_id, payment_exempt, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level, created_at")
     .eq("club_id", clubId)
     .eq("active", true)
     .order("created_at");
@@ -365,7 +370,7 @@ async function invokeLineBot(body) {
   return data;
 }
 
-export async function addLineMember({ clubId, displayName, lineUserId = null, skillLevel = null, allowLowerLevel = false, allowHigherLevel = false }) {
+export async function addLineMember({ clubId, displayName, lineUserId = null, skillLevel = null, playableSkillLevels, allowLowerLevel, allowHigherLevel }) {
   const cleanName = displayName.trim();
   const normalizedName = normalizeStoredMemberName(cleanName);
   const { data: existingMembers, error: existingError } = await client().from("club_members")
@@ -389,6 +394,16 @@ export async function addLineMember({ clubId, displayName, lineUserId = null, sk
     }
     return existing;
   }
+  const normalizedPlayable = skillLevel
+    ? normalizePlayableSkillLevels(
+      skillLevel,
+      playableSkillLevels === undefined && allowLowerLevel === undefined && allowHigherLevel === undefined
+        ? defaultPlayableSkillLevels(skillLevel)
+        : playableSkillLevels,
+      { allowLowerLevel, allowHigherLevel },
+    )
+    : [];
+  const legacyPreferences = legacyPreferencesForPlayable(skillLevel, normalizedPlayable);
   const { data, error } = await client().from("club_members")
     .insert({
       club_id: clubId,
@@ -397,8 +412,9 @@ export async function addLineMember({ clubId, displayName, lineUserId = null, sk
       line_user_id: lineUserId?.trim() || null,
       role: "member",
       skill_level: skillLevel,
-      allow_lower_level: Boolean(allowLowerLevel),
-      allow_higher_level: Boolean(allowHigherLevel),
+      playable_skill_levels: normalizedPlayable,
+      allow_lower_level: legacyPreferences.allowLowerLevel,
+      allow_higher_level: legacyPreferences.allowHigherLevel,
     })
     .select("id, display_name, nickname, line_user_id")
     .single();
@@ -411,6 +427,7 @@ export async function updateClubMember(memberId, {
   displayName,
   paymentExempt = false,
   skillLevel,
+  playableSkillLevels,
   allowLowerLevel,
   allowHigherLevel,
 }) {
@@ -431,8 +448,16 @@ export async function updateClubMember(memberId, {
       payment_exempt: Boolean(paymentExempt),
   };
   if (skillLevel !== undefined) profilePatch.skill_level = skillLevel || null;
-  if (allowLowerLevel !== undefined) profilePatch.allow_lower_level = Boolean(allowLowerLevel);
-  if (allowHigherLevel !== undefined) profilePatch.allow_higher_level = Boolean(allowHigherLevel);
+  if (skillLevel) {
+    const normalizedPlayable = normalizePlayableSkillLevels(skillLevel, playableSkillLevels, {
+      allowLowerLevel,
+      allowHigherLevel,
+    });
+    const legacyPreferences = legacyPreferencesForPlayable(skillLevel, normalizedPlayable);
+    profilePatch.playable_skill_levels = normalizedPlayable;
+    profilePatch.allow_lower_level = legacyPreferences.allowLowerLevel;
+    profilePatch.allow_higher_level = legacyPreferences.allowHigherLevel;
+  }
   const { error } = await client().from("club_members")
     .update(profilePatch)
     .eq("id", memberId);
@@ -475,13 +500,14 @@ export async function updateSignup({
   status,
   arrivalTime = null,
   skillLevel,
+  playableSkillLevels,
   allowLowerLevel,
   allowHigherLevel,
 }) {
   let memberProfile = null;
   if (status === "coming" && skillLevel === undefined) {
     const { data, error } = await client().from("club_members")
-      .select("skill_level, allow_lower_level, allow_higher_level")
+      .select("skill_level, playable_skill_levels, allow_lower_level, allow_higher_level")
       .eq("id", memberId)
       .single();
     throwIfError(error);
@@ -489,6 +515,17 @@ export async function updateSignup({
   }
   const nextSkillLevel = skillLevel === undefined ? memberProfile?.skill_level : skillLevel;
   if (status === "coming" && !nextSkillLevel) throw new Error("กรุณากำหนดระดับมือของผู้เล่นก่อนเพิ่มเข้ารอบ");
+  const nextPlayableLevels = status === "coming"
+    ? normalizePlayableSkillLevels(
+      nextSkillLevel,
+      playableSkillLevels === undefined ? memberProfile?.playable_skill_levels : playableSkillLevels,
+      {
+        allowLowerLevel: allowLowerLevel === undefined ? memberProfile?.allow_lower_level : allowLowerLevel,
+        allowHigherLevel: allowHigherLevel === undefined ? memberProfile?.allow_higher_level : allowHigherLevel,
+      },
+    )
+    : [];
+  const legacyPreferences = legacyPreferencesForPlayable(nextSkillLevel, nextPlayableLevels);
   const { error } = await client().from("signups").upsert({
     club_id: clubId,
     event_id: eventId,
@@ -496,8 +533,9 @@ export async function updateSignup({
     status,
     arrival_time: status === "coming" ? arrivalTime : null,
     skill_level_snapshot: status === "coming" ? nextSkillLevel : null,
-    allow_lower_level_snapshot: status === "coming" ? Boolean(allowLowerLevel === undefined ? memberProfile?.allow_lower_level : allowLowerLevel) : false,
-    allow_higher_level_snapshot: status === "coming" ? Boolean(allowHigherLevel === undefined ? memberProfile?.allow_higher_level : allowHigherLevel) : false,
+    playable_skill_levels_snapshot: nextPlayableLevels,
+    allow_lower_level_snapshot: status === "coming" ? legacyPreferences.allowLowerLevel : false,
+    allow_higher_level_snapshot: status === "coming" ? legacyPreferences.allowHigherLevel : false,
   }, { onConflict: "event_id,member_id" });
   throwIfError(error);
 }
@@ -758,14 +796,14 @@ async function seedDefaultExtraItems(clubId) {
 
 async function seedTestMembers(clubId) {
   const members = [
-    { club_id: clubId, display_name: "LINE Demo One", nickname: "เมย์ทดลอง", role: "member", skill_level: "BG", allow_higher_level: true },
-    { club_id: clubId, display_name: "LINE Demo Two", nickname: "แจ็คทดลอง", role: "member", skill_level: "BG", allow_higher_level: true },
-    { club_id: clubId, display_name: "LINE Demo Three", nickname: "บอยทดลอง", role: "member", skill_level: "N", allow_lower_level: true },
-    { club_id: clubId, display_name: "LINE Demo Four", nickname: "แนนทดลอง", role: "member", skill_level: "N", allow_lower_level: true },
-    { club_id: clubId, display_name: "LINE Demo Five", nickname: "เอ็มทดลอง", role: "member", skill_level: "BG", allow_higher_level: true },
-    { club_id: clubId, display_name: "LINE Demo Six", nickname: "เก่งทดลอง", role: "member", skill_level: "BG", allow_higher_level: true },
-    { club_id: clubId, display_name: "LINE Demo Seven", nickname: "หยกทดลอง", role: "member", skill_level: "N", allow_lower_level: true },
-    { club_id: clubId, display_name: "LINE Demo Eight", nickname: "นิวทดลอง", role: "member", skill_level: "N", allow_lower_level: true },
+    { club_id: clubId, display_name: "LINE Demo One", nickname: "เมย์ทดลอง", role: "member", skill_level: "BG", playable_skill_levels: ["Rookie", "BG", "N"], allow_lower_level: true, allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Two", nickname: "แจ็คทดลอง", role: "member", skill_level: "BG", playable_skill_levels: ["Rookie", "BG", "N"], allow_lower_level: true, allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Three", nickname: "บอยทดลอง", role: "member", skill_level: "N", playable_skill_levels: ["BG", "N", "S"], allow_lower_level: true, allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Four", nickname: "แนนทดลอง", role: "member", skill_level: "N", playable_skill_levels: ["BG", "N", "S"], allow_lower_level: true, allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Five", nickname: "เอ็มทดลอง", role: "member", skill_level: "BG", playable_skill_levels: ["Rookie", "BG", "N"], allow_lower_level: true, allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Six", nickname: "เก่งทดลอง", role: "member", skill_level: "BG", playable_skill_levels: ["Rookie", "BG", "N"], allow_lower_level: true, allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Seven", nickname: "หยกทดลอง", role: "member", skill_level: "N", playable_skill_levels: ["BG", "N", "S"], allow_lower_level: true, allow_higher_level: true },
+    { club_id: clubId, display_name: "LINE Demo Eight", nickname: "นิวทดลอง", role: "member", skill_level: "N", playable_skill_levels: ["BG", "N", "S"], allow_lower_level: true, allow_higher_level: true },
   ];
   const { error } = await client().from("club_members").insert(members);
   throwIfError(error);

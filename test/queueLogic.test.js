@@ -2,17 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   balanceTeams,
+  compatibilityPreferencePenalty,
   compatibilityTier,
   eligibleQueuePlayers,
   proposeQueueMatch,
   proposeReplacement,
 } from "../src/queueLogic.js";
+import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "../src/skillLevels.js";
 
 function player(id, level, overrides = {}) {
   return {
     memberId: id,
     name: id,
     skillLevel: level,
+    playableSkillLevels: [level],
     allowLowerLevel: false,
     allowHigherLevel: false,
     status: "waiting",
@@ -33,15 +36,45 @@ test("จัดกลุ่มระดับเดียวกันก่อ�
   assert.deepEqual(new Set(result.lineup.map((entry) => entry.skillLevel)), new Set(["BG"]));
 });
 
-test("ข้ามระดับแบบสมัครใจต้องยินยอมทั้งสองฝั่ง", () => {
-  const willing = [
-    player("a", "BG", { allowHigherLevel: true }),
-    player("b", "BG", { allowHigherLevel: true }),
-    player("c", "N", { allowLowerLevel: true }),
-    player("d", "N", { allowLowerLevel: true }),
+test("มือที่สูงกว่ายอมรับมืออ่อนกว่าฝ่ายเดียวก็จับคู่ได้", () => {
+  const strongerAccepts = [
+    player("a", "BG"),
+    player("b", "BG"),
+    player("c", "N", { playableSkillLevels: ["BG", "N"] }),
+    player("d", "N", { playableSkillLevels: ["BG", "N"] }),
   ];
-  assert.equal(compatibilityTier(willing), 2);
-  assert.equal(compatibilityTier(willing.map((entry) => entry.memberId === "d" ? { ...entry, allowLowerLevel: false } : entry)), 3);
+  assert.equal(compatibilityTier(strongerAccepts), 2);
+  const weakerOnly = strongerAccepts.map((entry) => entry.skillLevel === "BG"
+    ? { ...entry, playableSkillLevels: ["BG", "N"] }
+    : { ...entry, playableSkillLevels: ["N"] });
+  assert.equal(compatibilityTier(weakerOnly), 3);
+});
+
+test("การยอมรับกันทั้งสองฝั่งได้คะแนนดีกว่าการยอมรับฝ่ายเดียว", () => {
+  const oneWay = [
+    player("a", "BG"), player("b", "BG"),
+    player("c", "N", { playableSkillLevels: ["BG", "N"] }),
+    player("d", "N", { playableSkillLevels: ["BG", "N"] }),
+  ];
+  const mutual = oneWay.map((entry) => entry.skillLevel === "BG"
+    ? { ...entry, playableSkillLevels: ["BG", "N"] }
+    : entry);
+  assert.ok(compatibilityPreferencePenalty(mutual) < compatibilityPreferencePenalty(oneWay));
+});
+
+test("เลือกเล่นข้ามหลายระดับได้เมื่อมือที่สูงกว่ายินยอม", () => {
+  const lineup = [
+    player("a", "BG"), player("b", "BG"),
+    player("c", "P", { playableSkillLevels: ["BG", "P"] }),
+    player("d", "P", { playableSkillLevels: ["BG", "P"] }),
+  ];
+  assert.equal(compatibilityTier(lineup), 2);
+  assert.equal(compatibilityTier(lineup.map((entry) => entry.skillLevel === "P" ? { ...entry, playableSkillLevels: ["P"] } : entry)), 99);
+});
+
+test("ค่าเริ่มต้นมือ N คือ BG N และ S โดยระดับตัวเองถูกบังคับไว้", () => {
+  assert.deepEqual(defaultPlayableSkillLevels("N"), ["BG", "N", "S"]);
+  assert.deepEqual(normalizePlayableSkillLevels("N", ["P", "P"]), ["N", "P"]);
 });
 
 test("ความยุติธรรมยึดจำนวนเกมก่อนนาทีและเวลารอ", () => {
@@ -82,7 +115,7 @@ test("ระบบหาคนแทนจากคิวและไม่เ�
   const remaining = [player("a", "BG"), player("b", "BG"), player("c", "N")];
   const replacement = proposeReplacement(remaining, [
     ...remaining,
-    player("d", "N", { allowLowerLevel: true }),
+    player("d", "N", { playableSkillLevels: ["BG", "N"] }),
     player("e", "P"),
   ]);
   assert.equal(replacement.player.memberId, "d");

@@ -770,14 +770,14 @@ async function handleLiffRequest(payload: any) {
     }
 
     const { data: existingMember } = await admin.from("club_members")
-      .select("id, display_name, nickname, aliases, skill_level, allow_lower_level, allow_higher_level")
+      .select("id, display_name, nickname, aliases, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level")
       .eq("club_id", clubId)
       .eq("line_user_id", identity.sub)
       .maybeSingle();
 
     const { data: existingSignup } = existingMember
       ? await admin.from("signups")
-        .select("status, arrival_time, skill_level_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
+        .select("status, arrival_time, skill_level_snapshot, playable_skill_levels_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
         .eq("event_id", event.id)
         .eq("member_id", existingMember.id)
         .maybeSingle()
@@ -790,6 +790,7 @@ async function handleLiffRequest(payload: any) {
           name: String(identity.name || existingMember?.display_name || "สมาชิก LINE").slice(0, 80),
           nickname: existingMember?.nickname || "",
           skillLevel: existingMember?.skill_level || "",
+          playableSkillLevels: existingMember?.playable_skill_levels || [],
           allowLowerLevel: Boolean(existingMember?.allow_lower_level),
           allowHigherLevel: Boolean(existingMember?.allow_higher_level),
           picture: identity.picture || null,
@@ -861,6 +862,7 @@ async function handleLiffRequest(payload: any) {
         submitted_by_line_user_id: identity.sub,
         submitted_by_line_name: submitterLineName,
         skill_level_snapshot: guestSkill.skillLevel,
+        playable_skill_levels_snapshot: guestSkill.playableSkillLevels,
         allow_lower_level_snapshot: guestSkill.allowLowerLevel,
         allow_higher_level_snapshot: guestSkill.allowHigherLevel,
       }, { onConflict: "event_id,member_id" });
@@ -896,6 +898,7 @@ async function handleLiffRequest(payload: any) {
     if (payload.action === "save_liff_nickname" || payload.action === "save_liff_profile") {
       const skill = payload.action === "save_liff_profile" ? validateSkillProfile(payload) : {
         skillLevel: existingMember?.skill_level || null,
+        playableSkillLevels: existingMember?.playable_skill_levels || [],
         allowLowerLevel: Boolean(existingMember?.allow_lower_level),
         allowHigherLevel: Boolean(existingMember?.allow_higher_level),
       };
@@ -903,6 +906,7 @@ async function handleLiffRequest(payload: any) {
       if (existingSignup?.status === "coming" && !existingSignup.skill_level_snapshot && skill.skillLevel) {
         const { error: snapshotError } = await admin.from("signups").update({
           skill_level_snapshot: skill.skillLevel,
+          playable_skill_levels_snapshot: skill.playableSkillLevels,
           allow_lower_level_snapshot: skill.allowLowerLevel,
           allow_higher_level_snapshot: skill.allowHigherLevel,
         }).eq("event_id", event.id).eq("member_id", memberId);
@@ -934,6 +938,7 @@ async function handleLiffRequest(payload: any) {
       submitted_by_line_user_id: null,
       submitted_by_line_name: null,
       skill_level_snapshot: skill.skillLevel,
+      playable_skill_levels_snapshot: skill.playableSkillLevels,
       allow_lower_level_snapshot: skill.allowLowerLevel,
       allow_higher_level_snapshot: skill.allowHigherLevel,
     }, { onConflict: "event_id,member_id" });
@@ -971,6 +976,7 @@ async function findOrCreateGuestMember(admin: any, clubId: string, guestName: st
   if (exactMatches.length === 1) {
     const { error: updateError } = await admin.from("club_members").update({
       skill_level: skill.skillLevel,
+      playable_skill_levels: skill.playableSkillLevels,
       allow_lower_level: skill.allowLowerLevel,
       allow_higher_level: skill.allowHigherLevel,
     }).eq("id", exactMatches[0].id);
@@ -986,6 +992,7 @@ async function findOrCreateGuestMember(admin: any, clubId: string, guestName: st
     role: "member",
     active: true,
     skill_level: skill.skillLevel,
+    playable_skill_levels: skill.playableSkillLevels,
     allow_lower_level: skill.allowLowerLevel,
     allow_higher_level: skill.allowHigherLevel,
   }).select("id").single();
@@ -1029,7 +1036,7 @@ async function upsertLiffMember(
         matched.display_name,
       ].map((value) => String(value || "").trim()).filter(Boolean))];
       const { error } = await admin.from("club_members")
-        .update({ display_name: displayName, nickname, line_user_id: lineUserId, aliases, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
+        .update({ display_name: displayName, nickname, line_user_id: lineUserId, aliases, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, playable_skill_levels: skill.playableSkillLevels, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
         .eq("id", matched.id);
       if (error) throw error;
       return matched.id;
@@ -1041,20 +1048,20 @@ async function upsertLiffMember(
       nickname,
       line_user_id: lineUserId,
       role: "member",
-      ...(skill?.skillLevel ? { skill_level: skill.skillLevel, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}),
+      ...(skill?.skillLevel ? { skill_level: skill.skillLevel, playable_skill_levels: skill.playableSkillLevels, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}),
     }).select("id").single();
     if (error) throw error;
     return newMember.id;
   }
 
-  if (existingMember.display_name !== displayName || existingMember.nickname !== nickname || (skill?.skillLevel && existingMember.skill_level !== skill.skillLevel) || (skill?.skillLevel && (Boolean(existingMember.allow_lower_level) !== skill.allowLowerLevel || Boolean(existingMember.allow_higher_level) !== skill.allowHigherLevel))) {
+  if (existingMember.display_name !== displayName || existingMember.nickname !== nickname || skill?.skillLevel) {
     const aliases = [...new Set([
       ...(existingMember.aliases || []),
       existingMember.nickname,
       existingMember.display_name,
     ].map((value) => String(value || "").trim()).filter(Boolean))];
     const { error } = await admin.from("club_members")
-      .update({ display_name: displayName, nickname, aliases, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
+      .update({ display_name: displayName, nickname, aliases, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, playable_skill_levels: skill.playableSkillLevels, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
       .eq("id", existingMember.id);
     if (error) throw error;
   }
@@ -1092,10 +1099,24 @@ function validateSkillProfile(payload: any) {
   const skillLevel = String(payload.skillLevel || "");
   const index = levels.indexOf(skillLevel);
   if (index < 0) throw new Error("กรุณาเลือกระดับมือ");
+  let requestedLevels: string[];
+  if (Array.isArray(payload.playableSkillLevels)) {
+    requestedLevels = payload.playableSkillLevels.map(String);
+    if (new Set(requestedLevels).size !== requestedLevels.length || requestedLevels.some((level) => !levels.includes(level))) {
+      throw new Error("ระดับที่สามารถเล่นด้วยได้ไม่ถูกต้อง");
+    }
+  } else {
+    requestedLevels = [skillLevel];
+    if (index > 0 && Boolean(payload.allowLowerLevel)) requestedLevels.push(levels[index - 1]);
+    if (index < levels.length - 1 && Boolean(payload.allowHigherLevel)) requestedLevels.push(levels[index + 1]);
+  }
+  if (!requestedLevels.includes(skillLevel)) throw new Error("ต้องเลือกระดับมือของตัวเองไว้เสมอ");
+  const playableSkillLevels = levels.filter((level) => requestedLevels.includes(level));
   return {
     skillLevel,
-    allowLowerLevel: index > 0 && Boolean(payload.allowLowerLevel),
-    allowHigherLevel: index < levels.length - 1 && Boolean(payload.allowHigherLevel),
+    playableSkillLevels,
+    allowLowerLevel: index > 0 && playableSkillLevels.includes(levels[index - 1]),
+    allowHigherLevel: index < levels.length - 1 && playableSkillLevels.includes(levels[index + 1]),
   };
 }
 
