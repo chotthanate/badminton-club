@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildArrivalTimeOptions, getEventIdFromSearch, isLatestEventSearch } from "../src/liffSignup.js";
+import {
+  buildArrivalTimeOptions,
+  buildTestPaymentLiffUrl,
+  buildTestSignupLiffUrl,
+  getEventIdFromSearch,
+  getLiffTestContext,
+  isLatestEventSearch,
+} from "../src/liffSignup.js";
 
 test("LIFF state event takes priority over a stale direct event", () => {
   const search = "?liff=signup&event_id=old-round&liff.state=%3Fevent_id%3Dnew-round";
@@ -19,6 +26,22 @@ test("missing event returns null", () => {
 test("permanent latest link survives a LIFF redirect", () => {
   assert.equal(isLatestEventSearch("?liff.state=%3Flatest%3D1"), true);
   assert.equal(isLatestEventSearch("?latest=1"), true);
+});
+
+test("test context survives a LIFF redirect", () => {
+  const context = getLiffTestContext("?liff=signup&liff.state=%3Fevent_id%3Devent-1%26test%3D1%26test_club_id%3Dclub-1");
+  assert.deepEqual(context, { testMode: true, testClubId: "club-1" });
+});
+
+test("test LIFF links keep the event and isolated club", () => {
+  assert.equal(
+    buildTestSignupLiffUrl({ liffId: "123-demo", eventId: "event-1", testClubId: "club-1" }),
+    "https://liff.line.me/123-demo?event_id=event-1&test=1&test_club_id=club-1",
+  );
+  assert.equal(
+    buildTestPaymentLiffUrl({ liffId: "123-demo", testClubId: "club-1" }),
+    "https://liff.line.me/123-demo?mode=payment&test=1&test_club_id=club-1",
+  );
 });
 
 test("arrival time options advance by 15 minutes and stop before session end", () => {

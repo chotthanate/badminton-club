@@ -6,6 +6,26 @@ export function isLatestEventSearch(search) {
   return liffSearchParams(search).get("latest") === "1";
 }
 
+export function getLiffTestContext(search) {
+  const params = liffSearchParams(search);
+  return {
+    testMode: params.get("test") === "1",
+    testClubId: params.get("test_club_id") || null,
+  };
+}
+
+export function buildTestSignupLiffUrl({ liffId, eventId, testClubId }) {
+  if (!liffId || !eventId || !testClubId) return "";
+  const params = new URLSearchParams({ event_id: eventId, test: "1", test_club_id: testClubId });
+  return `https://liff.line.me/${encodeURIComponent(liffId)}?${params}`;
+}
+
+export function buildTestPaymentLiffUrl({ liffId, testClubId }) {
+  if (!liffId || !testClubId) return "";
+  const params = new URLSearchParams({ mode: "payment", test: "1", test_club_id: testClubId });
+  return `https://liff.line.me/${encodeURIComponent(liffId)}?${params}`;
+}
+
 function liffSearchParams(search) {
   const params = new URLSearchParams(search);
   const liffState = params.get("liff.state");

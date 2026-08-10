@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Check, ImagePlus, LoaderCircle, ReceiptText, ShieldCheck, UserRound, Users } from "lucide-react";
 import { baht, formatThaiDate } from "./badmintonLogic.js";
+import { getLiffTestContext } from "./liffSignup.js";
 import { classifySlipRecipient, PAYMENT_RECIPIENT_NAME, recognizeSlip } from "./paymentSlip.js";
 
 export default function LiffPaymentApp() {
+  const { testMode, testClubId } = getLiffTestContext(window.location.search);
+  const testPayload = { testMode, testClubId };
   const [data, setData] = useState(null);
   const [beneficiaryId, setBeneficiaryId] = useState("");
   const [selectedPaymentIds, setSelectedPaymentIds] = useState([]);
@@ -26,7 +29,7 @@ export default function LiffPaymentApp() {
           window.liff.login({ redirectUri: window.location.href });
           return;
         }
-        const response = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken() });
+        const response = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken(), ...testPayload });
         if (!active) return;
         setData(response);
         setBeneficiaryId(response.profile.memberId || response.beneficiaries[0]?.id || "");
@@ -117,9 +120,10 @@ export default function LiffPaymentApp() {
           dataUrl: slip.dataUrl,
           mimeType: slip.mimeType,
         },
+        ...testPayload,
       });
       setResult(response);
-      const refreshed = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken() });
+      const refreshed = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken(), ...testPayload });
       setData(refreshed);
       setSlip(null);
       if (response.status === "auto_paid") setSelectedPaymentIds([]);
@@ -160,7 +164,7 @@ export default function LiffPaymentApp() {
 
       <section className="liff-payment-card">
         <div className="liff-payment-section-title"><div><strong>เลือกรอบที่ต้องการจ่าย</strong><span>{availablePayments.length} รอบค้าง</span></div><b>{baht(total)} บาท</b></div>
-        {availablePayments.length ? <div className="liff-due-list">{availablePayments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} บาท</b></label>)}</div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>ไม่มียอดค้างชำระ</strong><span>ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้</span></div>}
+        {availablePayments.length ? <div className="liff-due-list">{availablePayments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} บาท</b></label>)}</div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? "ยังไม่มียอดค้างทดลอง" : "ไม่มียอดค้างชำระ"}</strong><span>{testMode ? "ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้" : "ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้"}</span></div>}
       </section>
 
       {availablePayments.length ? <section className="liff-payment-card">

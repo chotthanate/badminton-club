@@ -97,7 +97,9 @@ import {
   weekdayFromIsoDate,
 } from "./badmintonLogic.js";
 import { findExactDuplicateMemberGroups, normalizeMemberSearch, rankMemberSuggestions } from "./memberSearch.js";
-import { balanceTeams, proposeQueueMatch, proposeReplacement, SKILL_LEVELS } from "./queueLogic.js";
+import { buildTestPaymentLiffUrl, buildTestSignupLiffUrl } from "./liffSignup.js";
+import { balanceTeams, canReplaceQueuePlayer, proposeQueueMatch, proposeReplacement, SKILL_LEVELS } from "./queueLogic.js";
+import { randomTestPlayerCount } from "./randomTestPlayers.js";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "./skillLevels.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
@@ -108,6 +110,28 @@ const EVENT_STATUS_LABELS = {
   closed: "จบรอบแล้ว",
   cancelled: "ยกเลิก",
 };
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // LINE's in-app browser can deny Clipboard API even on HTTPS.
+    }
+  }
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  input.setSelectionRange(0, value.length);
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (!copied) throw new Error("คัดลอกไม่สำเร็จ กรุณาลองเปิดผ่าน Safari");
+}
 
 const ADMIN_TABS = [
   { id: "round", label: "รอบ", icon: CalendarDays },
@@ -331,12 +355,13 @@ function AdminDashboard({ session }) {
       window.alert("กรุณาเปิดลงชื่อในรอบทดลองก่อนเพิ่มผู้เล่นสุ่ม");
       return;
     }
-    if (!window.confirm("เพิ่มผู้เล่นสุ่มคละระดับ 30 คน และเช็กชื่อให้พร้อมเข้าคิวเลยใช่ไหม?")) return;
+    const count = randomTestPlayerCount();
+    if (!window.confirm(`เพิ่มผู้เล่นสุ่มคละระดับ ${count} คน และเช็กชื่อให้พร้อมเข้าคิวเลยใช่ไหม?`)) return;
     const saved = await mutate(async () => {
       const addedCount = await addRandomTestPlayers({
         clubId: context.club_id,
         eventId: dashboard.event.id,
-        count: 30,
+        count,
       });
       await recordAudit({
         clubId: context.club_id,
@@ -344,8 +369,31 @@ function AdminDashboard({ session }) {
         userId: session.user.id,
         action: `เพิ่มผู้เล่นสุ่มคละระดับ ${addedCount} คนในโหมดทดลอง`,
       });
-    }, "เพิ่มผู้เล่นสุ่มคละระดับ 30 คนและเช็กชื่อแล้ว");
+    }, `เพิ่มผู้เล่นสุ่มคละระดับ ${count} คนและเช็กชื่อแล้ว`);
     if (saved) setActiveTab("queue");
+  }
+
+  async function copyTestLink(kind) {
+    const liffId = import.meta.env.VITE_LINE_LIFF_ID;
+    if (!liffId) {
+      setError("ยังไม่ได้ตั้งค่า LINE LIFF ID สำหรับสร้างลิงก์ทดลอง");
+      return;
+    }
+    const common = { liffId, testClubId: context.club_id };
+    const link = kind === "signup"
+      ? buildTestSignupLiffUrl({ ...common, eventId: dashboard.event?.id })
+      : buildTestPaymentLiffUrl(common);
+    if (!link) {
+      setError(kind === "signup" ? "กรุณาสร้างและเปิดลงชื่อรอบทดลองก่อน" : "สร้างลิงก์ชำระเงินทดลองไม่สำเร็จ");
+      return;
+    }
+    try {
+      await copyTextToClipboard(link);
+      setError("");
+      setNotice(kind === "signup" ? "คัดลอกลิงก์ลงชื่อทดลองแล้ว" : "คัดลอกลิงก์ชำระเงินทดลองแล้ว");
+    } catch (copyError) {
+      setError(copyError.message);
+    }
   }
 
   if (loading && !dashboard) return <LoadingScreen label="กำลังโหลดหลังบ้าน" />;
@@ -383,7 +431,7 @@ function AdminDashboard({ session }) {
 
         {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
         {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
-        {context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving || dashboard.event?.status !== "open"} onClick={addDemoQueuePlayers} title={dashboard.event?.status === "open" ? "เพิ่มและเช็กชื่อผู้เล่นสุ่มคละระดับ" : "เปิดลงชื่อในรอบทดลองก่อน"} type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 30 คน</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
+        {context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving || dashboard.event?.status !== "open"} onClick={addDemoQueuePlayers} title={dashboard.event?.status === "open" ? "สุ่มจำนวน ระดับ และความยินยอม พร้อมเช็กชื่อเข้าคิว" : "เปิดลงชื่อในรอบทดลองก่อน"} type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 23–40 คน</button><button disabled={saving || dashboard.event?.status !== "open"} onClick={() => copyTestLink("signup")} type="button"><Copy size={15} /> ลิงก์ลงชื่อทดลอง</button><button disabled={saving} onClick={() => copyTestLink("payment")} type="button"><Copy size={15} /> ลิงก์ชำระเงินทดลอง</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
 
         {!dashboard.event ? (
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />
@@ -815,6 +863,7 @@ function mapQueueDashboard(dashboard) {
 function QueuePanel({ dashboard, event, mutate }) {
   const [replaceTarget, setReplaceTarget] = useState(null);
   const [manualReplacementId, setManualReplacementId] = useState("");
+  const [finishingMatchId, setFinishingMatchId] = useState(null);
   const [clock, setClock] = useState(Date.now());
   const queue = mapQueueDashboard(dashboard);
   const nextSequence = Math.max(0, ...queue.matches.map((match) => match.sequence)) + 1;
@@ -841,7 +890,7 @@ function QueuePanel({ dashboard, event, mutate }) {
       const ready = freshQueue.players.filter((player) => player.status === "waiting" && player.skillLevel).length;
       throw new Error(ready < 4
         ? `มีผู้เล่นพร้อมเข้าคิว ${ready} คน ต้องมีอย่างน้อย 4 คน`
-        : "ยังมีผู้เล่นพร้อมจัดคิวไม่ครบ 4 คน บางคนอาจถูกข้ามคิวชั่วคราว");
+        : "ยังไม่มีผู้เล่น 4 คนที่เงื่อนไขตรงกัน กรุณารอผู้เล่นที่เหมาะสมกลับเข้าคิว");
     }
     await claimQueueMatch({
       eventId: event.id,
@@ -855,15 +904,14 @@ function QueuePanel({ dashboard, event, mutate }) {
     return mutate(() => buildProposalForCourt(court.id), `จัดผู้เล่นสำหรับ ${court.name} แล้ว`);
   }
 
-  function finishAndContinue(match, court) {
-    return mutate(async () => {
-      await finishQueueMatch(match.id);
-      try {
-        await buildProposalForCourt(court.id);
-      } catch {
-        // จบเกมต้องสำเร็จเสมอ แม้จำนวนหรือระดับผู้เล่นยังไม่พอจัดเกมถัดไป
-      }
-    }, `จบเกม ${court.name} แล้ว${waiting.length >= 4 ? " และจัดคิวถัดไปแล้ว" : ""}`);
+  async function finishMatch(match, court) {
+    if (finishingMatchId) return;
+    setFinishingMatchId(match.id);
+    try {
+      await mutate(() => finishQueueMatch(match.id), `จบเกม ${court.name} แล้ว สนามว่าง`);
+    } finally {
+      setFinishingMatchId(null);
+    }
   }
 
   function replacePlayer(match, outgoing, automatic) {
@@ -881,6 +929,10 @@ function QueuePanel({ dashboard, event, mutate }) {
     } else {
       incoming = waiting.find((player) => player.memberId === manualReplacementId);
       if (!incoming) return;
+      if (!canReplaceQueuePlayer(remaining, incoming)) {
+        window.alert("ผู้เล่นคนนี้ไม่ตรงกับเงื่อนไขระดับที่ทุกคนเลือกไว้ กรุณาเลือกคนอื่น");
+        return;
+      }
       teams = balanceTeams([...remaining, incoming], queue.matches);
     }
     mutate(() => replaceQueueMatchPlayer({
@@ -916,7 +968,7 @@ function QueuePanel({ dashboard, event, mutate }) {
                   <div className="badminton-queue-teams">
                     {["A", "B"].map((team) => <div key={team}><span>ทีม {team}</span>{match.players.filter((player) => player.team === team).map((player) => <div key={player.memberId}><strong>{player.name}</strong><em>{player.skillLevel}</em>{match.status === "proposed" ? <button aria-label={`เปลี่ยน ${player.name}`} onClick={() => { setReplaceTarget({ match, player }); setManualReplacementId(""); }} type="button">เปลี่ยน</button> : null}</div>)}</div>)}
                   </div>
-                  {match.status === "proposed" ? <div className="badminton-queue-actions"><button className="badminton-secondary" onClick={() => mutate(() => cancelQueueMatch(match.id), `ยกเลิกเกม ${court.name} แล้ว`)} type="button"><X size={16} /> ยกเลิก</button><button className="badminton-primary" onClick={() => mutate(() => startQueueMatch(match.id), `เริ่มเกม ${court.name} แล้ว`)} type="button"><Play size={16} /> เริ่มเกม</button></div> : <div className="badminton-queue-playing"><span>เล่นมาแล้ว <strong>{elapsedMinutes} นาที</strong></span><button className="badminton-primary" onClick={() => finishAndContinue(match, court)} type="button"><Check size={17} /> จบเกม</button></div>}
+                  {match.status === "proposed" ? <div className="badminton-queue-actions"><button className="badminton-secondary" onClick={() => mutate(() => cancelQueueMatch(match.id), `ยกเลิกเกม ${court.name} แล้ว`)} type="button"><X size={16} /> ยกเลิก</button><button className="badminton-primary" onClick={() => mutate(() => startQueueMatch(match.id), `เริ่มเกม ${court.name} แล้ว`)} type="button"><Play size={16} /> เริ่มเกม</button></div> : <div className="badminton-queue-playing"><span>เล่นมาแล้ว <strong>{elapsedMinutes} นาที</strong></span><button className="badminton-primary" disabled={finishingMatchId === match.id} onClick={() => finishMatch(match, court)} type="button"><Check size={17} /> {finishingMatchId === match.id ? "กำลังจบเกม..." : "จบเกม"}</button></div>}
                 </>
               )}
             </article>
@@ -929,7 +981,7 @@ function QueuePanel({ dashboard, event, mutate }) {
         {waiting.length ? <ol>{waiting.map((player) => <li key={player.memberId}><span><strong>{player.name}</strong><em>{player.skillLevel}</em></span><small>{player.gamesPlayed} เกม · {player.minutesPlayed} นาที</small></li>)}</ol> : <div className="badminton-empty">ยังไม่มีผู้เล่นเช็กชื่อรอเข้าคิว</div>}
       </article>
 
-      {replaceTarget ? <div className="badminton-modal-backdrop" role="presentation"><div aria-modal="true" className="badminton-custom-charge-modal badminton-queue-replace-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เปลี่ยนผู้เล่น</p><h2>{replaceTarget.player.name}</h2></div><button aria-label="ปิด" onClick={() => setReplaceTarget(null)} type="button"><X size={19} /></button></div><p>คนที่ไม่อยู่จะถูกข้ามคิวถัดไป 1 ครั้ง แล้วกลับมารอตามปกติ</p><button className="badminton-primary" onClick={() => replacePlayer(replaceTarget.match, replaceTarget.player, true)} type="button">ให้ระบบเลือกคนถัดไป</button><div className="badminton-queue-manual-replace"><select aria-label="เลือกผู้เล่นแทน" onChange={(changeEvent) => setManualReplacementId(changeEvent.target.value)} value={manualReplacementId}><option value="">หรือเลือกคนเอง…</option>{waiting.map((player) => <option key={player.memberId} value={player.memberId}>{player.name} · {player.skillLevel}</option>)}</select><button className="badminton-secondary" disabled={!manualReplacementId} onClick={() => replacePlayer(replaceTarget.match, replaceTarget.player, false)} type="button">ยืนยัน</button></div></div></div> : null}
+      {replaceTarget ? <div className="badminton-modal-backdrop" role="presentation"><div aria-modal="true" className="badminton-custom-charge-modal badminton-queue-replace-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เปลี่ยนผู้เล่น</p><h2>{replaceTarget.player.name}</h2></div><button aria-label="ปิด" onClick={() => setReplaceTarget(null)} type="button"><X size={19} /></button></div><p>คนที่ไม่อยู่จะถูกข้ามคิวถัดไป 1 ครั้ง แล้วกลับมารอตามปกติ</p><button className="badminton-primary" onClick={() => replacePlayer(replaceTarget.match, replaceTarget.player, true)} type="button">ให้ระบบเลือกคนถัดไป</button><div className="badminton-queue-manual-replace"><select aria-label="เลือกผู้เล่นแทน" onChange={(changeEvent) => setManualReplacementId(changeEvent.target.value)} value={manualReplacementId}><option value="">หรือเลือกคนเอง…</option>{waiting.map((player) => { const compatible = canReplaceQueuePlayer(replaceTarget.match.players.filter((entry) => entry.memberId !== replaceTarget.player.memberId), player); return <option disabled={!compatible} key={player.memberId} value={player.memberId}>{player.name} · {player.skillLevel}{compatible ? "" : " · ไม่ตรงเงื่อนไข"}</option>; })}</select><button className="badminton-secondary" disabled={!manualReplacementId || !canReplaceQueuePlayer(replaceTarget.match.players.filter((entry) => entry.memberId !== replaceTarget.player.memberId), waiting.find((player) => player.memberId === manualReplacementId))} onClick={() => replacePlayer(replaceTarget.match, replaceTarget.player, false)} type="button">ยืนยัน</button></div></div></div> : null}
     </section>
   );
 }

@@ -455,8 +455,8 @@ function buildRosterText(event: any, players: Array<{ name: string; arrivalTime:
 }
 
 async function handlePaymentLiffRequest(payload: any) {
-  const clubId = Deno.env.get("LINE_CLUB_ID");
-  if (!clubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
+  const configuredClubId = Deno.env.get("LINE_CLUB_ID");
+  if (!configuredClubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
   if (!payload?.idToken) return json({ error: "ไม่พบบัญชี LINE สำหรับแจ้งโอน" }, 400);
 
   try {
@@ -465,6 +465,7 @@ async function handlePaymentLiffRequest(payload: any) {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+    const clubId = await resolveLiffClubId(admin, payload, configuredClubId);
     const { data: submitter, error: submitterError } = await admin.from("club_members")
       .select("id, nickname, display_name, line_user_id")
       .eq("club_id", clubId)
@@ -528,6 +529,7 @@ async function handlePaymentLiffRequest(payload: any) {
         });
       }
       return json({
+        testMode: Boolean(payload.testMode),
         profile: {
           memberId: submitter?.id || null,
           name: String(identity.name || submitter?.display_name || "สมาชิก LINE").slice(0, 80),
@@ -739,8 +741,8 @@ async function handlePaymentLiffRequest(payload: any) {
 }
 
 async function handleLiffRequest(payload: any) {
-  const clubId = Deno.env.get("LINE_CLUB_ID");
-  if (!clubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
+  const configuredClubId = Deno.env.get("LINE_CLUB_ID");
+  if (!configuredClubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
   if ((!payload?.eventId && !payload?.latest) || !payload?.idToken) {
     return json({ error: "ข้อมูลสำหรับลงชื่อไม่ครบ" }, 400);
   }
@@ -751,6 +753,7 @@ async function handleLiffRequest(payload: any) {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+    const clubId = await resolveLiffClubId(admin, payload, configuredClubId);
 
     let eventQuery = admin.from("events")
       .select("id, club_id, event_date, venue, status, starts_at, ends_at, clubs!inner(name), event_courts(court_name, starts_at, ends_at, position)")
@@ -958,6 +961,19 @@ async function handleLiffRequest(payload: any) {
     const status = message.includes("LINE login") ? 401 : 500;
     return json({ error: message }, status);
   }
+}
+
+async function resolveLiffClubId(admin: any, payload: any, configuredClubId: string) {
+  if (!payload?.testMode) return configuredClubId;
+  const testClubId = String(payload.testClubId || "");
+  if (!testClubId) throw new Error("ไม่พบกลุ่มทดลองสำหรับลิงก์นี้");
+  const { data: club, error } = await admin.from("clubs")
+    .select("id, is_test")
+    .eq("id", testClubId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!club?.is_test) throw new Error("ลิงก์นี้ไม่ได้เชื่อมกับกลุ่มทดลอง");
+  return club.id;
 }
 
 async function findOrCreateGuestMember(admin: any, clubId: string, guestName: string, skill: any) {

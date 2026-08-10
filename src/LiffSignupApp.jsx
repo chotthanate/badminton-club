@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Check, Clock3, Edit3, LoaderCircle, MapPin, Plus, X } from "lucide-react";
-import { buildArrivalTimeOptions, getEventIdFromSearch, isLatestEventSearch } from "./liffSignup.js";
+import { buildArrivalTimeOptions, getEventIdFromSearch, getLiffTestContext, isLatestEventSearch } from "./liffSignup.js";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels, SKILL_LEVELS } from "./skillLevels.js";
 
@@ -28,7 +28,9 @@ export default function LiffSignupApp() {
   const [error, setError] = useState("");
   const requestedEventId = getEventIdFromSearch(window.location.search);
   const latestRequested = isLatestEventSearch(window.location.search);
+  const { testMode, testClubId } = getLiffTestContext(window.location.search);
   const activeEventId = event?.id || requestedEventId;
+  const testPayload = { testMode, testClubId };
 
   useEffect(() => {
     let active = true;
@@ -47,7 +49,7 @@ export default function LiffSignupApp() {
 
         const idToken = window.liff.getIDToken();
         if (!idToken) throw new Error("ไม่สามารถยืนยันบัญชี LINE ได้");
-        const data = await callLiffApi("get_liff_event", { eventId: requestedEventId, latest: latestRequested, idToken });
+        const data = await callLiffApi("get_liff_event", { eventId: requestedEventId, latest: latestRequested, idToken, ...testPayload });
         if (!active) return;
         setEvent(data.event);
         setProfile(data.profile);
@@ -78,7 +80,7 @@ export default function LiffSignupApp() {
 
     start();
     return () => { active = false; };
-  }, [latestRequested, requestedEventId]);
+  }, [latestRequested, requestedEventId, testMode, testClubId]);
 
   useEffect(() => {
     if (!event?.id || !window.liff?.isLoggedIn()) return undefined;
@@ -88,7 +90,7 @@ export default function LiffSignupApp() {
       try {
         const idToken = window.liff.getIDToken();
         if (!idToken) return;
-        const data = await callLiffApi("get_liff_event", { eventId: activeEventId, idToken });
+        const data = await callLiffApi("get_liff_event", { eventId: activeEventId, idToken, ...testPayload });
         if (!active) return;
         setEvent(data.event);
         setRoster(data.roster || { coming: [] });
@@ -104,7 +106,7 @@ export default function LiffSignupApp() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [activeEventId, event?.id]);
+  }, [activeEventId, event?.id, testMode, testClubId]);
 
   useEffect(() => {
     if (!event) return;
@@ -125,7 +127,7 @@ export default function LiffSignupApp() {
     setError("");
     try {
       const idToken = window.liff.getIDToken();
-      const data = await callLiffApi("save_liff_profile", { eventId: activeEventId, idToken, nickname: nextNickname, skillLevel: skillDraft, playableSkillLevels: playableSkillLevelsDraft });
+      const data = await callLiffApi("save_liff_profile", { eventId: activeEventId, idToken, nickname: nextNickname, skillLevel: skillDraft, playableSkillLevels: playableSkillLevelsDraft, ...testPayload });
       setNickname(data.nickname);
       setNicknameDraft(data.nickname);
       setSkillLevel(data.skillLevel);
@@ -159,6 +161,7 @@ export default function LiffSignupApp() {
         nickname: nickname.trim(),
         skillLevel,
         playableSkillLevels,
+        ...testPayload,
       });
       setSavedStatus("coming");
       setSavedArrivalTime(data.arrivalTime || arrivalTime);
@@ -176,7 +179,7 @@ export default function LiffSignupApp() {
     setError("");
     try {
       const idToken = window.liff.getIDToken();
-      const data = await callLiffApi("cancel_liff_signup", { eventId: activeEventId, idToken });
+      const data = await callLiffApi("cancel_liff_signup", { eventId: activeEventId, idToken, ...testPayload });
       setSavedStatus(null);
       setSavedArrivalTime("");
       setRoster(data.roster || { coming: [] });
@@ -214,6 +217,7 @@ export default function LiffSignupApp() {
         arrivalTime: guestArrivalTime,
         skillLevel: guestSkill,
         playableSkillLevels: guestPlayableSkillLevels,
+        ...testPayload,
       });
       setGuestName("");
       setGuestSkill("");

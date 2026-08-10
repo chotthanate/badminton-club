@@ -45,16 +45,15 @@ function combinations(values, size, start = 0, prefix = [], result = []) {
   return result;
 }
 
-function skillRange(lineup) {
-  const levels = lineup.map((player) => skillIndex(player.skillLevel));
-  return Math.max(...levels) - Math.min(...levels);
-}
-
 function playableLevels(player) {
   return new Set(normalizePlayableSkillLevels(player.skillLevel, player.playableSkillLevels, {
     allowLowerLevel: player.allowLowerLevel,
     allowHigherLevel: player.allowHigherLevel,
   }));
+}
+
+function acceptsLevel(player, level) {
+  return playableLevels(player).has(level);
 }
 
 function pairCompatibility(left, right) {
@@ -69,15 +68,6 @@ function pairCompatibility(left, right) {
   };
 }
 
-function selectedCompatibility(lineup) {
-  for (let leftIndex = 0; leftIndex < lineup.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < lineup.length; rightIndex += 1) {
-      if (!pairCompatibility(lineup[leftIndex], lineup[rightIndex]).accepted) return false;
-    }
-  }
-  return true;
-}
-
 export function compatibilityPreferencePenalty(lineup) {
   let penalty = 0;
   for (let leftIndex = 0; leftIndex < lineup.length; leftIndex += 1) {
@@ -90,12 +80,62 @@ export function compatibilityPreferencePenalty(lineup) {
   return penalty;
 }
 
-export function compatibilityTier(lineup) {
-  const range = skillRange(lineup);
-  if (range === 0) return 1;
-  if (selectedCompatibility(lineup)) return 2;
-  if (range <= 1) return 3;
-  return 4;
+export function lineupCompatibility(lineup, basePlayer = lineup?.[0]) {
+  if (!Array.isArray(lineup) || lineup.length !== 4 || !basePlayer) {
+    return { valid: false, tier: 99, sameCount: 0, higherCount: 0, lowerCount: 0 };
+  }
+  const baseIndex = skillIndex(basePlayer.skillLevel);
+  if (baseIndex < 0 || lineup.some((player) => skillIndex(player.skillLevel) < 0)) {
+    return { valid: false, tier: 99, sameCount: 0, higherCount: 0, lowerCount: 0 };
+  }
+
+  const basePlayers = lineup.filter((player) => player.skillLevel === basePlayer.skillLevel);
+  const higherPlayers = lineup.filter((player) => skillIndex(player.skillLevel) > baseIndex);
+  const lowerPlayers = lineup.filter((player) => skillIndex(player.skillLevel) < baseIndex);
+  const result = {
+    valid: true,
+    tier: lowerPlayers.length ? 3 : (higherPlayers.length ? 2 : 1),
+    sameCount: basePlayers.length,
+    higherCount: higherPlayers.length,
+    lowerCount: lowerPlayers.length,
+  };
+
+  // A stronger guest is coming down to the base level, so they must accept
+  // every weaker level that will be present in the same game.
+  for (const stronger of higherPlayers) {
+    for (const teammate of lineup) {
+      if (skillIndex(teammate.skillLevel) < skillIndex(stronger.skillLevel)
+        && !acceptsLevel(stronger, teammate.skillLevel)) {
+        return { ...result, valid: false, tier: 99 };
+      }
+    }
+  }
+
+  // A weaker guest is being pulled up, so they must explicitly accept every
+  // stronger level in the game, including the base level.
+  for (const weaker of lowerPlayers) {
+    for (const teammate of lineup) {
+      if (skillIndex(teammate.skillLevel) > skillIndex(weaker.skillLevel)
+        && !acceptsLevel(weaker, teammate.skillLevel)) {
+        return { ...result, valid: false, tier: 99 };
+      }
+    }
+  }
+
+  // Pulling a weaker player into the base group also requires at least two
+  // thirds of the base-level players to accept that weaker level.
+  const requiredBaseConsent = Math.ceil((basePlayers.length * 2) / 3);
+  const lowerLevels = [...new Set(lowerPlayers.map((player) => player.skillLevel))];
+  for (const lowerLevel of lowerLevels) {
+    const accepted = basePlayers.filter((player) => acceptsLevel(player, lowerLevel)).length;
+    if (accepted < requiredBaseConsent) return { ...result, valid: false, tier: 99 };
+  }
+
+  return result;
+}
+
+export function compatibilityTier(lineup, basePlayer = lineup?.[0]) {
+  return lineupCompatibility(lineup, basePlayer).tier;
 }
 
 export function skillDistanceKey(lineup) {
@@ -110,9 +150,13 @@ export function skillDistanceKey(lineup) {
 }
 
 function compatibilitySortKey(candidate) {
-  return candidate.tier === 4
-    ? [candidate.tier, ...candidate.skillDistance, candidate.preferencePenalty]
-    : [candidate.tier, candidate.preferencePenalty, ...candidate.skillDistance];
+  return [
+    -candidate.sameCount,
+    candidate.lowerCount > 0 ? 1 : 0,
+    candidate.lowerCount,
+    ...candidate.skillDistance,
+    candidate.preferencePenalty,
+  ];
 }
 
 function pairKey(leftId, rightId) {
@@ -186,37 +230,61 @@ export function balanceTeams(lineup, matches = []) {
 export function proposeQueueMatch(players, matches = [], nextSequence = 1) {
   const eligible = eligibleQueuePlayers(players, nextSequence);
   if (eligible.length < 4) return null;
-  const anchor = eligible[0];
   const repeatStats = buildRepeatStats(matches);
-  const candidates = combinations(eligible.filter((player) => player.memberId !== anchor.memberId), 3)
-    .map((others) => [anchor, ...others])
-    .map((lineup) => ({
-      lineup,
-      tier: compatibilityTier(lineup),
-      preferencePenalty: compatibilityPreferencePenalty(lineup),
-      skillDistance: skillDistanceKey(lineup),
-      score: lineupScore(lineup, repeatStats),
-    }))
-    .filter((candidate) => candidate.tier < 99);
-  if (!candidates.length) return null;
-  candidates.sort((left, right) => compareKeys(compatibilitySortKey(left), compatibilitySortKey(right))
-    || compareKeys(left.score, right.score));
-  const selected = candidates[0];
-  const teams = balanceTeams(selected.lineup, matches);
-  return { ...teams, lineup: selected.lineup, tier: selected.tier };
+
+  for (const anchor of eligible) {
+    const candidates = combinations(eligible.filter((player) => player.memberId !== anchor.memberId), 3)
+      .map((others) => [anchor, ...others])
+      .map((lineup) => {
+        const compatibility = lineupCompatibility(lineup, anchor);
+        return {
+          ...compatibility,
+          lineup,
+          preferencePenalty: compatibilityPreferencePenalty(lineup),
+          skillDistance: skillDistanceKey(lineup),
+          score: lineupScore(lineup, repeatStats),
+        };
+      })
+      .filter((candidate) => candidate.valid);
+    if (!candidates.length) continue;
+    candidates.sort((left, right) => compareKeys(compatibilitySortKey(left), compatibilitySortKey(right))
+      || compareKeys(left.score, right.score));
+    const selected = candidates[0];
+    const teams = balanceTeams(selected.lineup, matches);
+    return { ...teams, lineup: selected.lineup, tier: selected.tier, baseLevel: anchor.skillLevel };
+  }
+  return null;
+}
+
+function replacementCompatibility(remainingPlayers, incomingPlayer) {
+  const lineup = [...remainingPlayers, incomingPlayer];
+  const possibleBases = [...remainingPlayers].sort((left, right) => compareKeys(queueFairnessKey(left), queueFairnessKey(right)));
+  for (const basePlayer of possibleBases) {
+    const compatibility = lineupCompatibility(lineup, basePlayer);
+    if (compatibility.valid) return compatibility;
+  }
+  return null;
+}
+
+export function canReplaceQueuePlayer(remainingPlayers, incomingPlayer) {
+  if (!incomingPlayer || !Array.isArray(remainingPlayers) || remainingPlayers.length !== 3) return false;
+  return Boolean(replacementCompatibility(remainingPlayers, incomingPlayer));
 }
 
 export function proposeReplacement(remainingPlayers, waitingPlayers, matches = [], nextSequence = 1) {
   const occupiedIds = new Set(remainingPlayers.map((player) => player.memberId));
   const candidates = eligibleQueuePlayers(waitingPlayers, nextSequence)
     .filter((player) => !occupiedIds.has(player.memberId))
-    .map((player) => ({
-      player,
-      tier: compatibilityTier([...remainingPlayers, player]),
-      preferencePenalty: compatibilityPreferencePenalty([...remainingPlayers, player]),
-      skillDistance: skillDistanceKey([...remainingPlayers, player]),
-    }))
-    .filter((candidate) => candidate.tier < 99)
+    .map((player) => {
+      const compatibility = replacementCompatibility(remainingPlayers, player);
+      return compatibility ? {
+        ...compatibility,
+        player,
+        preferencePenalty: compatibilityPreferencePenalty([...remainingPlayers, player]),
+        skillDistance: skillDistanceKey([...remainingPlayers, player]),
+      } : null;
+    })
+    .filter(Boolean)
     .sort((left, right) => compareKeys(compatibilitySortKey(left), compatibilitySortKey(right))
       || compareKeys(queueFairnessKey(left.player), queueFairnessKey(right.player)));
   if (!candidates.length) return null;

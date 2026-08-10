@@ -3,8 +3,8 @@ import {
   defaultPlayableSkillLevels,
   legacyPreferencesForPlayable,
   normalizePlayableSkillLevels,
-  SKILL_LEVELS,
 } from "./skillLevels.js";
+import { buildRandomTestPlayerProfiles } from "./randomTestPlayers.js";
 
 function client() {
   if (!supabase) throw new Error("ยังไม่ได้ตั้งค่า Supabase");
@@ -70,8 +70,8 @@ export async function resetTestClub(clubId) {
   await seedTestMembers(clubId);
 }
 
-export async function addRandomTestPlayers({ clubId, eventId, count = 30 }) {
-  const safeCount = Math.max(4, Math.min(60, Math.round(Number(count) || 30)));
+export async function addRandomTestPlayers({ clubId, eventId, count = 23, random = Math.random }) {
+  const profiles = buildRandomTestPlayerProfiles(count, random);
   const [clubResult, eventResult, memberCountResult] = await Promise.all([
     client().from("clubs").select("id, is_test").eq("id", clubId).single(),
     client().from("events").select("id, club_id, status, starts_at").eq("id", eventId).single(),
@@ -84,14 +84,8 @@ export async function addRandomTestPlayers({ clubId, eventId, count = 30 }) {
   if (eventResult.data?.club_id !== clubId) throw new Error("รอบทดลองไม่ตรงกับกลุ่มที่เลือก");
   if (eventResult.data?.status !== "open") throw new Error("กรุณาเปิดลงชื่อในรอบทดลองก่อนเพิ่มผู้เล่นสุ่ม");
 
-  const mixedLevels = Array.from({ length: safeCount }, (_, index) => SKILL_LEVELS[index % SKILL_LEVELS.length]);
-  for (let index = mixedLevels.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [mixedLevels[index], mixedLevels[swapIndex]] = [mixedLevels[swapIndex], mixedLevels[index]];
-  }
   const firstNumber = Number(memberCountResult.count || 0) + 1;
-  const memberRows = mixedLevels.map((skillLevel, index) => {
-    const playableSkillLevels = defaultPlayableSkillLevels(skillLevel);
+  const memberRows = profiles.map(({ skillLevel, playableSkillLevels }, index) => {
     const legacyPreferences = legacyPreferencesForPlayable(skillLevel, playableSkillLevels);
     const number = String(firstNumber + index).padStart(2, "0");
     return {
