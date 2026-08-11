@@ -591,6 +591,22 @@ export async function mergeClubMembers({ sourceMemberId, targetMemberId }) {
 }
 
 export async function removeParticipant({ eventId, memberId }) {
+  const { data: matchPlayers, error: matchPlayerError } = await client()
+    .from("queue_match_players")
+    .select("match_id")
+    .eq("event_id", eventId)
+    .eq("member_id", memberId);
+  throwIfError(matchPlayerError);
+  const matchIds = [...new Set((matchPlayers || []).map((row) => row.match_id))];
+  if (matchIds.length) {
+    const { count, error: completedMatchError } = await client()
+      .from("queue_matches")
+      .select("id", { count: "exact", head: true })
+      .in("id", matchIds)
+      .eq("status", "completed");
+    throwIfError(completedMatchError);
+    if ((count || 0) > 0) throw new Error("ลบผู้เล่นไม่ได้ เพราะมีประวัติเล่นจบแล้วอย่างน้อย 1 รอบ");
+  }
   const tables = ["member_extra_charges", "payments", "attendance", "signups"];
   for (const table of tables) {
     const { error } = await client().from(table)

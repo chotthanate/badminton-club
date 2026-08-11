@@ -5,6 +5,7 @@ import {
   billableHours,
   buildLineSummary,
   calculateSettlement,
+  completedRoundsByMember,
   formatPlayedDuration,
   minutesBetween,
   nextFridayIso,
@@ -18,13 +19,14 @@ import {
 import { classifySlipRecipient, parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
 import { getLiffMode } from "../src/liffMode.js";
 
-function makeEvent({ attendance = [], costs = [] } = {}) {
+function makeEvent({ attendance = [], costs = [], ...overrides } = {}) {
   return {
     date: "2026-07-17",
     startTime: "21:00",
     endTime: "00:00",
     attendance,
     costs,
+    ...overrides,
   };
 }
 
@@ -178,6 +180,131 @@ test("calculateSettlement gives equal open balances to players with equal hours 
   }));
 
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [227, 227]);
+});
+
+test("per-round billing splits every shared cost by completed player-game appearances", () => {
+  const result = calculateSettlement(makeEvent({
+    billingModel: "per_round",
+    costs: [
+      { type: "court", amount: 1200 },
+      { type: "shuttle", amount: 800 },
+    ],
+    attendance: [
+      { memberId: "two", name: "สองรอบ", arrived: true, roundsPlayed: 2, hours: 3, billingPercentage: 25 },
+      { memberId: "three", name: "สามรอบ", arrived: true, roundsPlayed: 3, hours: 1, billingPercentage: 100 },
+      { memberId: "five", name: "ห้ารอบ", arrived: true, roundsPlayed: 5, hours: 2, billingPercentage: 50 },
+    ],
+  }));
+
+  assert.equal(result.totalUnits, 10);
+  assert.equal(result.unitPrice, 200);
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [400, 600, 1000]);
+  assert.equal(result.rows.reduce((sum, row) => sum + row.roundedDue, 0), 2000);
+});
+
+test("per-round billing charges personal extras even when a checked-in player completed no games", () => {
+  const result = calculateSettlement(makeEvent({
+    billingModel: "per_round",
+    costs: [{ amount: 400 }],
+    attendance: [
+      { memberId: "played", name: "ได้เล่น", arrived: true, roundsPlayed: 2 },
+      { memberId: "waiting", name: "ไม่ได้เล่น", arrived: true, roundsPlayed: 0, extraCharges: [{ unitPrice: 20, quantity: 1 }] },
+    ],
+  }));
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [400, 20]);
+  assert.equal(result.personalExtrasTotal, 20);
+});
+
+test("per-round billing reports shared cost as unallocated until a game is completed", () => {
+  const result = calculateSettlement(makeEvent({
+    billingModel: "per_round",
+    costs: [{ amount: 500 }],
+    attendance: [{ memberId: "waiting", name: "รอเล่น", arrived: true, roundsPlayed: 0 }],
+  }));
+
+  assert.equal(result.totalUnits, 0);
+  assert.equal(result.rows.length, 0);
+  assert.equal(result.unallocatedSharedCost, 500);
+});
+
+test("per-round billing keeps the rounded shared total balanced", () => {
+  const result = calculateSettlement(makeEvent({
+    billingModel: "per_round",
+    costs: [{ amount: 100 }],
+    attendance: [
+      { memberId: "one", name: "หนึ่ง", arrived: true, roundsPlayed: 1 },
+      { memberId: "two", name: "สอง", arrived: true, roundsPlayed: 1 },
+      { memberId: "three", name: "สาม", arrived: true, roundsPlayed: 1 },
+    ],
+  }));
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [33, 33, 34]);
+  assert.equal(result.allocatedSharedTotal, 100);
+  assert.equal(result.unallocatedSharedCost, 0);
+});
+
+test("per-round billing preserves a finalized bill and redistributes only the unlocked balance", () => {
+  const result = calculateSettlement(makeEvent({
+    billingModel: "per_round",
+    costs: [{ amount: 500 }],
+    attendance: [
+      {
+        memberId: "locked",
+        name: "ล็อกแล้ว",
+        arrived: true,
+        roundsPlayed: 1,
+        billingFinalized: true,
+        billedAmount: 120,
+        lockedSharedAmount: 100,
+        lockedExtraAmount: 20,
+      },
+      { memberId: "two", name: "สองรอบ", arrived: true, roundsPlayed: 2 },
+      { memberId: "three", name: "หนึ่งรอบ", arrived: true, roundsPlayed: 1 },
+    ],
+  }));
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [120, 267, 133]);
+  assert.equal(result.rows[0].sharedDue, 100);
+  assert.equal(result.rows[0].extraAmount, 20);
+  assert.equal(result.allocatedSharedTotal, 500);
+});
+
+test("payment-exempt players still count toward the per-round shared-cost denominator", () => {
+  const result = calculateSettlement(makeEvent({
+    billingModel: "per_round",
+    costs: [{ amount: 400 }],
+    attendance: [
+      { memberId: "family", name: "ครอบครัว", arrived: true, roundsPlayed: 1, paymentExempt: true },
+      { memberId: "member", name: "สมาชิก", arrived: true, roundsPlayed: 3 },
+    ],
+  }));
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [100, 300]);
+  assert.equal(result.rows[0].paid, true);
+  assert.equal(result.totalUnits, 4);
+});
+
+test("completedRoundsByMember counts only unique players from completed matches", () => {
+  const rounds = completedRoundsByMember(
+    [
+      { id: "done-1", status: "completed" },
+      { id: "done-2", status: "completed" },
+      { id: "playing", status: "playing" },
+      { id: "cancelled", status: "cancelled" },
+    ],
+    [
+      { match_id: "done-1", member_id: "a" },
+      { match_id: "done-1", member_id: "a" },
+      { match_id: "done-1", member_id: "b" },
+      { match_id: "done-2", member_id: "a" },
+      { match_id: "playing", member_id: "b" },
+      { match_id: "cancelled", member_id: "a" },
+    ],
+  );
+
+  assert.equal(rounds.get("a"), 2);
+  assert.equal(rounds.get("b"), 1);
 });
 
 test("time-segmented billing charges a court extension only to players still present", () => {

@@ -91,6 +91,9 @@ export function billableHours(playedMinutes, billingPercentage = 100) {
 }
 
 export function calculateSettlement(event) {
+  if (event.billingModel === "per_round") {
+    return calculatePerRoundSettlement(event);
+  }
   if (event.billingModel === "time_segmented") {
     return calculateTimeSegmentedSettlement(event);
   }
@@ -183,6 +186,122 @@ export function calculateSettlement(event) {
     remainingSharedCost,
     rows,
   };
+}
+
+export function calculatePerRoundSettlement(event) {
+  const sharedTotalCost = (event.costs || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const preparedRows = (event.attendance || [])
+    .filter((row) => row.arrived)
+    .map((row) => {
+      const roundsPlayed = Math.max(0, Number(row.roundsPlayed) || 0);
+      const currentExtraAmount = (row.extraCharges || []).reduce(
+        (sum, charge) => sum + Number(charge.unitPrice || 0) * Number(charge.quantity || 1),
+        Number(row.extraAmount || 0),
+      );
+      const billedAmount = row.billedAmount === null || row.billedAmount === undefined
+        ? (row.paidAmount === null || row.paidAmount === undefined ? null : Number(row.paidAmount))
+        : Number(row.billedAmount);
+      const locked = !row.paymentExempt && Boolean(row.billingFinalized || row.paid) && Number.isFinite(billedAmount);
+      const explicitExtra = Number(row.lockedExtraAmount);
+      const lockedExtraAmount = locked
+        ? (row.lockedExtraAmount !== null && row.lockedExtraAmount !== undefined && Number.isFinite(explicitExtra)
+          ? Math.max(0, explicitExtra)
+          : Math.min(currentExtraAmount, Math.max(0, billedAmount)))
+        : null;
+      const explicitShared = Number(row.lockedSharedAmount);
+      const lockedSharedAmount = locked
+        ? (row.lockedSharedAmount !== null && row.lockedSharedAmount !== undefined && Number.isFinite(explicitShared)
+          ? Math.max(0, explicitShared)
+          : Math.max(0, billedAmount - lockedExtraAmount))
+        : null;
+      return {
+        ...row,
+        roundsPlayed,
+        paymentRecorded: Boolean(row.paid),
+        billedAmount,
+        currentExtraAmount,
+        locked,
+        lockedExtraAmount,
+        lockedSharedAmount,
+      };
+    })
+    .filter((row) => row.roundsPlayed > 0 || row.currentExtraAmount > 0 || row.locked);
+
+  const totalUnits = preparedRows.reduce((sum, row) => sum + row.roundsPlayed, 0);
+  const lockedSharedTotal = preparedRows.reduce((sum, row) => sum + Number(row.lockedSharedAmount || 0), 0);
+  const remainingSharedCost = Math.max(0, sharedTotalCost - lockedSharedTotal);
+  const openUnits = preparedRows
+    .filter((row) => !row.locked)
+    .reduce((sum, row) => sum + row.roundsPlayed, 0);
+  const unitPrice = openUnits > 0 ? remainingSharedCost / openUnits : 0;
+  let roundedOpenSharedTotal = 0;
+
+  const rows = preparedRows.map((row) => {
+    if (row.locked) {
+      return {
+        ...row,
+        rawDue: row.billedAmount,
+        sharedDue: row.lockedSharedAmount,
+        extraAmount: row.lockedExtraAmount,
+        roundedDue: Math.round(row.billedAmount),
+        paid: Boolean(row.paymentRecorded),
+      };
+    }
+    const rawSharedDue = unitPrice * row.roundsPlayed;
+    const sharedDue = Math.round(rawSharedDue);
+    roundedOpenSharedTotal += sharedDue;
+    return {
+      ...row,
+      rawDue: rawSharedDue + row.currentExtraAmount,
+      sharedDue,
+      extraAmount: row.currentExtraAmount,
+      roundedDue: sharedDue + Math.round(row.currentExtraAmount),
+      paid: Boolean(row.paymentExempt) || row.paymentRecorded,
+    };
+  });
+
+  const lastOpenIndex = rows.findLastIndex((row) => !row.locked && row.roundsPlayed > 0);
+  const delta = openUnits > 0 ? Math.round(remainingSharedCost) - roundedOpenSharedTotal : 0;
+  if (lastOpenIndex >= 0 && delta !== 0) {
+    rows[lastOpenIndex] = {
+      ...rows[lastOpenIndex],
+      sharedDue: rows[lastOpenIndex].sharedDue + delta,
+      roundedDue: rows[lastOpenIndex].roundedDue + delta,
+      roundingDelta: delta,
+    };
+  }
+
+  const personalExtrasTotal = rows.reduce((sum, row) => sum + Math.round(row.extraAmount), 0);
+  const allocatedSharedTotal = rows.reduce((sum, row) => sum + Number(row.sharedDue || 0), 0);
+  return {
+    totalCost: sharedTotalCost + personalExtrasTotal,
+    sharedTotalCost,
+    personalExtrasTotal,
+    totalHours: 0,
+    totalUnits,
+    unitPrice,
+    lockedSharedTotal,
+    remainingSharedCost,
+    allocatedSharedTotal,
+    unallocatedSharedCost: Math.max(0, Math.round(sharedTotalCost) - allocatedSharedTotal),
+    rows,
+  };
+}
+
+export function completedRoundsByMember(queueMatches = [], queueMatchPlayers = []) {
+  const completedIds = new Set(
+    queueMatches.filter((match) => match.status === "completed").map((match) => match.id),
+  );
+  const seen = new Set();
+  const rounds = new Map();
+  queueMatchPlayers.forEach((player) => {
+    if (!completedIds.has(player.match_id)) return;
+    const uniqueKey = `${player.match_id}:${player.member_id}`;
+    if (seen.has(uniqueKey)) return;
+    seen.add(uniqueKey);
+    rounds.set(player.member_id, (rounds.get(player.member_id) || 0) + 1);
+  });
+  return rounds;
 }
 
 export function calculateTimeSegmentedSettlement(event) {

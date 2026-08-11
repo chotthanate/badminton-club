@@ -93,6 +93,7 @@ import {
   billableHours,
   buildLineSummary,
   calculateSettlement,
+  completedRoundsByMember,
   createInitialEvent,
   formatPlayedDuration,
   formatThaiLongDate,
@@ -781,6 +782,12 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
     }
     if (event.status === "open") {
       return mutate(async () => {
+        if (mappedEvent.billingModel === "per_round" && mappedEvent.hasPlayingGames) {
+          throw new Error("ยังมีสนามกำลังเล่น กรุณากดจบเกมทุกสนามก่อนจบรอบและคำนวณยอดตามจำนวนรอบ");
+        }
+        if (mappedEvent.billingModel === "per_round" && settlement.sharedTotalCost > 0 && settlement.totalUnits <= 0) {
+          throw new Error("ยังไม่มีเกมที่จบ ระบบจึงยังหารค่าส่วนกลางตามจำนวนรอบไม่ได้");
+        }
         await finishEvent({
           clubId: mappedEvent.clubId,
           eventId: event.id,
@@ -792,7 +799,11 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
           clubId: mappedEvent.clubId,
           eventId: event.id,
           userId: session.user.id,
-          action: "จบรอบและบันทึกยอดที่ต้องชำระ",
+          action: `จบรอบและบันทึกยอดที่ต้องชำระแบบ${mappedEvent.billingModel === "per_round" ? "ตามจำนวนรอบ" : "ตามเวลา"}`,
+          details: {
+            billing_model: mappedEvent.billingModel,
+            completed_games: mappedEvent.completedGameCount,
+          },
         });
       }, "จบรอบแล้ว ยอดของผู้เล่นทุกคนถูกเก็บไว้");
     }
@@ -1358,6 +1369,23 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     const freshEvent = mapDashboardToEvent(freshDashboard);
     const freshRow = freshEvent.attendance.find((row) => row.memberId === memberId);
     if (!freshRow) throw new Error("ไม่พบข้อมูลผู้เล่นหลังบันทึกเวลากลับ");
+    if (freshEvent.billingModel === "per_round") {
+      await recordAudit({
+        clubId: event.clubId,
+        eventId: event.id,
+        userId: session.user.id,
+        action: leftAt
+          ? `${participantName} กลับ ${leftAt} · รอสรุปยอดตามจำนวนรอบหลังจบรอบ`
+          : `ยกเลิกเวลากลับของ ${participantName}`,
+        details: {
+          member_id: memberId,
+          left_at: leftAt || null,
+          billing_model: "per_round",
+          rounds_played: freshRow.roundsPlayed || 0,
+        },
+      });
+      return;
+    }
     const hasManualAdjustment = freshRow.billingFinalized
       && freshRow.calculatedAmount !== null
       && Number(freshRow.billedAmount) !== Number(freshRow.calculatedAmount);
@@ -1515,7 +1543,11 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             }
             return mutate(
               () => saveDepartureAndLock({ memberId: member.id, participantName, plannedArrival, leftAt: nextDeparture }),
-              nextDeparture ? `บันทึกเวลากลับและล็อกยอดของ ${participantName} แล้ว` : `ยกเลิกเวลากลับของ ${participantName} แล้ว`,
+              nextDeparture
+                ? event.billingModel === "per_round"
+                  ? `บันทึกเวลากลับของ ${participantName} แล้ว · ยอดจะสรุปหลังจบรอบ`
+                  : `บันทึกเวลากลับและล็อกยอดของ ${participantName} แล้ว`
+                : `ยกเลิกเวลากลับของ ${participantName} แล้ว`,
             );
           }
 
@@ -1614,7 +1646,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                 <button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button>
                 {submittedByLineName ? <small className="badminton-signup-attribution" title={`ลงชื่อให้โดย LINE: ${submittedByLineName}`}>ลงชื่อให้โดย LINE: {submittedByLineName}</small> : null}
               </div>
-              <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span>กลับ {leftAt}</span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}><select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select><small>{formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `ล็อกยอด ${baht(due)}` : leftAt ? `ยอด ${baht(due)}` : `≈ ${baht(due)}`} บาท</strong></div></div>
+              <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span>กลับ {leftAt}</span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}>{event.billingModel === "per_round" ? <span className="badminton-round-count">{settlementRow?.roundsPlayed || 0} รอบ</span> : <select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>}<small>{event.billingModel === "per_round" ? "คิดตามเกมที่จบ" : formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `ล็อกยอด ${baht(due)}` : event.billingModel === "per_round" ? `≈ ${baht(due)}` : leftAt ? `ยอด ${baht(due)}` : `≈ ${baht(due)}`} บาท</strong></div></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
@@ -1733,9 +1765,40 @@ function PricingPanel({ event, mutate, session, settlement }) {
     }
   }
 
+  function changeBillingModel(nextModel) {
+    if (nextModel === event.billingModel) return;
+    if (event.status === "closed" || settlement.rows.some((row) => row.billingFinalized)) {
+      window.alert("เปลี่ยนวิธีคิดเงินไม่ได้ เนื่องจากรอบนี้เริ่มสรุปยอดแล้ว");
+      return;
+    }
+    const nextLabel = nextModel === "per_round" ? "ตามจำนวนรอบที่เล่น" : "ตามเวลาที่อยู่จริง";
+    const warning = nextModel === "per_round"
+      ? "ค่าสนาม ลูกแบด และค่าใช้จ่ายส่วนกลางจะหารตามจำนวนเกมที่ผู้เล่นแต่ละคนเล่นจบ และจะสรุปยอดจริงได้หลังจบรอบเท่านั้น"
+      : "ค่าสนามและลูกแบดจะกลับมาหารตามช่วงเวลาที่ผู้เล่นอยู่จริง";
+    if (!window.confirm(`เปลี่ยนวิธีคิดเงินเป็น “${nextLabel}” ใช่ไหม?\n\n${warning}`)) return;
+    mutate(async () => {
+      await updateEvent(event.id, { billing_model: nextModel });
+      await recordAudit({
+        clubId: event.clubId,
+        eventId: event.id,
+        userId: session.user.id,
+        action: `เปลี่ยนวิธีคิดเงินเป็น ${nextLabel}`,
+        details: { from: event.billingModel, to: nextModel },
+      });
+    }, `เปลี่ยนวิธีคิดเงินเป็น ${nextLabel} แล้ว`);
+  }
+
   return (
     <section className="badminton-card badminton-pricing-card">
       <div className="badminton-card-title badminton-pricing-title"><Calculator size={20} /><div><h2>ค่าใช้จ่ายรวม</h2></div><strong>{baht(sharedCost)} บาท</strong></div>
+      <div className="badminton-billing-method">
+        <div><strong>วิธีคิดค่าใช้จ่าย</strong><span>{event.billingModel === "per_round" ? "หารค่าส่วนกลางตามจำนวนเกมที่เล่นจบ" : "หารค่าส่วนกลางตามช่วงเวลาที่อยู่จริง"}</span></div>
+        <div aria-label="เลือกวิธีคิดค่าใช้จ่าย" role="group">
+          <button className={event.billingModel !== "per_round" ? "is-active" : ""} disabled={event.status === "closed" || settlement.rows.some((row) => row.billingFinalized)} onClick={() => changeBillingModel("time_segmented")} type="button">ตามเวลา</button>
+          <button className={event.billingModel === "per_round" ? "is-active" : ""} disabled={event.status === "closed" || settlement.rows.some((row) => row.billingFinalized)} onClick={() => changeBillingModel("per_round")} type="button">ตามจำนวนรอบ</button>
+        </div>
+        {event.billingModel === "per_round" ? <small>จบแล้ว {event.completedGameCount} เกม · รวม {event.attendance.reduce((sum, row) => sum + Number(row.roundsPlayed || 0), 0)} รอบผู้เล่น{settlement.totalUnits > 0 ? ` · ประมาณ ${baht(settlement.unitPrice)} บาท/คน/รอบ` : " · ยังไม่มีเกมที่จบ"}</small> : null}
+      </div>
       <div className="badminton-pricing-grid">
         <article className="badminton-price-box badminton-court-summary-box">
           <div className="badminton-price-head"><span>สรุปคอร์ท</span><strong>{baht(courtCost)} บาท</strong></div>
@@ -1752,7 +1815,7 @@ function PricingPanel({ event, mutate, session, settlement }) {
             <label><span>เพิ่มหลายลูก</span><input aria-label="จำนวนลูกแบดที่ต้องการเพิ่ม" disabled={shuttleBusy} inputMode="numeric" max="100" min="1" onChange={(changeEvent) => setShuttleBatch(changeEvent.target.value)} placeholder="เช่น 12" required type="number" value={shuttleBatch} /></label>
             <button className="badminton-secondary" disabled={shuttleBusy} type="submit"><Plus size={16} /> เพิ่ม</button>
           </form>
-          <small className="badminton-shuttle-auto-note">ทุกครั้งที่เพิ่ม ระบบจะบันทึกช่วงเวลา 15 นาทีอัตโนมัติ เพื่อไม่คิดค่าลูกย้อนหลังกับคนที่มาทีหลัง</small>
+          <small className="badminton-shuttle-auto-note">{event.billingModel === "per_round" ? "ค่าลูกแบดทั้งหมดจะรวมเป็นค่าใช้จ่ายส่วนกลาง แล้วหารตามจำนวนรอบที่ผู้เล่นแต่ละคนเล่นจบ" : "ทุกครั้งที่เพิ่ม ระบบจะบันทึกช่วงเวลา 15 นาทีอัตโนมัติ เพื่อไม่คิดค่าลูกย้อนหลังกับคนที่มาทีหลัง"}</small>
           <form className="badminton-shuttle-total-form" onSubmit={saveShuttlecockTotal}>
             <label><span>แก้ยอดรวม</span><input aria-label="แก้จำนวนลูกแบดรวม" disabled={shuttleBusy} inputMode="numeric" max="1000" min="0" onChange={(changeEvent) => setShuttleTotalDraft(changeEvent.target.value)} type="number" value={shuttleTotalDraft} /></label>
             <button className="badminton-edit-price" disabled={shuttleBusy || Number(shuttleTotalDraft) === Number(event.shuttlecockCount)} type="submit">บันทึก</button>
@@ -1810,6 +1873,7 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
   const [billDraft, setBillDraft] = useState(null);
   const [paymentView, setPaymentView] = useState("current");
   const lineSummary = useMemo(() => buildLineSummary(event), [event]);
+  const perRoundAwaitingClose = event.billingModel === "per_round" && event.status !== "closed";
   const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
   const previousRows = (previousOutstanding.rows || []).filter((row) => row.event_id !== event.id);
   const previousTotal = previousRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -1832,6 +1896,10 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
   }
 
   function togglePayment(row) {
+    if (perRoundAwaitingClose) {
+      window.alert("ระบบตามจำนวนรอบจะสรุปยอดจริงได้หลังจบรอบและจบเกมทุกสนามแล้ว");
+      return undefined;
+    }
     if (!row.billingFinalized) {
       setBillDraft({ row, amount: String(row.roundedDue) });
       return undefined;
@@ -1867,6 +1935,10 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
 
   function confirmBill(submitEvent) {
     submitEvent.preventDefault();
+    if (perRoundAwaitingClose) {
+      window.alert("กรุณาจบรอบก่อนสรุปยอดตามจำนวนเกมที่เล่น");
+      return;
+    }
     if (!billDraft?.row) return;
     const billedAmount = Number(billDraft.amount);
     if (!Number.isFinite(billedAmount) || billedAmount < 0) {
@@ -1977,8 +2049,9 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
       <div className="badminton-payment-subtabs" role="tablist"><button className="is-active" role="tab" type="button">รอบนี้</button><button onClick={() => setPaymentView("outstanding")} role="tab" type="button">ยอดค้าง <span>{previousOutstanding.count}</span></button></div>
       <div className="badminton-payment-workspace">
         <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div></div>
+        {perRoundAwaitingClose ? <div className="badminton-per-round-pending"><Timer size={18} /><div><strong>กำลังคำนวณตามจำนวนรอบ</strong><span>ยอดด้านล่างเป็นยอดประมาณ เมื่อจบเกมทุกสนามและกด “จบรอบ” แล้วจึงจะสรุปยอดจริงได้</span></div></div> : null}
         <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
-          <div className="badminton-current-round-total"><span>ยอดรอบนี้</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
+          <div className="badminton-current-round-total"><span>{perRoundAwaitingClose ? "ยอดประมาณรอบนี้" : "ยอดรอบนี้"}</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
           <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousTotal)} บาท</strong></div>
           <div className="badminton-summary-grand-total"><span>รวมทั้งหมด</span><strong>{baht(combinedTotal)} บาท</strong></div>
           <div className="badminton-round-payment-status">
@@ -1993,9 +2066,9 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
             const extraLabel = formatExtraItems(row.extraCharges);
             const amount = row.billingFinalized ? row.billedAmount : row.roundedDue;
             return <article className={`badminton-pay-row ${row.billingFinalized ? "is-billed" : ""} ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
-              <div className="badminton-pay-person"><strong>{row.name}</strong><span>{formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>ยอดคำนวณสำหรับแอดมิน</small>}</div>
+              <div className="badminton-pay-person"><strong>{row.name}</strong><span>{event.billingModel === "per_round" ? `${row.roundsPlayed || 0} รอบ` : formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>{perRoundAwaitingClose ? "ยอดประมาณ · รอจบรอบ" : "ยอดคำนวณสำหรับแอดมิน"}</small>}</div>
               <strong className="badminton-pay-amount">{baht(amount)} บาท{row.billingFinalized && !row.paid ? <button aria-label={`แก้ยอดเรียกเก็บของ ${row.name}`} className="badminton-edit-bill" onClick={() => setBillDraft({ row, amount: String(row.billedAmount) })} title="แก้ยอดเรียกเก็บ" type="button"><Pencil size={13} /></button> : null}</strong>
-              {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : "สรุปยอด"}</button>}
+              {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} disabled={perRoundAwaitingClose} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : perRoundAwaitingClose ? <Timer size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : perRoundAwaitingClose ? "รอจบรอบ" : "สรุปยอด"}</button>}
             </article>;
           })}
         </div>
@@ -2071,6 +2144,10 @@ function mapDashboardToEvent(dashboard) {
     endsAt: court.ends_at.slice(0, 5),
   }));
   const courtHours = totalCourtHours(courts);
+  const roundsByMember = completedRoundsByMember(
+    dashboard.queueMatches || [],
+    dashboard.queueMatchPlayers || [],
+  );
   const billableSignups = dashboard.signups.filter((row) => row.status === "coming");
   const attendance = billableSignups.map((signup) => {
     const row = attendanceByMember.get(signup.member_id);
@@ -2092,6 +2169,7 @@ function mapDashboardToEvent(dashboard) {
       weight: billingPercentage / 100,
       hours: weightedHours,
       playedMinutes,
+      roundsPlayed: roundsByMember.get(signup.member_id) || 0,
       billingPercentage,
       paymentExempt: Boolean(member?.payment_exempt),
       arrivedAt: arrivalTime,
@@ -2126,6 +2204,8 @@ function mapDashboardToEvent(dashboard) {
     shuttlecockCount,
     shuttlecockUnitPrice,
     billingModel: dashboard.event.billing_model || "legacy",
+    completedGameCount: (dashboard.queueMatches || []).filter((match) => match.status === "completed").length,
+    hasPlayingGames: (dashboard.queueMatches || []).some((match) => match.status === "playing"),
     shuttlecockCheckpoints: (dashboard.shuttlecockCheckpoints || []).map((checkpoint) => ({
       id: checkpoint.id,
       time: checkpoint.checkpoint_time?.slice(0, 5),

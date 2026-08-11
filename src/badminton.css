@@ -2726,6 +2726,69 @@
   font-size: 21px;
 }
 
+.badminton-billing-method {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px;
+  border: 1px solid #cfe0d2;
+  border-radius: 13px;
+  background: #f5faf6;
+}
+
+.badminton-billing-method > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.badminton-billing-method > div:first-child span,
+.badminton-billing-method > small {
+  color: #637064;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.badminton-billing-method > div[role="group"] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(92px, 1fr));
+  padding: 3px;
+  border: 1px solid #c7d7c9;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.badminton-billing-method > div[role="group"] button {
+  min-height: 38px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #637064;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badminton-billing-method > div[role="group"] button.is-active {
+  background: #15966a;
+  color: #fff;
+}
+
+.badminton-billing-method > div[role="group"] button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.badminton-billing-method > small {
+  grid-column: 1 / -1;
+  padding-top: 8px;
+  border-top: 1px solid #dce7dd;
+  color: #176f50;
+  font-weight: 800;
+}
+
 .badminton-court-summary-list {
   display: flex;
   flex-wrap: wrap;
@@ -3445,6 +3508,27 @@
   position: relative;
 }
 
+.badminton-per-round-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid #e3cd80;
+  border-radius: 11px;
+  background: #fff8dc;
+  color: #6f5709;
+}
+
+.badminton-per-round-pending > div {
+  display: grid;
+  gap: 2px;
+}
+
+.badminton-per-round-pending span {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .badminton-settlement-card.is-collection-locked {
   min-height: 420px;
   overflow: hidden;
@@ -3668,6 +3752,16 @@
   font-weight: 900;
 }
 
+.badminton-round-count {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e3f4e9;
+  color: #0f7a52 !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  white-space: nowrap;
+}
+
 .badminton-player-billing-meta small {
   color: #637064;
   font-size: 11px;
@@ -3724,6 +3818,14 @@
 }
 
 @media (max-width: 430px) {
+  .badminton-billing-method {
+    grid-template-columns: 1fr;
+  }
+
+  .badminton-billing-method > div[role="group"] {
+    width: 100%;
+  }
+
   .badminton-player-cost-status {
     align-items: flex-start;
   }
