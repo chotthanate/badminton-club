@@ -371,10 +371,37 @@ export function calculateTimeSegmentedSettlement(event) {
     );
   }
 
+  const courtCost = totalCourtHours(event.courts || []) * hourlyRate;
+  const shuttleCost = Math.max(0, Number(event.shuttlecockCount) || 0)
+    * Math.max(0, Number(event.shuttlecockUnitPrice) || 0);
+  const sharedTotalCost = courtCost + shuttleCost + otherSharedCost;
+  const lockedSharedTotal = preparedRows
+    .filter((row) => row.locked)
+    .reduce((sum, row) => sum + Math.round(Number(row.lockedSharedAmount) || 0), 0);
+  const openSharedTarget = Math.max(0, Math.round(sharedTotalCost) - lockedSharedTotal);
+  const openRawSharedTotal = preparedRows
+    .filter((row) => !row.locked)
+    .reduce((sum, row) => {
+      const share = shares.get(row.memberId) || { court: 0, shuttle: 0, other: 0 };
+      return sum + share.court + share.shuttle + share.other;
+    }, 0);
+  const openAllocations = allocateLargestRemainder(
+    preparedRows.filter((row) => !row.locked).map((row) => {
+      const share = shares.get(row.memberId) || { court: 0, shuttle: 0, other: 0 };
+      const naturalShare = share.court + share.shuttle + share.other;
+      return {
+        key: row.memberId,
+        amount: openRawSharedTotal > 0
+          ? naturalShare * openSharedTarget / openRawSharedTotal
+          : 0,
+      };
+    }),
+    openRawSharedTotal > 0 ? openSharedTarget : 0,
+  );
+
   const rows = preparedRows.map((row) => {
     const share = shares.get(row.memberId) || { court: 0, shuttle: 0, other: 0 };
     const calculatedSharedAmount = share.court + share.shuttle + share.other;
-    const calculatedAmount = Math.round(calculatedSharedAmount) + Math.round(row.currentExtraAmount);
     if (row.locked) {
       return {
         ...row,
@@ -389,6 +416,7 @@ export function calculateTimeSegmentedSettlement(event) {
         paid: Boolean(row.paymentRecorded),
       };
     }
+    const sharedDue = openAllocations.get(row.memberId) || 0;
     return {
       ...row,
       courtDue: share.court,
@@ -396,17 +424,14 @@ export function calculateTimeSegmentedSettlement(event) {
       otherSharedDue: share.other,
       calculatedSharedAmount,
       rawDue: calculatedSharedAmount + row.currentExtraAmount,
-      sharedDue: Math.round(calculatedSharedAmount),
+      sharedDue,
       extraAmount: row.currentExtraAmount,
-      roundedDue: calculatedAmount,
+      roundedDue: sharedDue + Math.round(row.currentExtraAmount),
+      roundingDelta: sharedDue - Math.round(calculatedSharedAmount),
       paid: Boolean(row.paymentExempt) || row.paymentRecorded,
     };
   });
 
-  const courtCost = totalCourtHours(event.courts || []) * hourlyRate;
-  const shuttleCost = Math.max(0, Number(event.shuttlecockCount) || 0)
-    * Math.max(0, Number(event.shuttlecockUnitPrice) || 0);
-  const sharedTotalCost = courtCost + shuttleCost + otherSharedCost;
   const personalExtrasTotal = rows.reduce((sum, row) => sum + Math.round(row.extraAmount), 0);
   const allocatedSharedTotal = rows.reduce((sum, row) => sum + Number(row.sharedDue || 0), 0);
   const totalHours = rows.reduce((sum, row) => sum + row.hours, 0);
@@ -418,12 +443,31 @@ export function calculateTimeSegmentedSettlement(event) {
     totalHours,
     totalUnits: totalHours,
     unitPrice: totalHours > 0 ? sharedTotalCost / totalHours : 0,
-    lockedSharedTotal: rows.filter((row) => row.locked).reduce((sum, row) => sum + Number(row.sharedDue || 0), 0),
-    remainingSharedCost: Math.max(0, sharedTotalCost - rows.filter((row) => row.locked).reduce((sum, row) => sum + Number(row.sharedDue || 0), 0)),
+    lockedSharedTotal,
+    remainingSharedCost: openSharedTarget,
     allocatedSharedTotal,
     roundingDifference: Math.round(sharedTotalCost) - allocatedSharedTotal,
+    unallocatedSharedCost: openRawSharedTotal > 0 ? 0 : openSharedTarget,
     rows,
   };
+}
+
+function allocateLargestRemainder(entries, targetTotal) {
+  const target = Math.max(0, Math.round(Number(targetTotal) || 0));
+  const prepared = entries.map((entry, index) => {
+    const amount = Math.max(0, Number(entry.amount) || 0);
+    const floor = Math.floor(amount);
+    return { ...entry, index, floor, fraction: amount - floor };
+  });
+  const allocations = new Map(prepared.map((entry) => [entry.key, entry.floor]));
+  let remainder = target - prepared.reduce((sum, entry) => sum + entry.floor, 0);
+  const ranked = [...prepared].sort((left, right) =>
+    right.fraction - left.fraction
+    || left.index - right.index);
+  for (let index = 0; index < ranked.length && remainder > 0; index += 1, remainder -= 1) {
+    allocations.set(ranked[index].key, (allocations.get(ranked[index].key) || 0) + 1);
+  }
+  return allocations;
 }
 
 function prepareSettlementRow(row) {

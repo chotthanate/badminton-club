@@ -53,6 +53,7 @@ export function parseSlipText(text) {
   return {
     amount: parseSlipAmount(source),
     date: parseSlipDate(source),
+    reference: parseSlipReference(source),
   };
 }
 
@@ -84,6 +85,24 @@ export function parseSlipDate(text) {
   const textual = new RegExp(`(?:^|\\D)(\\d{1,2})\\s*(${monthNames})\\s*(\\d{2,4})(?:\\D|$)`, "i").exec(source);
   if (!textual) return null;
   return isoDate(textual[1], THAI_MONTHS.get(textual[2].toLowerCase()), textual[3]);
+}
+
+export function parseSlipReference(text) {
+  const source = String(text || "").normalize("NFKC");
+  const marker = /(?:เลขที่(?:รายการ|อ้างอิง)|รหัสอ้างอิง|หมายเลขอ้างอิง|transaction\s*(?:id|no\.?|number)|reference\s*(?:id|no\.?|number)?|ref(?:erence)?\.?)/ig;
+  let match;
+  while ((match = marker.exec(source))) {
+    const nearby = source.slice(match.index + match[0].length, match.index + match[0].length + 90);
+    const candidate = /[:#\-\s]*([A-Z0-9][A-Z0-9\-]{5,49})/i.exec(nearby)?.[1];
+    const normalized = normalizeSlipReference(candidate);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+export function normalizeSlipReference(value) {
+  const normalized = String(value || "").normalize("NFKC").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return normalized.length >= 6 && normalized.length <= 50 ? normalized : null;
 }
 
 export async function recognizeSlip(file, onProgress = () => {}) {

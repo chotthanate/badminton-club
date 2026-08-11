@@ -16,7 +16,7 @@ import {
   totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
-import { classifySlipRecipient, parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
+import { classifySlipRecipient, parseSlipReference, parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
 import { getLiffMode } from "../src/liffMode.js";
 
 function makeEvent({ attendance = [], costs = [], ...overrides } = {}) {
@@ -347,6 +347,67 @@ test("time-segmented billing is independent of which equal player was finalized 
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [300, 300]);
 });
 
+test("time-segmented billing distributes every rounded baht across many equal players", () => {
+  const result = calculateSettlement({
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    courts: [{ startsAt: "21:00", endsAt: "00:00" }],
+    courtHourlyRate: 1600 / 3,
+    shuttlecockCount: 0,
+    shuttlecockUnitPrice: 95,
+    extraCosts: [],
+    attendance: Array.from({ length: 69 }, (_, index) => ({
+      memberId: `player-${index + 1}`,
+      name: `ผู้เล่น ${index + 1}`,
+      arrived: true,
+      arrivedAt: "21:00",
+      leftAt: "00:00",
+      playedMinutes: 180,
+      billingPercentage: 100,
+    })),
+  });
+
+  const amounts = result.rows.map((row) => row.roundedDue);
+  assert.equal(amounts.reduce((sum, amount) => sum + amount, 0), 1600);
+  assert.equal(result.allocatedSharedTotal, 1600);
+  assert.equal(result.roundingDifference, 0);
+  assert.equal(Math.max(...amounts) - Math.min(...amounts), 1);
+});
+
+test("time-segmented billing keeps finalized rows fixed and balances the open remainder", () => {
+  const result = calculateSettlement({
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    courts: [{ startsAt: "21:00", endsAt: "00:00" }],
+    courtHourlyRate: 200,
+    shuttlecockCount: 0,
+    shuttlecockUnitPrice: 95,
+    extraCosts: [],
+    attendance: [
+      {
+        memberId: "locked",
+        name: "สรุปแล้ว",
+        arrived: true,
+        arrivedAt: "21:00",
+        leftAt: "00:00",
+        playedMinutes: 180,
+        billingPercentage: 100,
+        billingFinalized: true,
+        billedAmount: 186,
+        lockedSharedAmount: 186,
+        lockedExtraAmount: 0,
+      },
+      { memberId: "open-1", name: "ยังไม่สรุป 1", arrived: true, arrivedAt: "21:00", leftAt: "00:00", playedMinutes: 180, billingPercentage: 100 },
+      { memberId: "open-2", name: "ยังไม่สรุป 2", arrived: true, arrivedAt: "21:00", leftAt: "00:00", playedMinutes: 180, billingPercentage: 100 },
+    ],
+  });
+
+  assert.equal(result.rows[0].roundedDue, 186);
+  assert.equal(result.rows.reduce((sum, row) => sum + row.roundedDue, 0), 600);
+  assert.equal(result.rows[1].roundedDue + result.rows[2].roundedDue, 414);
+  assert.equal(Math.abs(result.rows[1].roundedDue - result.rows[2].roundedDue), 0);
+});
+
 test("a finalized time-segmented bill never changes when another player or court is edited", () => {
   const lockedPlayer = {
     memberId: "locked",
@@ -515,7 +576,14 @@ test("slip parser reads Thai transfer amount and Buddhist date", () => {
   assert.deepEqual(parseSlipText("จำนวนเงิน 200.00 บาท\nวันที่ 25/07/2569"), {
     amount: 200,
     date: "2026-07-25",
+    reference: null,
   });
+});
+
+test("slip parser normalizes a transaction reference for duplicate protection", () => {
+  assert.equal(parseSlipReference("เลขที่รายการ: 0100-20260725-ABC123"), "010020260725ABC123");
+  assert.equal(parseSlipReference("Transaction ID\nAB12CD345678"), "AB12CD345678");
+  assert.equal(parseSlipReference("ข้อความทั่วไปที่ไม่มีเลขอ้างอิง"), null);
 });
 
 test("slip recipient accepts only the configured full recipient name", () => {

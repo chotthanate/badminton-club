@@ -1063,34 +1063,15 @@ export async function finalizeMemberBill({
   throwIfError(error);
 }
 
-export async function reviewPaymentSlip({ slip, approved, userId }) {
+export async function reviewPaymentSlip({ slip, approved }) {
   const paymentIds = Array.isArray(slip.payment_ids) ? slip.payment_ids : [];
   if (!paymentIds.length) throw new Error("สลิปนี้ไม่มีรายการชำระเงิน");
-  const now = new Date().toISOString();
-  if (approved) {
-    const excess = Math.max(0, Number(slip.transferred_amount || 0) - Number(slip.expected_amount || 0));
-    for (let index = 0; index < paymentIds.length; index += 1) {
-      const { error: paymentError } = await client().from("payments").update({
-        paid_at: now,
-        payment_status: "paid",
-        paid_source: "slip_review",
-        transferred_amount: index === 0 ? slip.transferred_amount : null,
-        overpayment_amount: index === 0 ? excess : 0,
-      }).eq("id", paymentIds[index]).is("paid_at", null);
-      throwIfError(paymentError);
-    }
-  } else {
-    const { error: paymentError } = await client().from("payments").update({
-      payment_status: "awaiting",
-    }).in("id", paymentIds).is("paid_at", null);
-    throwIfError(paymentError);
-  }
-  const { error: slipError } = await client().from("payment_slips").update({
-    status: approved ? "auto_paid" : "rejected",
-    reviewed_by: userId,
-    reviewed_at: now,
-  }).eq("id", slip.id).eq("status", "pending");
-  throwIfError(slipError);
+  const { error } = await client().rpc("settle_payment_slip", {
+    target_slip_id: slip.id,
+    approve: Boolean(approved),
+    settlement_source: "slip_review",
+  });
+  throwIfError(error);
 }
 
 export async function getPaymentSlipImageUrl(storagePath) {

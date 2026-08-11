@@ -643,17 +643,32 @@ async function handlePaymentLiffRequest(payload: any) {
     const slip = payload.slip || {};
     const slipHash = String(slip.hash || "").trim().toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(slipHash)) return json({ error: "ข้อมูลรูปสลิปไม่ถูกต้อง" }, 400);
-    const { data: duplicate } = await admin.from("payment_slips")
+    const transactionReference = extractSlipReference(slip.text) || normalizeSlipReference(slip.reference);
+    const { data: hashDuplicate } = await admin.from("payment_slips")
       .select("id, status")
       .eq("club_id", clubId)
       .eq("slip_hash", slipHash)
       .maybeSingle();
+    let duplicate = hashDuplicate;
+    if (!duplicate && transactionReference) {
+      const { data: referenceDuplicate, error: referenceDuplicateError } = await admin.from("payment_slips")
+        .select("id, status")
+        .eq("club_id", clubId)
+        .eq("transaction_reference", transactionReference)
+        .eq("status", "auto_paid")
+        .maybeSingle();
+      if (referenceDuplicateError) throw referenceDuplicateError;
+      duplicate = referenceDuplicate;
+    }
     if (duplicate) {
+      if (duplicate.status === "rejected") {
+        return json({ error: "รายการโอนนี้เคยถูกตรวจสอบแล้ว กรุณาติดต่อแอดมิน" }, 409);
+      }
       return json({
         status: duplicate.status,
         message: duplicate.status === "auto_paid"
-          ? "สลิปนี้ถูกบันทึกว่าชำระแล้วก่อนหน้านี้"
-          : "สลิปนี้อยู่ระหว่างรอแอดมินตรวจสอบ",
+          ? "รายการโอนนี้ถูกบันทึกว่าชำระแล้วก่อนหน้านี้"
+          : "รายการโอนนี้อยู่ระหว่างรอแอดมินตรวจสอบ",
       });
     }
 
@@ -691,25 +706,34 @@ async function handlePaymentLiffRequest(payload: any) {
       return String(badmintonEvent?.event_date || "");
     }).filter(Boolean);
     const latestEventDate = [...eventDates].sort().at(-1) || null;
-    const datePasses = Boolean(transferredOn && latestEventDate && transferredOn >= latestEventDate);
+    const todayInBangkok = bangkokIsoDate();
+    const datePasses = Boolean(
+      transferredOn
+      && latestEventDate
+      && transferredOn >= latestEventDate
+      && transferredOn <= todayInBangkok,
+    );
     const ocrPasses = confidence !== null
       && confidence >= 35
       && Boolean(transferredOn)
       && transferredAmount !== null
-      && recipientStatus === "match";
-    const autoPaid = datePasses && ocrPasses;
+      && recipientStatus === "match"
+      && Boolean(transactionReference);
+    const autoPaidCandidate = datePasses && ocrPasses;
     const overpaymentAmount = 0;
     const reviewReasons = [
       recipientStatus === "unclear" ? "ระบบอ่านชื่อบัญชีผู้รับไม่ชัด" : "",
       transferredAmount === null ? "ระบบอ่านยอดเงินไม่ชัด" : "",
       !transferredOn ? "ระบบอ่านวันที่โอนไม่ชัด" : "",
+      !transactionReference ? "ระบบอ่านเลขอ้างอิงรายการไม่ชัด" : "",
       confidence === null || confidence < 35 ? "ความชัดเจนของข้อความในสลิปต่ำ" : "",
       transferredOn && latestEventDate && transferredOn < latestEventDate ? "วันที่โอนอยู่ก่อนวันที่ตีแบด" : "",
+      transferredOn && transferredOn > todayInBangkok ? "วันที่โอนเป็นวันอนาคต" : "",
     ].filter(Boolean);
     const slipId = crypto.randomUUID();
     let storagePath: string | null = null;
 
-    if (!autoPaid && typeof slip.dataUrl === "string") {
+    if (typeof slip.dataUrl === "string") {
       const image = decodeDataUrl(slip.dataUrl);
       if (image && image.bytes.byteLength <= 3 * 1024 * 1024) {
         const extension = image.mimeType === "image/png" ? "png" : image.mimeType === "image/webp" ? "webp" : "jpg";
@@ -722,6 +746,8 @@ async function handlePaymentLiffRequest(payload: any) {
         }
       }
     }
+    if (!storagePath) reviewReasons.push("ระบบเก็บรูปสลิปไม่สำเร็จ");
+    const autoPaid = autoPaidCandidate && Boolean(storagePath);
 
     const { error: slipError } = await admin.from("payment_slips").insert({
       id: slipId,
@@ -735,8 +761,9 @@ async function handlePaymentLiffRequest(payload: any) {
       ocr_confidence: confidence,
       ocr_text: String(slip.text || "").slice(0, 12000),
       slip_hash: slipHash,
+      transaction_reference: transactionReference,
       storage_path: storagePath,
-      status: autoPaid ? "auto_paid" : "pending",
+      status: "pending",
       review_reason: reviewReasons.join(" · ") || (autoPaid ? null : "รอแอดมินตรวจสอบ"),
       overpayment_amount: overpaymentAmount,
     });
@@ -761,16 +788,23 @@ async function handlePaymentLiffRequest(payload: any) {
     }
 
     if (autoPaid) {
-      const paidAt = new Date().toISOString();
-      for (let index = 0; index < paymentIds.length; index += 1) {
-        const { error: updateError } = await admin.from("payments").update({
-          paid_at: paidAt,
-          payment_status: "paid",
-          paid_source: "slip_auto",
-          transferred_amount: index === 0 ? transferredAmount : null,
-          overpayment_amount: index === 0 ? overpaymentAmount : 0,
-        }).eq("id", paymentIds[index]).is("paid_at", null);
-        if (updateError) throw updateError;
+      const { error: settlementError } = await admin.rpc("settle_payment_slip", {
+        target_slip_id: slipId,
+        approve: true,
+        settlement_source: "slip_auto",
+      });
+      if (settlementError) {
+        console.error("Atomic slip settlement failed", settlementError.message);
+        await admin.from("payment_slips").update({
+          review_reason: "ระบบปิดยอดพร้อมกันไม่สำเร็จ กรุณาให้แอดมินตรวจสอบ",
+        }).eq("id", slipId).eq("status", "pending");
+        await admin.from("payments").update({ payment_status: "review" })
+          .in("id", paymentIds)
+          .is("paid_at", null);
+        return json({
+          status: "pending",
+          message: "ยังไม่ได้เปลี่ยนสถานะเป็นจ่ายแล้ว แอดมินจะตรวจสอบรายการนี้อีกครั้ง",
+        });
       }
     } else {
       await admin.from("payments").update({ payment_status: "review" })
@@ -1437,6 +1471,35 @@ function isoDateValue(value: unknown) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
   const date = new Date(`${text}T12:00:00+07:00`);
   return Number.isNaN(date.getTime()) ? null : text;
+}
+
+function bangkokIsoDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function extractSlipReference(value: unknown) {
+  const source = String(value || "").normalize("NFKC");
+  const marker = /(?:เลขที่(?:รายการ|อ้างอิง)|รหัสอ้างอิง|หมายเลขอ้างอิง|transaction\s*(?:id|no\.?|number)|reference\s*(?:id|no\.?|number)?|ref(?:erence)?\.?)/ig;
+  let match;
+  while ((match = marker.exec(source))) {
+    const nearby = source.slice(match.index + match[0].length, match.index + match[0].length + 90);
+    const candidate = /[:#\-\s]*([A-Z0-9][A-Z0-9\-]{5,49})/i.exec(nearby)?.[1];
+    const normalized = normalizeSlipReference(candidate);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function normalizeSlipReference(value: unknown) {
+  const normalized = String(value || "").normalize("NFKC").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return normalized.length >= 6 && normalized.length <= 50 ? normalized : null;
 }
 
 function classifySlipRecipient(value: unknown) {

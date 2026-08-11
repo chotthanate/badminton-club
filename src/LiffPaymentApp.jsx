@@ -55,6 +55,7 @@ export default function LiffPaymentApp() {
     ? null
     : Number(slip.amount) - total;
   const amountMismatch = amountDifference !== null && Math.abs(amountDifference) >= 0.009;
+  const futureTransferDate = Boolean(slip?.date && slip.date > todayIsoLocal());
 
   function selectBeneficiary(nextId) {
     setBeneficiaryId(nextId);
@@ -117,6 +118,7 @@ export default function LiffPaymentApp() {
           confidence: slip.confidence,
           text: slip.text,
           hash: slip.hash,
+          reference: slip.reference,
           dataUrl: slip.dataUrl,
           mimeType: slip.mimeType,
         },
@@ -148,7 +150,7 @@ export default function LiffPaymentApp() {
     <PaymentShell>
       <header className="liff-payment-header">
         <ReceiptText size={25} />
-        <div><h1>แจ้งโอนค่าแบด</h1><p>ระบบตรวจชื่อผู้รับ ยอด และวันที่จากสลิปให้อัตโนมัติ</p></div>
+        <div><h1>แจ้งโอนค่าแบด</h1><p>ตรวจสลิปเบื้องต้นอัตโนมัติจากชื่อผู้รับ ยอด วันที่ และเลขอ้างอิง</p></div>
       </header>
 
       <section className="liff-payment-card">
@@ -171,7 +173,7 @@ export default function LiffPaymentApp() {
         <div className="liff-payment-section-title"><div><strong>แนบรูปสลิป</strong><span>รองรับภาพจากแอปธนาคาร</span></div></div>
         <label className={`liff-slip-picker ${slip ? "has-slip" : ""}`}>
           <input accept="image/*" disabled={reading || submitting} onChange={readSlip} type="file" />
-          {reading ? <><LoaderCircle className="is-spinning" size={28} /><strong>กำลังอ่านข้อความ {progress}%</strong></> : slip ? <><Check size={29} /><strong>อ่านสลิปแล้ว</strong><span>ยอด {slip.amount === null ? "อ่านไม่ชัด" : `${baht(slip.amount)} บาท`} · วันที่ {slip.date || "อ่านไม่ชัด"}</span></> : <><ImagePlus size={29} /><strong>เลือกรูปสลิป</strong><span>แตะเพื่อเลือกรูปจากเครื่อง</span></>}
+          {reading ? <><LoaderCircle className="is-spinning" size={28} /><strong>กำลังอ่านข้อความ {progress}%</strong></> : slip ? <><Check size={29} /><strong>อ่านสลิปแล้ว</strong><span>ยอด {slip.amount === null ? "อ่านไม่ชัด" : `${baht(slip.amount)} บาท`} · วันที่ {slip.date || "อ่านไม่ชัด"} · เลขอ้างอิง {slip.reference || "อ่านไม่ชัด"}</span></> : <><ImagePlus size={29} /><strong>เลือกรูปสลิป</strong><span>แตะเพื่อเลือกรูปจากเครื่อง</span></>}
         </label>
         {slip && recipientStatus === "mismatch" ? <p className="liff-slip-warning">บัญชีผู้รับไม่ถูกต้อง กรุณาตรวจสอบว่าโอนไปยัง {PAYMENT_RECIPIENT_NAME}</p> : null}
         {slip && recipientStatus === "unclear" ? <p className="liff-slip-warning">ระบบอ่านชื่อบัญชีผู้รับไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
@@ -179,6 +181,8 @@ export default function LiffPaymentApp() {
         {slip && amountDifference !== null && amountDifference < -0.009 ? <p className="liff-slip-warning">ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากน้อยกว่ายอดที่ต้องจ่ายจริง ต้องชำระ {baht(total)} บาท แต่สลิปเป็น {baht(slip.amount)} บาท</p> : null}
         {slip && amountDifference !== null && amountDifference > 0.009 ? <p className="liff-slip-warning">ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากมากกว่ายอดที่ต้องจ่ายจริง ต้องชำระ {baht(total)} บาท แต่สลิปเป็น {baht(slip.amount)} บาท</p> : null}
         {slip && !slip.date ? <p className="liff-slip-warning">ระบบอ่านวันที่ไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
+        {slip && futureTransferDate ? <p className="liff-slip-warning">วันที่บนสลิปเป็นวันอนาคต รายการจะไปรอแอดมินตรวจสอบ</p> : null}
+        {slip && !slip.reference ? <p className="liff-slip-warning">ระบบอ่านเลขอ้างอิงไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
         {error ? <div className="liff-inline-error">{error}</div> : null}
         <button className="liff-payment-submit" disabled={!selectedPaymentIds.length || !slip || recipientStatus === "mismatch" || amountMismatch || reading || submitting} onClick={submitPayment} type="button">{submitting ? "กำลังตรวจสอบ..." : `ยืนยันแจ้งโอน ${baht(total)} บาท`}</button>
       </section> : null}
@@ -201,4 +205,11 @@ async function callPaymentApi(action, payload) {
   const responseData = await response.json().catch(() => ({}));
   if (!response.ok || responseData.error) throw new Error(responseData.error || "เชื่อมต่อระบบไม่สำเร็จ");
   return responseData;
+}
+
+function todayIsoLocal(now = new Date()) {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
