@@ -454,7 +454,13 @@ function AdminDashboard({ session }) {
             <p>{context.clubs.name}</p>
           </div>
           <div className="badminton-header-actions">
-            <button aria-label="รีเฟรชข้อมูล" className="badminton-icon-button" onClick={() => refresh()} type="button">
+            <button
+              aria-label="โหลดหน้าเว็บและข้อมูลล่าสุด"
+              className="badminton-icon-button"
+              onClick={() => window.location.reload()}
+              title="โหลดหน้าเว็บและข้อมูลล่าสุด"
+              type="button"
+            >
               <RefreshCw size={18} />
             </button>
             {!isStaff ? <button aria-label="เปลี่ยนรหัสเข้าเว็บ" className="badminton-icon-button" onClick={() => setPasswordModalOpen(true)} title="เปลี่ยนรหัสเข้าเว็บ" type="button">
