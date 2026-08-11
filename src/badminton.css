@@ -4991,6 +4991,133 @@
   .badminton-operator-courts .badminton-court-row select { padding-inline: 7px; font-size: 13px; }
   .badminton-staff-player-head { flex-wrap: wrap; }
   .badminton-staff-player-head .badminton-line-name { order: 5; flex-basis: calc(100% - 48px); margin-left: 48px; }
-  .live-header { align-items: stretch; flex-direction: column; }
-  .live-header > button { align-self: flex-start; }
+  .live-queue-shell {
+    padding: max(10px, env(safe-area-inset-top)) 10px 28px;
+  }
+
+  .live-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .live-header h1 {
+    margin: 0 0 2px;
+    font-size: 23px;
+  }
+
+  .live-header p {
+    max-width: 250px;
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .live-header .badminton-kicker {
+    font-size: 11px;
+  }
+
+  .live-header > button {
+    min-height: 40px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  .live-header > button svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .live-courts > h2,
+  .live-upcoming h2,
+  .live-waiting h2 {
+    font-size: 18px;
+  }
+
+  .live-courts > div {
+    gap: 7px;
+    margin-top: 7px;
+  }
+
+  .live-court {
+    gap: 7px;
+    padding: 9px 10px;
+    border-radius: 14px;
+  }
+
+  .live-court > header strong {
+    font-size: 16px;
+  }
+
+  .live-court > header span {
+    font-size: 11px;
+  }
+
+  .live-court > header b {
+    font-size: 14px;
+  }
+
+  .live-court > header b svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .live-court-teams {
+    gap: 6px;
+  }
+
+  .live-court-teams > div {
+    padding: 6px 7px;
+    border-radius: 9px;
+  }
+
+  .live-court-teams > div > span {
+    font-size: 10px;
+  }
+
+  .live-court-teams p {
+    margin-top: 3px;
+    font-size: 13px;
+  }
+
+  .live-court-teams p strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .live-court-teams em {
+    padding: 1px 5px;
+    font-size: 11px;
+  }
+
+  .live-upcoming,
+  .live-waiting {
+    gap: 7px;
+    margin-top: 9px;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .live-upcoming > article {
+    gap: 5px;
+    padding: 8px;
+  }
+
+  .live-upcoming > article span {
+    min-width: 0;
+    padding: 5px 6px;
+    font-size: 12px;
+  }
+
+  .live-upcoming > article span b {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }

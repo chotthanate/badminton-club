@@ -310,8 +310,8 @@ export default function LiffSignupApp() {
       {showNicknameModal ? (
         <div className="liff-modal-backdrop" role="presentation">
           <form className="liff-nickname-modal" onSubmit={saveNickname}>
-            <div><p className="badminton-kicker">โปรไฟล์สมาชิก</p><h2>{nickname && skillLevel ? "แก้ไขโปรไฟล์" : "ตั้งค่าครั้งแรก"}</h2><p>ระบบจะจำชื่อและระดับไว้ ครั้งต่อไปไม่ต้องกรอกใหม่</p></div>
-            <label htmlFor="liff-nickname"><span>ชื่อเล่น</span><input autoFocus id="liff-nickname" maxLength="40" onChange={(changeEvent) => setNicknameDraft(changeEvent.target.value)} placeholder="เช่น บอย, หยก, แนน" required value={nicknameDraft} /></label>
+            <div><h2>โปรไฟล์สมาชิก</h2><p>ระบบจะจำชื่อและระดับไว้สำหรับครั้งต่อไป</p></div>
+            <label htmlFor="liff-nickname"><span>ชื่อเล่น</span><input autoFocus id="liff-nickname" maxLength="40" onChange={(changeEvent) => setNicknameDraft(changeEvent.target.value)} required value={nicknameDraft} /></label>
             <label><span>ระดับมือ</span><select onChange={(changeEvent) => { setSkillDraft(changeEvent.target.value); setPlayableSkillLevelsDraft(defaultPlayableSkillLevels(changeEvent.target.value)); }} required value={skillDraft}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
             <SkillCompatibilityPicker className="liff-skill-preferences" onChange={setPlayableSkillLevelsDraft} skillLevel={skillDraft} value={playableSkillLevelsDraft} />
             <small>ชื่อ LINE ของคุณคือ {profile?.name || "สมาชิก LINE"}</small>
