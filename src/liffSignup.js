@@ -26,6 +26,17 @@ export function buildTestPaymentLiffUrl({ liffId, testClubId }) {
   return `https://liff.line.me/${encodeURIComponent(liffId)}?${params}`;
 }
 
+export function buildLiveQueueUrl({ eventId = null, testClubId = null, origin = window.location.origin + window.location.pathname } = {}) {
+  const params = new URLSearchParams({ liff: "live" });
+  if (eventId) params.set("event_id", eventId);
+  else params.set("latest", "1");
+  if (testClubId) {
+    params.set("test", "1");
+    params.set("test_club_id", testClubId);
+  }
+  return `${origin}?${params}`;
+}
+
 function liffSearchParams(search) {
   const params = new URLSearchParams(search);
   const liffState = params.get("liff.state");

@@ -18,11 +18,14 @@ Deno.serve(async (request) => {
   const payload = safeJson(rawBody);
   const authorization = request.headers.get("Authorization");
 
+  if (payload?.action === "staff_login") return handleStaffLogin(payload);
+  if (payload?.action === "get_live_queue") return handleLiveQueueRequest(payload);
+
   if (["get_liff_payments", "submit_liff_payment"].includes(payload?.action)) {
     return handlePaymentLiffRequest(payload);
   }
 
-  if (["get_liff_event", "save_liff_nickname", "save_liff_profile", "submit_liff_signup", "submit_liff_guest", "cancel_liff_signup"].includes(payload?.action)) {
+  if (["get_liff_event", "save_liff_nickname", "save_liff_profile", "save_live_profile", "submit_liff_signup", "submit_liff_guest", "cancel_liff_signup"].includes(payload?.action)) {
     return handleLiffRequest(payload);
   }
 
@@ -35,7 +38,7 @@ Deno.serve(async (request) => {
 
 async function publishFromAdmin(request: Request, rawBody: string, authorization: string) {
   const payload = safeJson(rawBody);
-  if (!["publish_event", "change_admin_password"].includes(payload?.action)) {
+  if (!["publish_event", "change_admin_password", "configure_staff_access"].includes(payload?.action)) {
     return json({ error: "Invalid action" }, 400);
   }
 
@@ -46,6 +49,10 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
   );
   const { data: authData, error: authError } = await userClient.auth.getUser();
   if (authError || !authData.user) return json({ error: "Unauthorized" }, 401);
+
+  if (payload.action === "configure_staff_access") {
+    return configureStaffAccess(userClient, authData.user, payload);
+  }
 
   if (payload.action === "change_admin_password") {
     const password = typeof payload.password === "string" ? payload.password : "";
@@ -117,6 +124,70 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
     action: "เตรียมรอบสำหรับคำสั่งเปิดลงชื่อใน LINE",
   });
   return json({ ok: true, command: "เปิดลงชื่อ" });
+}
+
+function staffEmail(clubId: string) {
+  return `staff+${clubId}@headshot.invalid`;
+}
+
+async function handleStaffLogin(payload: any) {
+  const clubId = Deno.env.get("LINE_CLUB_ID");
+  const password = typeof payload?.password === "string" ? payload.password : "";
+  if (!clubId || !password) return json({ error: "รหัสสตาฟไม่ถูกต้อง" }, 401);
+  const anon = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!);
+  const { data, error } = await anon.auth.signInWithPassword({ email: staffEmail(clubId), password });
+  if (error || !data.user || !data.session) return json({ error: "รหัสสตาฟไม่ถูกต้อง" }, 401);
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const { data: staffMember } = await admin.from("club_members")
+    .select("id")
+    .eq("club_id", clubId)
+    .eq("profile_id", data.user.id)
+    .eq("role", "staff")
+    .eq("active", true)
+    .maybeSingle();
+  if (!staffMember) {
+    return json({ error: "รหัสสตาฟถูกปิดใช้งานแล้ว" }, 403);
+  }
+  return json({ session: { access_token: data.session.access_token, refresh_token: data.session.refresh_token } });
+}
+
+async function configureStaffAccess(userClient: any, user: any, payload: any) {
+  const clubId = String(payload?.clubId || "");
+  const enabled = payload?.enabled !== false;
+  const { data: adminMember, error: memberError } = await userClient.from("club_members")
+    .select("id")
+    .eq("club_id", clubId)
+    .eq("profile_id", user.id)
+    .eq("role", "admin")
+    .eq("active", true)
+    .maybeSingle();
+  if (memberError || !adminMember) return json({ error: "Admin only" }, 403);
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const { data: existingStaff } = await admin.from("club_members")
+    .select("id, profile_id")
+    .eq("club_id", clubId)
+    .eq("role", "staff")
+    .limit(1)
+    .maybeSingle();
+  if (existingStaff?.profile_id) await admin.auth.admin.deleteUser(existingStaff.profile_id);
+  if (!enabled) {
+    if (existingStaff?.id) await admin.from("club_members").update({ active: false, profile_id: null }).eq("id", existingStaff.id);
+    await admin.from("audit_logs").insert({ club_id: clubId, actor_id: user.id, action: "ปิดใช้งานรหัสสตาฟ" });
+    return json({ ok: true, enabled: false });
+  }
+  const password = typeof payload?.password === "string" ? payload.password : "";
+  if (password.length < 6 || password.length > 72) return json({ error: "รหัสสตาฟต้องมี 6-72 ตัวอักษร" }, 400);
+  const { data: created, error: createError } = await admin.auth.admin.createUser({ email: staffEmail(clubId), password, email_confirm: true, user_metadata: { role: "staff", club_id: clubId } });
+  if (createError || !created.user) return json({ error: "ตั้งค่ารหัสสตาฟไม่สำเร็จ" }, 500);
+  if (existingStaff?.id) {
+    const { error } = await admin.from("club_members").update({ profile_id: created.user.id, active: true, display_name: "สตาฟ", nickname: "สตาฟ" }).eq("id", existingStaff.id);
+    if (error) return json({ error: "ผูกบัญชีสตาฟไม่สำเร็จ" }, 500);
+  } else {
+    const { error } = await admin.from("club_members").insert({ club_id: clubId, profile_id: created.user.id, display_name: "สตาฟ", nickname: "สตาฟ", role: "staff", active: true });
+    if (error) return json({ error: "สร้างบัญชีสตาฟไม่สำเร็จ" }, 500);
+  }
+  await admin.from("audit_logs").insert({ club_id: clubId, actor_id: user.id, action: "ตั้งหรือเปลี่ยนรหัสสตาฟ" });
+  return json({ ok: true, enabled: true });
 }
 
 async function receiveLineWebhook(request: Request, rawBody: string) {
@@ -740,6 +811,73 @@ async function handlePaymentLiffRequest(payload: any) {
   }
 }
 
+async function handleLiveQueueRequest(payload: any) {
+  const configuredClubId = Deno.env.get("LINE_CLUB_ID");
+  if (!configuredClubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
+  try {
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const clubId = await resolveLiffClubId(admin, payload, configuredClubId);
+    let eventQuery = admin.from("events")
+      .select("id, event_date, venue, status, starts_at, ends_at")
+      .eq("club_id", clubId)
+      .eq("status", "open");
+    if (payload?.eventId) eventQuery = eventQuery.eq("id", String(payload.eventId));
+    else eventQuery = eventQuery.order("event_date", { ascending: false }).order("created_at", { ascending: false });
+    const { data: event, error: eventError } = await eventQuery.limit(1).maybeSingle();
+    if (eventError) throw eventError;
+    if (!event) return json({ error: "ตอนนี้ยังไม่มีรอบที่กำลังเล่น" }, 404);
+
+    const [courtsResult, membersResult, signupsResult, queuePlayersResult, matchesResult] = await Promise.all([
+      admin.from("event_courts").select("id, court_name, starts_at, ends_at, position").eq("event_id", event.id).order("position"),
+      admin.from("club_members").select("id, nickname, skill_level, playable_skill_levels").eq("club_id", clubId).eq("role", "member").eq("active", true),
+      admin.from("signups").select("member_id, status, skill_level_snapshot, playable_skill_levels_snapshot").eq("event_id", event.id).eq("status", "coming"),
+      admin.from("event_queue_players").select("member_id, status").eq("event_id", event.id),
+      admin.from("queue_matches").select("id, court_id, status, queue_position, started_at").eq("event_id", event.id).in("status", ["approved", "playing"]).order("queue_position"),
+    ]);
+    for (const result of [courtsResult, membersResult, signupsResult, queuePlayersResult, matchesResult]) if (result.error) throw result.error;
+    const matchIds = (matchesResult.data || []).map((match: any) => match.id);
+    const { data: matchPlayers, error: matchPlayersError } = matchIds.length
+      ? await admin.from("queue_match_players").select("match_id, member_id, team, position, skill_level_snapshot").in("match_id", matchIds)
+      : { data: [], error: null };
+    if (matchPlayersError) throw matchPlayersError;
+    const membersById = new Map((membersResult.data || []).map((member: any) => [member.id, member]));
+    const signupsById = new Map((signupsResult.data || []).map((signup: any) => [signup.member_id, signup]));
+    const safePlayer = (memberId: string, skillSnapshot?: string | null) => {
+      const member: any = membersById.get(memberId);
+      return { nickname: String(member?.nickname || "สมาชิก").slice(0, 40), skillLevel: skillSnapshot || (signupsById.get(memberId) as any)?.skill_level_snapshot || member?.skill_level || "-" };
+    };
+    const playersByMatch = new Map<string, any[]>();
+    for (const player of matchPlayers || []) {
+      const rows = playersByMatch.get(player.match_id) || [];
+      rows.push({ ...safePlayer(player.member_id, player.skill_level_snapshot), team: player.team, slot: `${player.team}${player.position}` });
+      playersByMatch.set(player.match_id, rows);
+    }
+    const playingByCourt = new Map((matchesResult.data || []).filter((match: any) => match.status === "playing").map((match: any) => [match.court_id, match]));
+    const courts = (courtsResult.data || []).map((court: any) => {
+      const match: any = playingByCourt.get(court.id);
+      return { id: court.id, name: court.court_name, playing: Boolean(match), startedAt: match?.started_at || null, players: match ? (playersByMatch.get(match.id) || []) : [] };
+    });
+    const upcoming = (matchesResult.data || []).filter((match: any) => match.status === "approved").sort((a: any, b: any) => a.queue_position - b.queue_position).map((match: any) => ({ id: match.id, position: match.queue_position, players: playersByMatch.get(match.id) || [] }));
+    const waitingRows = (queuePlayersResult.data || []).filter((row: any) => row.status === "waiting");
+    const levels = ["Rookie-", "Rookie", "BG", "N", "S", "P"];
+    const waiting = levels.map((skillLevel) => {
+      const players = waitingRows.map((row: any) => ({ memberId: row.member_id, ...safePlayer(row.member_id) })).filter((player: any) => player.skillLevel === skillLevel).map(({ memberId: _memberId, ...player }: any) => player);
+      return { skillLevel, count: players.length, players };
+    });
+    let profile = null;
+    if (payload?.idToken) {
+      const identity = await verifyLiffIdToken(payload.idToken);
+      const { data: linkedMember } = await admin.from("club_members").select("id, nickname, skill_level, playable_skill_levels").eq("club_id", clubId).eq("line_user_id", identity.sub).eq("active", true).eq("role", "member").maybeSingle();
+      profile = { memberId: linkedMember?.id || null, nickname: linkedMember?.nickname || "", skillLevel: linkedMember?.skill_level || "", playableSkillLevels: linkedMember?.playable_skill_levels || [] };
+    }
+    return json({ serverNow: new Date().toISOString(), event: { id: event.id, date: event.event_date, venue: event.venue, startTime: shortTime(event.starts_at), endTime: shortTime(event.ends_at) }, courts, upcoming, waiting, profile });
+  } catch (error) {
+    console.error("Live queue request failed", error);
+    const message = error instanceof Error ? error.message : "โหลดสนามสดไม่สำเร็จ";
+    return json({ error: message }, message.includes("LINE login") ? 401 : 500);
+  }
+}
+
 async function handleLiffRequest(payload: any) {
   const configuredClubId = Deno.env.get("LINE_CLUB_ID");
   if (!configuredClubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
@@ -898,15 +1036,21 @@ async function handleLiffRequest(payload: any) {
     }
     const displayName = String(identity.name || existingMember?.display_name || "สมาชิก LINE").slice(0, 80);
 
-    if (payload.action === "save_liff_nickname" || payload.action === "save_liff_profile") {
-      const skill = payload.action === "save_liff_profile" ? validateSkillProfile(payload) : {
+    if (["save_liff_nickname", "save_liff_profile", "save_live_profile"].includes(payload.action)) {
+      const skill = payload.action !== "save_liff_nickname" ? validateSkillProfile(payload) : {
         skillLevel: existingMember?.skill_level || null,
         playableSkillLevels: existingMember?.playable_skill_levels || [],
         allowLowerLevel: Boolean(existingMember?.allow_lower_level),
         allowHigherLevel: Boolean(existingMember?.allow_higher_level),
       };
       const memberId = await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember, skill);
-      if (existingSignup?.status === "coming" && !existingSignup.skill_level_snapshot && skill.skillLevel) {
+      const { data: queuePlayer } = await admin.from("event_queue_players")
+        .select("status")
+        .eq("event_id", event.id)
+        .eq("member_id", memberId)
+        .maybeSingle();
+      const snapshotCanChange = !queuePlayer || ["waiting", "left"].includes(queuePlayer.status);
+      if (existingSignup?.status === "coming" && skill.skillLevel && snapshotCanChange) {
         const { error: snapshotError } = await admin.from("signups").update({
           skill_level_snapshot: skill.skillLevel,
           playable_skill_levels_snapshot: skill.playableSkillLevels,
@@ -915,7 +1059,7 @@ async function handleLiffRequest(payload: any) {
         }).eq("event_id", event.id).eq("member_id", memberId);
         if (snapshotError) throw snapshotError;
       }
-      return json({ ok: true, nickname, ...skill });
+      return json({ ok: true, nickname, ...skill, appliesAfterCurrentQueue: Boolean(queuePlayer && ["reserved", "playing"].includes(queuePlayer.status)) });
     }
 
     const status = String(payload.status || "");
@@ -1138,16 +1282,16 @@ function validateSkillProfile(payload: any) {
 
 async function getLiffQueueStatus(admin: any, eventId: string, memberId: string) {
   const { data: queuePlayer, error } = await admin.from("event_queue_players")
-    .select("status, games_played, minutes_played")
+    .select("status")
     .eq("event_id", eventId)
     .eq("member_id", memberId)
     .maybeSingle();
   if (error) throw error;
   if (!queuePlayer) return null;
   const { data: activeMatches, error: matchError } = await admin.from("queue_matches")
-    .select("id, court_id")
+    .select("id, court_id, status")
     .eq("event_id", eventId)
-    .in("status", ["proposed", "playing"]);
+    .in("status", ["draft", "approved", "playing"]);
   if (matchError) throw matchError;
   const matchIds = (activeMatches || []).map((match: any) => match.id);
   const { data: matchPlayer, error: playerError } = matchIds.length
@@ -1155,16 +1299,14 @@ async function getLiffQueueStatus(admin: any, eventId: string, memberId: string)
     : { data: null, error: null };
   if (playerError) throw playerError;
   const match = matchPlayer ? (activeMatches || []).find((entry: any) => entry.id === matchPlayer.match_id) : null;
-  const { data: court, error: courtError } = match
+  const { data: court, error: courtError } = match?.status === "playing" && match.court_id
     ? await admin.from("event_courts").select("court_name").eq("id", match.court_id).maybeSingle()
     : { data: null, error: null };
   if (courtError) throw courtError;
   return {
     status: queuePlayer.status,
-    gamesPlayed: Number(queuePlayer.games_played) || 0,
-    minutesPlayed: Number(queuePlayer.minutes_played) || 0,
     team: matchPlayer?.team || null,
-    courtName: court?.court_name || null,
+    courtName: match?.status === "playing" ? court?.court_name || null : null,
   };
 }
 

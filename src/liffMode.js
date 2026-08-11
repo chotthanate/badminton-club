@@ -14,8 +14,8 @@ export function getLiffMode(search) {
   if (states.some((state) => state.get("mode") === "payment")) return "payment";
   for (const state of states.slice(1).reverse()) {
     const nestedMode = state.get("liff");
-    if (nestedMode === "payment" || nestedMode === "signup") return nestedMode;
+    if (nestedMode === "payment" || nestedMode === "signup" || nestedMode === "live") return nestedMode;
   }
   const directMode = states[0]?.get("liff");
-  return directMode === "payment" || directMode === "signup" ? directMode : null;
+  return ["payment", "signup", "live"].includes(directMode) ? directMode : null;
 }

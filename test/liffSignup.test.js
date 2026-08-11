@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildArrivalTimeOptions,
+  buildLiveQueueUrl,
   buildTestPaymentLiffUrl,
   buildTestSignupLiffUrl,
   getEventIdFromSearch,
@@ -41,6 +42,17 @@ test("test LIFF links keep the event and isolated club", () => {
   assert.equal(
     buildTestPaymentLiffUrl({ liffId: "123-demo", testClubId: "club-1" }),
     "https://liff.line.me/123-demo?mode=payment&test=1&test_club_id=club-1",
+  );
+});
+
+test("live queue links use latest production or an isolated test round", () => {
+  assert.equal(
+    buildLiveQueueUrl({ origin: "https://example.com/badminton-club/" }),
+    "https://example.com/badminton-club/?liff=live&latest=1",
+  );
+  assert.equal(
+    buildLiveQueueUrl({ origin: "https://example.com/badminton-club/", eventId: "event-1", testClubId: "club-1" }),
+    "https://example.com/badminton-club/?liff=live&event_id=event-1&test=1&test_club_id=club-1",
   );
 });
 

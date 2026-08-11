@@ -16,15 +16,44 @@ function throwIfError(error) {
 }
 
 export async function getAdminContexts(userId) {
-  const { data, error } = await client()
-    .from("club_members")
-    .select("id, club_id, display_name, nickname, role, clubs!inner(id, name, line_group_id, is_test, default_friday_court_hourly_rate, default_saturday_court_hourly_rate, default_other_court_hourly_rate, default_shuttlecock_unit_price)")
-    .eq("profile_id", userId)
-    .eq("role", "admin")
-    .eq("active", true)
-    .order("created_at");
+  const { data, error } = await client().rpc("get_backoffice_contexts");
   throwIfError(error);
-  return data || [];
+  return (data || []).map((row) => ({
+    id: row.member_id,
+    club_id: row.club_id,
+    display_name: row.display_name,
+    nickname: row.nickname,
+    role: row.role,
+    user_id: userId,
+    clubs: {
+      id: row.club_id,
+      name: row.club_name,
+      line_group_id: row.line_group_id,
+      is_test: Boolean(row.is_test),
+      default_friday_court_hourly_rate: row.default_friday_court_hourly_rate,
+      default_saturday_court_hourly_rate: row.default_saturday_court_hourly_rate,
+      default_other_court_hourly_rate: row.default_other_court_hourly_rate,
+      default_shuttlecock_unit_price: row.default_shuttlecock_unit_price,
+    },
+  }));
+}
+
+export async function signInStaff(password) {
+  const { data, error } = await client().functions.invoke("line-bot", {
+    body: { action: "staff_login", password },
+  });
+  if (error || data?.error || !data?.session?.access_token || !data?.session?.refresh_token) {
+    throw new Error(data?.error || "รหัสสตาฟไม่ถูกต้อง");
+  }
+  const { error: sessionError } = await client().auth.setSession({
+    access_token: data.session.access_token,
+    refresh_token: data.session.refresh_token,
+  });
+  throwIfError(sessionError);
+}
+
+export async function configureStaffAccess({ clubId, password = "", enabled = true }) {
+  return invokeLineBot({ action: "configure_staff_access", clubId, password, enabled });
 }
 
 export async function createClub({ name, ownerId }) {
@@ -60,7 +89,7 @@ export async function resetTestClub(clubId) {
   const { error: memberError } = await client().from("club_members")
     .delete()
     .eq("club_id", clubId)
-    .neq("role", "admin");
+    .eq("role", "member");
   throwIfError(memberError);
   const { error: venueError } = await client().from("club_venues").delete().eq("club_id", clubId);
   throwIfError(venueError);
@@ -75,7 +104,7 @@ export async function addRandomTestPlayers({ clubId, eventId, count = 23, random
   const [clubResult, eventResult, memberCountResult] = await Promise.all([
     client().from("clubs").select("id, is_test").eq("id", clubId).single(),
     client().from("events").select("id, club_id, status, starts_at").eq("id", eventId).single(),
-    client().from("club_members").select("id", { count: "exact", head: true }).eq("club_id", clubId).neq("role", "admin"),
+    client().from("club_members").select("id", { count: "exact", head: true }).eq("club_id", clubId).eq("role", "member"),
   ]);
   throwIfError(clubResult.error);
   throwIfError(eventResult.error);
@@ -222,6 +251,29 @@ export async function loadDashboard(clubId, eventId = null) {
     queuePlayers: queuePlayersResult.data || [],
     queueMatches: queueMatchesResult.data || [],
     queueMatchPlayers: queueMatchPlayersResult.data || [],
+  };
+}
+
+export async function loadStaffDashboard(clubId) {
+  const { data, error } = await client().rpc("load_staff_dashboard", { target_club_id: clubId });
+  throwIfError(error);
+  return {
+    event: data?.event || null,
+    members: data?.members || [],
+    courts: data?.courts || [],
+    signups: data?.signups || [],
+    attendance: data?.attendance || [],
+    queuePlayers: data?.queuePlayers || [],
+    queueMatches: data?.queueMatches || [],
+    queueMatchPlayers: data?.queueMatchPlayers || [],
+    expenses: [],
+    payments: [],
+    paymentSlips: [],
+    auditLogs: [],
+    venues: [],
+    extraItems: [],
+    memberExtras: [],
+    shuttlecockCheckpoints: [],
   };
 }
 
@@ -442,7 +494,7 @@ export async function addLineMember({ clubId, displayName, lineUserId = null, sk
     .select("id, display_name, nickname, aliases, line_user_id")
     .eq("club_id", clubId)
     .eq("active", true)
-    .neq("role", "admin");
+    .eq("role", "member");
   throwIfError(existingError);
   const existing = (existingMembers || []).find((member) =>
     [member.nickname, member.display_name, ...(member.aliases || [])]
@@ -624,10 +676,9 @@ export async function ensureEventQueuePlayers({ clubId, eventId }) {
   throwIfError(error);
 }
 
-export async function claimQueueMatch({ eventId, courtId, memberIds, teamAIds }) {
-  const { data, error } = await client().rpc("claim_queue_match_proposal", {
+export async function createQueueDraft({ eventId, memberIds, teamAIds }) {
+  const { data, error } = await client().rpc("create_queue_draft", {
     target_event_id: eventId,
-    target_court_id: courtId,
     selected_member_ids: memberIds,
     team_a_member_ids: teamAIds,
   });
@@ -635,9 +686,38 @@ export async function claimQueueMatch({ eventId, courtId, memberIds, teamAIds })
   return data;
 }
 
-export async function startQueueMatch(matchId) {
-  const { error } = await client().rpc("start_queue_match", { target_match_id: matchId });
+export async function updateQueueDraftLineup({ matchId, slots }) {
+  const { error } = await client().rpc("update_queue_draft_lineup", {
+    target_match_id: matchId,
+    slot_assignments: slots.map((slot) => ({
+      member_id: slot.memberId,
+      team: slot.team,
+      position: slot.position,
+    })),
+  });
   throwIfError(error);
+}
+
+export async function approveQueueDraft(matchId) {
+  const { error } = await client().rpc("approve_queue_draft", { target_match_id: matchId });
+  throwIfError(error);
+}
+
+export async function moveUpcomingQueue(matchId, direction) {
+  const { error } = await client().rpc("move_upcoming_queue", {
+    target_match_id: matchId,
+    direction: Number(direction),
+  });
+  throwIfError(error);
+}
+
+export async function startNextQueueOnCourt({ eventId, courtId }) {
+  const { data, error } = await client().rpc("start_next_queue_on_court", {
+    target_event_id: eventId,
+    target_court_id: courtId,
+  });
+  throwIfError(error);
+  return data;
 }
 
 export async function finishQueueMatch(matchId) {
@@ -647,19 +727,51 @@ export async function finishQueueMatch(matchId) {
 }
 
 export async function cancelQueueMatch(matchId) {
-  const { error } = await client().rpc("cancel_queue_match_proposal", { target_match_id: matchId });
+  const { error } = await client().rpc("cancel_upcoming_queue", { target_match_id: matchId });
   throwIfError(error);
 }
 
-export async function replaceQueueMatchPlayer({ matchId, outgoingMemberId, incomingMemberId, skipAbsent = true, teamAIds = null }) {
-  const { error } = await client().rpc("replace_queue_match_player", {
-    target_match_id: matchId,
-    outgoing_member_id: outgoingMemberId,
-    incoming_member_id: incomingMemberId,
-    skip_absent: skipAbsent,
-    replacement_team_a_member_ids: teamAIds,
+export async function updateOperatorMemberSkill({ eventId, memberId, skillLevel, playableSkillLevels }) {
+  const { data, error } = await client().rpc("operator_update_member_skill", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+    next_skill_level: skillLevel,
+    next_playable_skill_levels: playableSkillLevels,
   });
   throwIfError(error);
+  return data;
+}
+
+export async function updateOperatorSignupArrival({ eventId, memberId, arrivalTime }) {
+  const { error } = await client().rpc("operator_update_signup_arrival", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+    next_arrival: arrivalTime,
+  });
+  throwIfError(error);
+}
+
+export async function updateOperatorAttendance({ eventId, memberId, arrived, arrivedAt = null, leftAt = null }) {
+  const { error } = await client().rpc("operator_update_attendance", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+    next_arrived: Boolean(arrived),
+    next_arrived_at: arrivedAt || null,
+    next_left_at: leftAt || null,
+  });
+  throwIfError(error);
+}
+
+export async function upsertOperatorCourt({ eventId, courtId = null, courtName, startsAt, endsAt }) {
+  const { data, error } = await client().rpc("operator_upsert_event_court", {
+    target_event_id: eventId,
+    target_court_id: courtId,
+    next_court_name: courtName,
+    next_starts_at: startsAt,
+    next_ends_at: endsAt,
+  });
+  throwIfError(error);
+  return data;
 }
 
 export async function updateAttendance({ clubId, eventId, memberId, patch }) {

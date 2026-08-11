@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Check, Clock3, Edit3, LoaderCircle, MapPin, Plus, X } from "lucide-react";
-import { buildArrivalTimeOptions, getEventIdFromSearch, getLiffTestContext, isLatestEventSearch } from "./liffSignup.js";
+import { Check, Clock3, Edit3, LoaderCircle, MapPin, Plus, Users, X } from "lucide-react";
+import { buildArrivalTimeOptions, buildLiveQueueUrl, getEventIdFromSearch, getLiffTestContext, isLatestEventSearch } from "./liffSignup.js";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels, SKILL_LEVELS } from "./skillLevels.js";
 
@@ -252,10 +252,11 @@ export default function LiffSignupApp() {
           {event.courts.map((court) => <span key={court.name}><strong>{court.name} :</strong> {court.time}</span>)}
         </div>
       </section>
+      <a className="liff-live-link" href={buildLiveQueueUrl({ eventId: testMode ? activeEventId : null, testClubId: testMode ? testClubId : null })}><Users size={17} /> เปิดสนามสด ดูผู้เล่นและคิวถัดไป</a>
 
       <section className="liff-answer-card">
         <div className="liff-signup-as"><span>ลงชื่อเป็น</span><strong>{nickname}</strong>{skillLevel ? <em>{skillLevel}</em> : null}<button onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setPlayableSkillLevelsDraft(playableSkillLevels); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> แก้โปรไฟล์</button></div>
-        {queueStatus ? <div className={`liff-queue-status is-${queueStatus.status}`}><span>{queueStatus.status === "playing" ? `กำลังเล่น ${queueStatus.courtName || "ในสนาม"}` : queueStatus.status === "proposed" ? `เตรียมลง ${queueStatus.courtName || "สนามถัดไป"}` : queueStatus.status === "waiting" ? "อยู่ในคิวรอเล่น" : "ออกจากคิวแล้ว"}</span><small>{queueStatus.gamesPlayed} เกม · {queueStatus.minutesPlayed} นาที{queueStatus.team ? ` · ทีม ${queueStatus.team}` : ""}</small></div> : null}
+        {queueStatus ? <div className={`liff-queue-status is-${queueStatus.status}`}><span>{queueStatus.status === "playing" ? `กำลังเล่น ${queueStatus.courtName || "ในสนาม"}` : queueStatus.status === "reserved" ? "อยู่ในคิวที่กำลังเตรียม" : queueStatus.status === "waiting" ? "อยู่ในคิวรอเล่น" : "ออกจากคิวแล้ว"}</span>{queueStatus.team ? <small>ทีม {queueStatus.team}</small> : null}</div> : null}
         <div className="liff-answer-heading">
           <div><span>เวลาของคุณ</span><strong>{closed ? "รอบนี้ปิดรับลงเวลาแล้ว" : savedStatus === "coming" ? "ลงเวลาเรียบร้อยแล้ว" : "เลือกเวลาที่จะไป"}</strong></div>
           {savedStatus === "coming" ? <Check className="liff-saved-check" size={24} /> : <Clock3 size={22} />}

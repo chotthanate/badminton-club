@@ -4707,7 +4707,7 @@
   font-weight: 900;
 }
 
-.liff-queue-status.is-proposed,
+.liff-queue-status.is-reserved,
 .liff-queue-status.is-playing {
   background: #ddf4e5;
   color: #0f7a52;
@@ -4813,4 +4813,184 @@
   .liff-payment-card {
     padding: 13px;
   }
+}
+
+.badminton-role-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 16px 0;
+  padding: 5px;
+  border-radius: 14px;
+  background: #edf3ee;
+}
+
+.badminton-role-switch button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #637064;
+  font-weight: 700;
+}
+
+.badminton-role-switch button.is-active {
+  background: #fff;
+  color: #0f7a52;
+  box-shadow: 0 2px 8px rgb(20 54 38 / 10%);
+}
+
+.badminton-full-button { width: 100%; }
+
+.badminton-upcoming-queues,
+.badminton-operator-courts { display: grid; gap: 14px; }
+
+.badminton-upcoming-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #cfddd1;
+  border-radius: 16px;
+  background: #fbfdfb;
+}
+
+.badminton-upcoming-card.is-approved {
+  border-color: #85cfab;
+  background: #edf9f2;
+}
+
+.badminton-upcoming-card > header,
+.badminton-queue-order-actions,
+.badminton-queue-playing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.badminton-upcoming-card > header > div:first-child { display: grid; }
+.badminton-upcoming-card > header span { color: #637064; font-size: 13px; }
+.badminton-queue-order-actions button { min-width: 40px; min-height: 40px; }
+
+.badminton-queue-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.badminton-queue-slots label { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 6px; }
+.badminton-queue-slots label > span { font-weight: 800; color: #0f7a52; }
+.badminton-queue-slots select { min-width: 0; width: 100%; min-height: 46px; }
+.badminton-queue-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.badminton-queue-actions > button { flex: 1 1 130px; min-height: 46px; }
+
+.badminton-operator-courts .badminton-court-row {
+  grid-template-columns: minmax(100px, 1.5fr) minmax(74px, .8fr) minmax(74px, .8fr) 48px;
+}
+
+.badminton-operator-add-court { padding-top: 10px; border-top: 1px dashed #cad7cc; }
+
+.badminton-staff-player-list { display: grid; gap: 10px; }
+.badminton-staff-player {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d5e1d6;
+  border-radius: 15px;
+  background: #fff;
+}
+.badminton-staff-player.has-left { opacity: .58; background: #eef0ee; }
+.badminton-staff-player-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.badminton-staff-player-head strong { flex: 0 1 auto; min-width: 0; }
+.badminton-staff-player-head .badminton-line-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #6b776d;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badminton-staff-player-head em {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #e3f4e9;
+  color: #0f7a52;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 800;
+}
+.badminton-staff-player-head > button:last-child { flex: 0 0 42px; min-height: 42px; }
+.badminton-arrival-check { flex: 0 0 40px; width: 40px; min-height: 40px; border-radius: 10px; }
+.badminton-arrival-check.is-checked { border-color: #15966a; background: #15966a; color: #fff; }
+.badminton-staff-time-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.badminton-staff-time-row label { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px; color: #637064; font-size: 13px; }
+.badminton-staff-time-row select { min-width: 0; min-height: 46px; }
+
+.liff-live-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  border: 1px solid #aad0b7;
+  border-radius: 14px;
+  background: #fff;
+  color: #0f7a52;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.live-queue-page { min-height: 100vh; background: #f3f7f3; }
+.live-queue-shell { width: min(760px, 100%); margin: 0 auto; padding: max(18px, env(safe-area-inset-top)) 14px 40px; }
+.live-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.live-header h1 { margin: 2px 0 4px; font-size: clamp(25px, 7vw, 36px); }
+.live-header p { display: flex; align-items: center; gap: 5px; margin: 0; color: #637064; }
+.live-header > button { flex: 0 0 auto; min-height: 44px; padding: 0 12px; }
+.live-courts > h2,
+.live-upcoming h2,
+.live-waiting h2 { margin: 0; font-size: 20px; }
+.live-courts > div { display: grid; gap: 10px; margin-top: 10px; }
+.live-court,
+.live-upcoming,
+.live-waiting { padding: 14px; border: 1px solid #d5e1d6; border-radius: 18px; background: #fff; }
+.live-court { display: grid; gap: 12px; }
+.live-court.is-playing { border-color: #74c99e; box-shadow: 0 5px 18px rgb(32 103 70 / 8%); }
+.live-court > header,
+.live-court > header > div,
+.live-section-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.live-court > header > div { align-items: baseline; }
+.live-court > header span { color: #15966a; font-size: 13px; font-weight: 800; }
+.live-court > header b { display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.live-court-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.live-court-teams > div { padding: 10px; border-radius: 12px; background: #f2f7f2; }
+.live-court-teams > div > span { color: #637064; font-size: 12px; font-weight: 800; }
+.live-court-teams p { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 7px 0 0; }
+.live-court-teams em { padding: 2px 6px; border-radius: 99px; background: #dff2e6; color: #0f7a52; font-size: 12px; font-style: normal; font-weight: 800; }
+.live-court-empty { margin: 0; color: #839087; text-align: center; }
+.live-upcoming,
+.live-waiting { display: grid; gap: 10px; margin-top: 14px; }
+.live-section-title > span { color: #637064; font-weight: 800; }
+.live-upcoming > article { display: grid; gap: 8px; padding: 11px; border-radius: 13px; background: #eef8f1; }
+.live-upcoming > article > div { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.live-upcoming > article span { display: flex; justify-content: space-between; gap: 5px; padding: 7px; border-radius: 9px; background: #fff; }
+.live-upcoming em { color: #0f7a52; font-size: 12px; font-style: normal; font-weight: 800; }
+.live-waiting-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.live-waiting-grid article { min-width: 0; padding: 10px; border-radius: 12px; background: #f3f7f3; }
+.live-waiting-grid header { display: flex; justify-content: space-between; gap: 6px; color: #0f7a52; }
+.live-waiting-grid p { margin: 7px 0 0; overflow-wrap: anywhere; color: #4f5d52; font-size: 13px; line-height: 1.45; }
+.live-updated { color: #7a877d; font-size: 12px; text-align: center; }
+.live-loading,
+.live-empty { display: grid; place-items: center; gap: 12px; min-height: 80vh; padding: 24px; text-align: center; }
+
+@media (max-width: 520px) {
+  .badminton-queue-slots { grid-template-columns: 1fr; }
+  .badminton-operator-courts .badminton-court-row { grid-template-columns: minmax(0, 1.4fr) minmax(68px, .8fr) minmax(68px, .8fr) 44px; gap: 5px; }
+  .badminton-operator-courts .badminton-court-row input,
+  .badminton-operator-courts .badminton-court-row select { padding-inline: 7px; font-size: 13px; }
+  .badminton-staff-player-head { flex-wrap: wrap; }
+  .badminton-staff-player-head .badminton-line-name { order: 5; flex-basis: calc(100% - 48px); margin-left: 48px; }
+  .live-header { align-items: stretch; flex-direction: column; }
+  .live-header > button { align-self: flex-start; }
 }

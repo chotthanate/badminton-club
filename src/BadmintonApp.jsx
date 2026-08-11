@@ -35,11 +35,13 @@ import {
   addLineMember,
   addMemberExtraCharge,
   addRandomTestPlayers,
+  approveQueueDraft,
   cancelQueueMatch,
   changeAdminPassword,
-  claimQueueMatch,
+  configureStaffAccess,
   createClub,
   createEvent,
+  createQueueDraft,
   createTestClub,
   deleteCompletedEvent,
   finalizeMemberBill,
@@ -48,10 +50,10 @@ import {
   finishQueueMatch,
   getPaymentSlipImageUrl,
   incrementEventShuttlecockCount,
-  ensureEventQueuePlayers,
   listClubEvents,
   listOutstandingPayments,
   loadDashboard,
+  loadStaffDashboard,
   markOutstandingPaymentPaid,
   mergeClubMembers,
   recordAudit,
@@ -64,10 +66,10 @@ import {
   removeMemberExtraCharge,
   removeParticipant,
   removeShuttlecockCheckpoint,
-  replaceQueueMatchPlayer,
   setPayment,
   setEventShuttlecockCount,
-  startQueueMatch,
+  signInStaff,
+  startNextQueueOnCourt,
   updateAttendance,
   updateClubMember,
   updateCourt,
@@ -78,6 +80,12 @@ import {
   updateExpense,
   updateSignup,
   updateSignupArrival,
+  updateQueueDraftLineup,
+  updateOperatorAttendance,
+  updateOperatorMemberSkill,
+  updateOperatorSignupArrival,
+  upsertOperatorCourt,
+  moveUpcomingQueue,
   upsertShuttlecockCheckpoint,
 } from "./clubRepository.js";
 import {
@@ -97,10 +105,12 @@ import {
   weekdayFromIsoDate,
 } from "./badmintonLogic.js";
 import { findExactDuplicateMemberGroups, normalizeMemberSearch, rankMemberSuggestions } from "./memberSearch.js";
-import { buildTestPaymentLiffUrl, buildTestSignupLiffUrl } from "./liffSignup.js";
-import { balanceTeams, canReplaceQueuePlayer, proposeQueueMatch, proposeReplacement, SKILL_LEVELS } from "./queueLogic.js";
+import { buildLiveQueueUrl, buildTestPaymentLiffUrl, buildTestSignupLiffUrl } from "./liffSignup.js";
+import { proposeQueueMatch, SKILL_LEVELS } from "./queueLogic.js";
 import { randomTestPlayerCount } from "./randomTestPlayers.js";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
+import QueuePanel from "./QueuePanel.jsx";
+import StaffParticipantsPanel from "./StaffParticipantsPanel.jsx";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "./skillLevels.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
 
@@ -178,6 +188,7 @@ export default function BadmintonApp() {
 }
 
 function AdminLogin() {
+  const [role, setRole] = useState("admin");
   const [accessCode, setAccessCode] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
@@ -186,10 +197,20 @@ function AdminLogin() {
     event.preventDefault();
     setSending(true);
     setMessage("");
-    const { error } = await supabase.auth.signInWithPassword({
-      email: import.meta.env.VITE_ADMIN_EMAIL,
-      password: accessCode,
-    });
+    let error = null;
+    try {
+      if (role === "staff") {
+        await signInStaff(accessCode);
+      } else {
+        const result = await supabase.auth.signInWithPassword({
+          email: import.meta.env.VITE_ADMIN_EMAIL,
+          password: accessCode,
+        });
+        error = result.error;
+      }
+    } catch (nextError) {
+      error = nextError;
+    }
     setSending(false);
     setMessage(error ? "รหัสเข้าเว็บไม่ถูกต้อง" : "เข้าสู่ระบบสำเร็จ");
   }
@@ -201,19 +222,23 @@ function AdminLogin() {
         <p className="badminton-kicker">Admin only</p>
         <h1>หลังบ้านกลุ่มแบด</h1>
         <p>สมาชิกไม่ต้องเข้าเว็บ การลงชื่อทั้งหมดจะทำผ่าน LINE</p>
+        <div className="badminton-role-switch" aria-label="เลือกสิทธิ์เข้าใช้งาน">
+          <button className={role === "admin" ? "is-active" : ""} onClick={() => { setRole("admin"); setMessage(""); }} type="button">เจ้าของ</button>
+          <button className={role === "staff" ? "is-active" : ""} onClick={() => { setRole("staff"); setMessage(""); }} type="button">สตาฟ</button>
+        </div>
         <form onSubmit={submit}>
           <label htmlFor="admin-code">รหัสเข้าเว็บ</label>
           <input
             autoComplete="current-password"
             id="admin-code"
             onChange={(event) => setAccessCode(event.target.value)}
-            placeholder="กรอกรหัสแอดมิน"
+            placeholder={role === "staff" ? "กรอกรหัสสตาฟ" : "กรอกรหัสเจ้าของ"}
             required
             type="password"
             value={accessCode}
           />
           <button className="badminton-primary" disabled={sending} type="submit">
-            <LogIn size={18} /> {sending ? "กำลังตรวจสอบ..." : "เข้าสู่หลังบ้าน"}
+            <LogIn size={18} /> {sending ? "กำลังตรวจสอบ..." : role === "staff" ? "เข้าสู่โหมดสตาฟ" : "เข้าสู่หลังบ้าน"}
           </button>
         </form>
         {message ? <p className="badminton-form-message">{message}</p> : null}
@@ -231,6 +256,7 @@ function AdminDashboard({ session }) {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("round");
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [staffAccessModalOpen, setStaffAccessModalOpen] = useState(false);
   const [eventSummaries, setEventSummaries] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [previousOutstanding, setPreviousOutstanding] = useState({ count: 0, total: 0, rows: [] });
@@ -259,23 +285,27 @@ function AdminDashboard({ session }) {
         setPreviousOutstanding({ count: 0, total: 0, rows: [] });
         return;
       }
-      const nextEvents = await listClubEvents(nextContext.club_id);
+      const isStaffContext = nextContext.role === "staff";
+      const nextEvents = isStaffContext ? [] : await listClubEvents(nextContext.club_id);
       const requestedEventId = options.preferLatest ? null : (options.eventId || selectedEventIdRef.current);
-      const targetEventId = nextEvents.some((event) => event.id === requestedEventId)
+      const targetEventId = isStaffContext ? null : nextEvents.some((event) => event.id === requestedEventId)
         ? requestedEventId
         : nextEvents[0]?.id || null;
-      const nextDashboard = await loadDashboard(nextContext.club_id, targetEventId);
-      const outstandingRows = await listOutstandingPayments(nextContext.club_id);
+      const nextDashboard = isStaffContext
+        ? await loadStaffDashboard(nextContext.club_id)
+        : await loadDashboard(nextContext.club_id, targetEventId);
+      const outstandingRows = isStaffContext ? [] : await listOutstandingPayments(nextContext.club_id);
       const nextOutstanding = {
         count: outstandingRows.length,
         total: outstandingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
         rows: outstandingRows,
       };
       setEventSummaries(nextEvents);
-      setSelectedEventId(targetEventId);
-      selectedEventIdRef.current = targetEventId;
+      setSelectedEventId(isStaffContext ? nextDashboard.event?.id || null : targetEventId);
+      selectedEventIdRef.current = isStaffContext ? nextDashboard.event?.id || null : targetEventId;
       setDashboard(nextDashboard);
       setPreviousOutstanding(nextOutstanding);
+      if (isStaffContext) setActiveTab((current) => ["queue", "players"].includes(current) ? current : "queue");
     } catch (nextError) {
       setError(nextError.message);
     } finally {
@@ -375,14 +405,16 @@ function AdminDashboard({ session }) {
 
   async function copyTestLink(kind) {
     const liffId = import.meta.env.VITE_LINE_LIFF_ID;
-    if (!liffId) {
+    if (kind !== "live" && !liffId) {
       setError("ยังไม่ได้ตั้งค่า LINE LIFF ID สำหรับสร้างลิงก์ทดลอง");
       return;
     }
     const common = { liffId, testClubId: context.club_id };
     const link = kind === "signup"
       ? buildTestSignupLiffUrl({ ...common, eventId: dashboard.event?.id })
-      : buildTestPaymentLiffUrl(common);
+      : kind === "payment"
+        ? buildTestPaymentLiffUrl(common)
+        : buildLiveQueueUrl({ eventId: dashboard.event?.id, testClubId: context.club_id });
     if (!link) {
       setError(kind === "signup" ? "กรุณาสร้างและเปิดลงชื่อรอบทดลองก่อน" : "สร้างลิงก์ชำระเงินทดลองไม่สำเร็จ");
       return;
@@ -390,7 +422,7 @@ function AdminDashboard({ session }) {
     try {
       await copyTextToClipboard(link);
       setError("");
-      setNotice(kind === "signup" ? "คัดลอกลิงก์ลงชื่อทดลองแล้ว" : "คัดลอกลิงก์ชำระเงินทดลองแล้ว");
+      setNotice(kind === "signup" ? "คัดลอกลิงก์ลงชื่อทดลองแล้ว" : kind === "payment" ? "คัดลอกลิงก์ชำระเงินทดลองแล้ว" : "คัดลอกลิงก์สนามสดทดลองแล้ว");
     } catch (copyError) {
       setError(copyError.message);
     }
@@ -400,16 +432,18 @@ function AdminDashboard({ session }) {
   if (!context) return <ClubSetup session={session} onCreated={refresh} error={error} />;
   if (!dashboard) return <main className="badminton-app badminton-auth-page"><section className="badminton-auth-card"><h1>โหลดข้อมูลไม่สำเร็จ</h1><p>{error || "กรุณาลองโหลดข้อมูลอีกครั้ง"}</p><button className="badminton-primary" onClick={() => refresh()} type="button"><RefreshCw size={18} /> ลองใหม่</button></section></main>;
 
+  const isStaff = context.role === "staff";
   const appEvent = dashboard.event ? mapDashboardToEvent(dashboard) : null;
-  const settlement = appEvent ? calculateSettlement(appEvent) : null;
+  const settlement = appEvent && !isStaff ? calculateSettlement(appEvent) : null;
   const hasUnfinishedRound = eventSummaries.some((round) => ["draft", "open"].includes(round.status));
+  const visibleTabs = isStaff ? ADMIN_TABS.filter((tab) => ["queue", "players"].includes(tab.id)) : ADMIN_TABS;
 
   return (
     <main className="badminton-app">
       <section className="badminton-shell">
         <header className="badminton-header">
           <div>
-            <p className="badminton-kicker">หลังบ้าน</p>
+            <p className="badminton-kicker">{isStaff ? "โหมดสตาฟ" : "หลังบ้าน"}</p>
             <h1>จัดการรอบแบด</h1>
             <p>{context.clubs.name}</p>
           </div>
@@ -417,12 +451,13 @@ function AdminDashboard({ session }) {
             <button aria-label="รีเฟรชข้อมูล" className="badminton-icon-button" onClick={() => refresh()} type="button">
               <RefreshCw size={18} />
             </button>
-            <button aria-label="เปลี่ยนรหัสเข้าเว็บ" className="badminton-icon-button" onClick={() => setPasswordModalOpen(true)} title="เปลี่ยนรหัสเข้าเว็บ" type="button">
+            {!isStaff ? <button aria-label="เปลี่ยนรหัสเข้าเว็บ" className="badminton-icon-button" onClick={() => setPasswordModalOpen(true)} title="เปลี่ยนรหัสเข้าเว็บ" type="button">
               <ShieldCheck size={18} />
-            </button>
-            <button aria-label={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} className={`badminton-icon-button ${context.clubs.is_test ? "is-test-mode" : ""}`} onClick={switchTestMode} title={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} type="button">
+            </button> : null}
+            {!isStaff && !context.clubs.is_test ? <button aria-label="ตั้งค่ารหัสสตาฟ" className="badminton-icon-button" onClick={() => setStaffAccessModalOpen(true)} title="ตั้งค่ารหัสสตาฟ" type="button"><Users size={18} /></button> : null}
+            {!isStaff ? <button aria-label={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} className={`badminton-icon-button ${context.clubs.is_test ? "is-test-mode" : ""}`} onClick={switchTestMode} title={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} type="button">
               <FlaskConical size={18} />
-            </button>
+            </button> : null}
             <button className="badminton-secondary" onClick={() => supabase.auth.signOut()} type="button">
               <LogOut size={17} /> ออกจากระบบ
             </button>
@@ -431,13 +466,15 @@ function AdminDashboard({ session }) {
 
         {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
         {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
-        {context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving || dashboard.event?.status !== "open"} onClick={addDemoQueuePlayers} title={dashboard.event?.status === "open" ? "สุ่มจำนวน ระดับ และความยินยอม พร้อมเช็กชื่อเข้าคิว" : "เปิดลงชื่อในรอบทดลองก่อน"} type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 23–40 คน</button><button disabled={saving || dashboard.event?.status !== "open"} onClick={() => copyTestLink("signup")} type="button"><Copy size={15} /> ลิงก์ลงชื่อทดลอง</button><button disabled={saving} onClick={() => copyTestLink("payment")} type="button"><Copy size={15} /> ลิงก์ชำระเงินทดลอง</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
+        {!isStaff && context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving || dashboard.event?.status !== "open"} onClick={addDemoQueuePlayers} title={dashboard.event?.status === "open" ? "สุ่มจำนวน ระดับ และความยินยอม พร้อมเช็กชื่อเข้าคิว" : "เปิดลงชื่อในรอบทดลองก่อน"} type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 23–40 คน</button><button disabled={saving || dashboard.event?.status !== "open"} onClick={() => copyTestLink("signup")} type="button"><Copy size={15} /> ลิงก์ลงชื่อทดลอง</button><button disabled={saving} onClick={() => copyTestLink("payment")} type="button"><Copy size={15} /> ลิงก์ชำระเงินทดลอง</button><button disabled={saving || !dashboard.event} onClick={() => copyTestLink("live")} type="button"><Copy size={15} /> ลิงก์สนามสดทดลอง</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
 
-        {!dashboard.event ? (
+        {!dashboard.event && !isStaff ? (
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />
+        ) : !dashboard.event ? (
+          <section className="badminton-card badminton-empty"><h2>ยังไม่มีรอบที่เปิดอยู่</h2><p>สตาฟจะเข้าใช้งานได้เมื่อเจ้าของเปิดรอบแล้ว</p></section>
         ) : (
           <>
-            <RoundSwitcher
+            {!isStaff ? <RoundSwitcher
               events={eventSummaries}
               onChange={(eventId) => refresh(false, { eventId })}
               onDelete={(round) => mutate(
@@ -446,14 +483,14 @@ function AdminDashboard({ session }) {
                 { selectLatest: true, errorMode: "alert" },
               )}
               selectedEventId={selectedEventId}
-            />
+            /> : null}
             <nav aria-label="เมนูหลังบ้าน" className="badminton-tabs">
-              {ADMIN_TABS.map(({ id, label, icon: Icon }) => (
+              {visibleTabs.map(({ id, label, icon: Icon }) => (
                 <button className={activeTab === id ? "is-active" : ""} key={id} onClick={() => setActiveTab(id)} type="button"><Icon size={18} /><span>{label}</span></button>
               ))}
             </nav>
 
-            {activeTab === "round" ? <>
+            {!isStaff && activeTab === "round" ? <>
               <EventControlCard
                 clubName={context.clubs.name}
                 clubSettings={context.clubs}
@@ -473,7 +510,7 @@ function AdminDashboard({ session }) {
             </> : null}
 
             {activeTab === "players" ? (
-              <ParticipantsPanel
+              isStaff ? <StaffParticipantsPanel dashboard={dashboard} event={appEvent} mutate={mutate} /> : <ParticipantsPanel
                 context={context}
                 dashboard={dashboard}
                 event={appEvent}
@@ -484,21 +521,22 @@ function AdminDashboard({ session }) {
             ) : null}
 
             {activeTab === "queue" ? (
-              <QueuePanel dashboard={dashboard} event={appEvent} mutate={mutate} />
+              <QueuePanel dashboard={dashboard} event={appEvent} isStaff={isStaff} mutate={mutate} />
             ) : null}
 
-            {activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} settlement={settlement} /> : null}
-            {activeTab === "payments" ? <SettlementPanel event={appEvent} mutate={mutate} previousOutstanding={previousOutstanding} session={session} settlement={settlement} /> : null}
-            {activeTab === "history" ? <AuditPanel actions={appEvent.actions} /> : null}
+            {!isStaff && activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} settlement={settlement} /> : null}
+            {!isStaff && activeTab === "payments" ? <SettlementPanel event={appEvent} mutate={mutate} previousOutstanding={previousOutstanding} session={session} settlement={settlement} /> : null}
+            {!isStaff && activeTab === "history" ? <AuditPanel actions={appEvent.actions} /> : null}
           </>
         )}
-        {passwordModalOpen ? (
+        {!isStaff && passwordModalOpen ? (
           <AdminPasswordModal
             onClose={() => setPasswordModalOpen(false)}
             onSave={(password) => mutate(() => changeAdminPassword(password), "เปลี่ยนรหัสเข้าเว็บแล้ว")}
             saving={saving}
           />
         ) : null}
+        {!isStaff && !context.clubs.is_test && staffAccessModalOpen ? <StaffAccessModal clubId={context.club_id} onClose={() => setStaffAccessModalOpen(false)} onSave={(settings) => mutate(() => configureStaffAccess({ clubId: context.club_id, ...settings }), settings.enabled ? "ตั้งค่ารหัสสตาฟแล้ว เซสชันเดิมถูกตัด" : "ปิดใช้งานรหัสสตาฟแล้ว")} saving={saving} /> : null}
         {saving ? <div className="badminton-saving">กำลังบันทึก...</div> : null}
       </section>
     </main>
@@ -535,6 +573,28 @@ function AdminPasswordModal({ onClose, onSave, saving }) {
       </form>
     </div>
   );
+}
+
+function StaffAccessModal({ clubId, onClose, onSave, saving }) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [localError, setLocalError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    setLocalError("");
+    if (password !== confirmation) return setLocalError("รหัสทั้งสองช่องไม่ตรงกัน");
+    const saved = await onSave({ clubId, password, enabled: true });
+    if (saved) onClose();
+  }
+
+  async function disable() {
+    if (!window.confirm("ปิดรหัสสตาฟและให้ออกจากระบบทุกเครื่องใช่ไหม?")) return;
+    const saved = await onSave({ clubId, enabled: false });
+    if (saved) onClose();
+  }
+
+  return <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal badminton-password-modal" onSubmit={submit}><div className="badminton-modal-title"><div><p className="badminton-kicker">สิทธิ์ทีมงาน</p><h2>ตั้งค่ารหัสสตาฟ</h2></div><button aria-label="ปิด" onClick={onClose} type="button"><X size={18} /></button></div><p>เปลี่ยนรหัสเมื่อใด สตาฟที่เปิดค้างไว้จะถูกให้ออกจากระบบทันที และต้องใช้รหัสใหม่</p><label>รหัสสตาฟใหม่<input autoComplete="new-password" minLength="6" maxLength="72" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} /></label><label>ยืนยันรหัส<input autoComplete="new-password" minLength="6" maxLength="72" onChange={(event) => setConfirmation(event.target.value)} required type="password" value={confirmation} /></label>{localError ? <p className="badminton-form-message is-error">{localError}</p> : null}<button className="badminton-primary" disabled={saving} type="submit"><Save size={17} /> ตั้งหรือเปลี่ยนรหัสสตาฟ</button><button className="badminton-delete-button badminton-full-button" disabled={saving} onClick={disable} type="button"><X size={17} /> ปิดใช้งานรหัสสตาฟ</button></form></div>;
 }
 
 function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
@@ -740,7 +800,7 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
   }
 
   const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
-  const statusLabel = event.status === "draft" && event.line_publish_ready
+  const statusLabel = event.status === "draft" && event.line_publish_ready && !isTestMode
     ? "รอคำสั่ง LINE"
     : event.status === "closed"
     ? (paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ")
@@ -756,10 +816,10 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
         <div className="badminton-event-actions">
           <span className={`badminton-status-pill is-${event.status} ${paymentComplete ? "is-settled" : ""}`}>{statusLabel}</span>
           {event.status !== "closed" ? <button className="badminton-secondary badminton-compact-action" onClick={() => setEditingDetails((value) => !value)} type="button">{editingDetails ? "ซ่อนตั้งค่า" : "แก้วันที่/สถานที่"}</button> : null}
-          {event.status !== "closed" ? <button className="badminton-primary badminton-round-action" disabled={event.status === "draft" && event.line_publish_ready} onClick={advanceRound} type="button">{event.status === "draft" ? (event.line_publish_ready ? "รอพิมพ์ใน LINE" : isTestMode ? "เปิดลงชื่อทดลอง" : "เตรียมเปิดลงชื่อ") : "จบรอบ"}</button> : null}
+          {event.status !== "closed" ? <button className="badminton-primary badminton-round-action" disabled={event.status === "draft" && event.line_publish_ready && !isTestMode} onClick={advanceRound} type="button">{event.status === "draft" ? (isTestMode ? "เปิดลงชื่อทดลอง" : event.line_publish_ready ? "รอพิมพ์ใน LINE" : "เตรียมเปิดลงชื่อ") : "จบรอบ"}</button> : null}
         </div>
       </div>
-      {event.status === "draft" && event.line_publish_ready ? <div className="badminton-line-command-ready"><strong>ขั้นตอนสุดท้าย</strong><span>ไปที่กลุ่ม LINE แล้วพิมพ์ <b>เปิดลงชื่อ</b> บอทจะตอบการ์ดโดยไม่หักโควตา</span></div> : null}
+      {event.status === "draft" && event.line_publish_ready && !isTestMode ? <div className="badminton-line-command-ready"><strong>ขั้นตอนสุดท้าย</strong><span>ไปที่กลุ่ม LINE แล้วพิมพ์ <b>เปิดลงชื่อ</b> บอทจะตอบการ์ดโดยไม่หักโควตา</span></div> : null}
       {editingDetails ? <div className="badminton-event-form badminton-event-main-form">
         <label>วันที่<input type="date" value={form.event_date} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></label>
         <label>สถานที่<input list="round-saved-venues" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} /></label>
@@ -838,10 +898,15 @@ function mapQueueDashboard(dashboard) {
   const playersById = new Map(players.map((player) => [player.memberId, player]));
   const matchPlayersByMatch = new Map();
   for (const row of dashboard.queueMatchPlayers || []) {
-    const player = playersById.get(row.member_id) || {
+    const livePlayer = playersById.get(row.member_id);
+    const player = {
+      ...(livePlayer || {}),
       memberId: row.member_id,
-      name: memberName(membersById.get(row.member_id)) || "ไม่ทราบชื่อ",
-      skillLevel: row.skill_level_snapshot,
+      name: livePlayer?.name || memberName(membersById.get(row.member_id)) || "ไม่ทราบชื่อ",
+      skillLevel: row.skill_level_snapshot || livePlayer?.skillLevel,
+      playableSkillLevels: row.playable_skill_levels_snapshot?.length
+        ? row.playable_skill_levels_snapshot
+        : livePlayer?.playableSkillLevels || [],
     };
     const next = matchPlayersByMatch.get(row.match_id) || [];
     next.push({ ...player, team: row.team, position: row.position });
@@ -851,6 +916,7 @@ function mapQueueDashboard(dashboard) {
     id: match.id,
     courtId: match.court_id,
     sequence: Number(match.sequence),
+    queuePosition: match.queue_position === null ? null : Number(match.queue_position),
     status: match.status,
     proposedAt: match.proposed_at,
     startedAt: match.started_at,
@@ -860,7 +926,7 @@ function mapQueueDashboard(dashboard) {
   return { players, matches };
 }
 
-function QueuePanel({ dashboard, event, mutate }) {
+function LegacyQueuePanel({ dashboard, event, mutate }) {
   const [replaceTarget, setReplaceTarget] = useState(null);
   const [manualReplacementId, setManualReplacementId] = useState("");
   const [finishingMatchId, setFinishingMatchId] = useState(null);
@@ -1018,7 +1084,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const timeOptions = useMemo(() => buildTimeOptions(event.startTime, event.endTime), [event.startTime, event.endTime]);
   const settlementByMember = new Map(settlement.rows.map((row) => [row.memberId, row]));
   const participantIds = new Set(participants.map((participant) => participant.member.id));
-  const savedMembers = dashboard.members.filter((member) => member.role !== "admin");
+  const savedMembers = dashboard.members.filter((member) => member.role === "member");
   const duplicateMemberGroups = findExactDuplicateMemberGroups(savedMembers);
   const memberSuggestions = rankMemberSuggestions(
     savedMembers,
@@ -1030,7 +1096,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     const trimmedName = name.trim();
     const normalizedName = normalizeMemberSearch(trimmedName);
     const exactMember = dashboard.members.find((member) =>
-      member.role !== "admin"
+      member.role === "member"
       && normalizedName
       && [member.nickname, member.display_name, ...(member.aliases || [])]
         .some((value) => normalizeMemberSearch(value) === normalizedName));
@@ -1153,6 +1219,12 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         nickname,
         displayName,
         paymentExempt: memberEdit.paymentExempt,
+        skillLevel: memberEdit.skillLevel,
+        playableSkillLevels: memberEdit.playableSkillLevels,
+      });
+      await updateOperatorMemberSkill({
+        eventId: event.id,
+        memberId: editingMember.id,
         skillLevel: memberEdit.skillLevel,
         playableSkillLevels: memberEdit.playableSkillLevels,
       });
