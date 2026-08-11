@@ -422,7 +422,7 @@ function AdminDashboard({ session }) {
     try {
       await copyTextToClipboard(link);
       setError("");
-      setNotice(kind === "signup" ? "คัดลอกลิงก์ลงชื่อทดลองแล้ว" : kind === "payment" ? "คัดลอกลิงก์ชำระเงินทดลองแล้ว" : "คัดลอกลิงก์สนามสดทดลองแล้ว");
+      setNotice(kind === "signup" ? "คัดลอกลิงก์ลงชื่อทดลองแล้ว" : kind === "payment" ? "คัดลอกลิงก์ชำระเงินทดลองแล้ว" : "คัดลอกลิงก์สนามและคิวทดลองแล้ว");
     } catch (copyError) {
       setError(copyError.message);
     }
@@ -466,7 +466,7 @@ function AdminDashboard({ session }) {
 
         {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
         {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
-        {!isStaff && context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving || dashboard.event?.status !== "open"} onClick={addDemoQueuePlayers} title={dashboard.event?.status === "open" ? "สุ่มจำนวน ระดับ และความยินยอม พร้อมเช็กชื่อเข้าคิว" : "เปิดลงชื่อในรอบทดลองก่อน"} type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 23–40 คน</button><button disabled={saving || dashboard.event?.status !== "open"} onClick={() => copyTestLink("signup")} type="button"><Copy size={15} /> ลิงก์ลงชื่อทดลอง</button><button disabled={saving} onClick={() => copyTestLink("payment")} type="button"><Copy size={15} /> ลิงก์ชำระเงินทดลอง</button><button disabled={saving || !dashboard.event} onClick={() => copyTestLink("live")} type="button"><Copy size={15} /> ลิงก์สนามสดทดลอง</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
+        {!isStaff && context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving || dashboard.event?.status !== "open"} onClick={addDemoQueuePlayers} title={dashboard.event?.status === "open" ? "สุ่มจำนวน ระดับ และความยินยอม พร้อมเช็กชื่อเข้าคิว" : "เปิดลงชื่อในรอบทดลองก่อน"} type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 23–40 คน</button><button disabled={saving || dashboard.event?.status !== "open"} onClick={() => copyTestLink("signup")} type="button"><Copy size={15} /> ลิงก์ลงชื่อทดลอง</button><button disabled={saving} onClick={() => copyTestLink("payment")} type="button"><Copy size={15} /> ลิงก์ชำระเงินทดลอง</button><button disabled={saving || !dashboard.event} onClick={() => copyTestLink("live")} type="button"><Copy size={15} /> ลิงก์สนามและคิวทดลอง</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
 
         {!dashboard.event && !isStaff ? (
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />

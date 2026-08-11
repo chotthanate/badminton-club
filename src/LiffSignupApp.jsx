@@ -252,7 +252,7 @@ export default function LiffSignupApp() {
           {event.courts.map((court) => <span key={court.name}><strong>{court.name} :</strong> {court.time}</span>)}
         </div>
       </section>
-      <a className="liff-live-link" href={buildLiveQueueUrl({ eventId: testMode ? activeEventId : null, testClubId: testMode ? testClubId : null })}><Users size={17} /> เปิดสนามสด ดูผู้เล่นและคิวถัดไป</a>
+      <a className="liff-live-link" href={buildLiveQueueUrl({ eventId: testMode ? activeEventId : null, testClubId: testMode ? testClubId : null })}><Users size={17} /> ดูสนามและผู้เล่นคิวถัดไป</a>
 
       <section className="liff-answer-card">
         <div className="liff-signup-as"><span>ลงชื่อเป็น</span><strong>{nickname}</strong>{skillLevel ? <em>{skillLevel}</em> : null}<button onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setPlayableSkillLevelsDraft(playableSkillLevels); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> แก้โปรไฟล์</button></div>

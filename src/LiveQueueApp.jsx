@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Clock3, Edit3, LoaderCircle, MapPin, RefreshCw, Users, X } from "lucide-react";
+import { Clock3, Edit3, ListOrdered, LoaderCircle, MapPin, RefreshCw, Users, X } from "lucide-react";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
 import { getEventIdFromSearch, getLiffTestContext, isLatestEventSearch } from "./liffSignup.js";
 import { defaultPlayableSkillLevels, SKILL_LEVELS } from "./skillLevels.js";
@@ -26,7 +26,7 @@ export default function LiveQueueApp() {
       if (response.profile) setProfile({ nickname: response.profile.nickname || "", skillLevel: response.profile.skillLevel || "", playableSkillLevels: response.profile.playableSkillLevels || defaultPlayableSkillLevels(response.profile.skillLevel) });
       return response;
     } catch (nextError) {
-      setError(nextError.message || "โหลดสนามสดไม่สำเร็จ");
+      setError(nextError.message || "โหลดสนามและคิวไม่สำเร็จ");
       return null;
     } finally { setLoading(false); }
   }
@@ -66,10 +66,10 @@ export default function LiveQueueApp() {
     } catch (nextError) { setError(nextError.message); } finally { setSaving(false); }
   }
 
-  if (loading) return <main className="badminton-app live-queue-page"><div className="live-loading"><LoaderCircle className="is-spinning" /><span>กำลังโหลดสนามสด</span></div></main>;
+  if (loading) return <main className="badminton-app live-queue-page"><div className="live-loading"><LoaderCircle className="is-spinning" /><span>กำลังโหลดสนามและคิว</span></div></main>;
   if (!data?.event) return <main className="badminton-app live-queue-page"><section className="live-empty"><h1>ยังไม่มีรอบที่กำลังเล่น</h1><p>{error || "กรุณาลองอีกครั้งเมื่อเปิดรอบแล้ว"}</p><button onClick={() => refresh()} type="button"><RefreshCw size={18} /> ลองใหม่</button></section></main>;
 
-  return <main className="badminton-app live-queue-page"><div className="live-queue-shell"><header className="live-header"><div><p className="badminton-kicker">สนามสด</p><h1>Headshot Badminton</h1><p><MapPin size={15} /> {data.event.venue}</p></div><button onClick={openProfile} type="button"><Edit3 size={17} /> โปรไฟล์</button></header>{error ? <div className="badminton-alert is-error"><span>{error}</span><button onClick={() => setError("")} type="button"><X size={16} /></button></div> : null}<section className="live-courts"><h2>สนามตอนนี้</h2><div>{data.courts.map((court) => <LiveCourt clock={clock + serverOffsetMs} court={court} key={court.id} />)}</div></section><section className="live-upcoming"><div className="live-section-title"><h2>คิวถัดไป</h2><span>{data.upcoming.length} คิว</span></div>{data.upcoming.length ? data.upcoming.map((queue, index) => <article key={queue.id}><strong>คิว {index + 1}</strong><div>{queue.players.map((player) => <span key={`${queue.id}-${player.slot}`}><b>{player.nickname}</b><em>{player.skillLevel}</em></span>)}</div></article>) : <p>ยังไม่มีคิวที่อนุมัติ</p>}</section><section className="live-waiting"><div className="live-section-title"><h2>ผู้เล่นที่รอ</h2><span>{data.waiting.reduce((sum, group) => sum + group.count, 0)} คน</span></div><div className="live-waiting-grid">{data.waiting.map((group) => <article key={group.skillLevel}><header><strong>{group.skillLevel}</strong><span>{group.count} คน</span></header><p>{group.players.map((player) => player.nickname).join(" · ") || "—"}</p></article>)}</div></section><p className="live-updated">อัปเดตอัตโนมัติทุก 5 วินาที</p></div>{editing ? <ProfileModal onClose={() => setEditing(false)} onSave={saveProfile} profile={profile} saving={saving} setProfile={setProfile} /> : null}</main>;
+  return <main className="badminton-app live-queue-page"><div className="live-queue-shell"><header className="live-header"><div><p className="badminton-kicker">สนามและคิว</p><h1>Headshot Badminton</h1><p><MapPin size={15} /> {data.event.venue}</p></div><button onClick={openProfile} type="button"><Edit3 size={17} /> โปรไฟล์</button></header>{error ? <div className="badminton-alert is-error"><span>{error}</span><button onClick={() => setError("")} type="button"><X size={16} /></button></div> : null}<section className="live-courts"><h2>สนามตอนนี้</h2><div>{data.courts.map((court) => <LiveCourt clock={clock + serverOffsetMs} court={court} key={court.id} />)}</div></section><section className="live-upcoming"><div className="live-section-title"><h2><ListOrdered size={20} /> คิวถัดไป</h2><span>{data.upcoming.length} คิว</span></div>{data.upcoming.length ? data.upcoming.map((queue, index) => <article key={queue.id}><strong>คิว {index + 1}</strong><div>{queue.players.map((player) => <span key={`${queue.id}-${player.slot}`}><b>{player.nickname}</b><em>{player.skillLevel}</em></span>)}</div></article>) : <p>ยังไม่มีคิวที่อนุมัติ</p>}</section><section className="live-waiting"><div className="live-section-title"><h2>ผู้เล่นที่รอ</h2><span>{data.waiting.reduce((sum, group) => sum + group.count, 0)} คน</span></div><div className="live-waiting-grid">{data.waiting.map((group) => <article key={group.skillLevel}><header><strong>{group.skillLevel}</strong><span>{group.count} คน</span></header><p>{group.players.map((player) => player.nickname).join(" · ") || "—"}</p></article>)}</div></section><p className="live-updated">อัปเดตอัตโนมัติทุก 5 วินาที</p></div>{editing ? <ProfileModal onClose={() => setEditing(false)} onSave={saveProfile} profile={profile} saving={saving} setProfile={setProfile} /> : null}</main>;
 }
 
 function LiveCourt({ clock, court }) {
