@@ -212,7 +212,7 @@ export async function loadDashboard(clubId, eventId = null) {
     };
   }
 
-  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult] = await Promise.all([
+  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, perRoundSnapshotsResult, perRoundSnapshotMatchesResult, perRoundSnapshotAllocationsResult] = await Promise.all([
     membersPromise,
     client().from("event_courts").select("*").eq("event_id", event.id).order("position").order("created_at"),
     client().from("signups").select("*").eq("event_id", event.id).order("created_at"),
@@ -228,9 +228,12 @@ export async function loadDashboard(clubId, eventId = null) {
     client().from("event_queue_players").select("*").eq("event_id", event.id),
     client().from("queue_matches").select("*").eq("event_id", event.id).order("sequence", { ascending: false }),
     client().from("queue_match_players").select("*").eq("event_id", event.id),
+    client().from("per_round_billing_snapshots").select("*").eq("event_id", event.id).order("checkpoint_at"),
+    client().from("per_round_snapshot_matches").select("*").eq("event_id", event.id),
+    client().from("per_round_snapshot_allocations").select("*").eq("event_id", event.id),
   ]);
 
-  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult]
+  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, perRoundSnapshotsResult, perRoundSnapshotMatchesResult, perRoundSnapshotAllocationsResult]
     .forEach((result) => throwIfError(result.error));
 
   return {
@@ -251,6 +254,9 @@ export async function loadDashboard(clubId, eventId = null) {
     queuePlayers: queuePlayersResult.data || [],
     queueMatches: queueMatchesResult.data || [],
     queueMatchPlayers: queueMatchPlayersResult.data || [],
+    perRoundSnapshots: perRoundSnapshotsResult.data || [],
+    perRoundSnapshotMatches: perRoundSnapshotMatchesResult.data || [],
+    perRoundSnapshotAllocations: perRoundSnapshotAllocationsResult.data || [],
   };
 }
 
@@ -274,6 +280,9 @@ export async function loadStaffDashboard(clubId) {
     extraItems: [],
     memberExtras: [],
     shuttlecockCheckpoints: [],
+    perRoundSnapshots: [],
+    perRoundSnapshotMatches: [],
+    perRoundSnapshotAllocations: [],
   };
 }
 
@@ -831,6 +840,21 @@ export async function upsertShuttlecockCheckpoint({ clubId, eventId, time, cumul
   throwIfError(error);
   const maxCount = Math.max(count, ...(checkpoints || []).map((checkpoint) => Number(checkpoint.cumulative_count) || 0));
   await updateEvent(eventId, { shuttlecock_count: maxCount });
+}
+
+export async function snapshotPerRoundDeparture({ eventId, memberId, departureTime, cumulativeShuttlecockCount }) {
+  const count = Number(cumulativeShuttlecockCount);
+  if (!Number.isInteger(count) || count < 0 || count > 1000) {
+    throw new Error("จำนวนลูกแบดสะสมต้องอยู่ระหว่าง 0 ถึง 1,000 ลูก");
+  }
+  const { data, error } = await client().rpc("snapshot_per_round_departure", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+    departure_at: `${String(departureTime).slice(0, 5)}:00`,
+    cumulative_shuttlecock_count: count,
+  });
+  throwIfError(error);
+  return data;
 }
 
 export async function incrementEventShuttlecockCount({ eventId, increment, checkpointTime }) {

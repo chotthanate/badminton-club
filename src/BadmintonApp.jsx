@@ -69,6 +69,7 @@ import {
   setPayment,
   setEventShuttlecockCount,
   signInStaff,
+  snapshotPerRoundDeparture,
   startNextQueueOnCourt,
   updateAttendance,
   updateClubMember,
@@ -1360,6 +1361,17 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     if (currentRow?.paid && !currentRow.paymentExempt) {
       throw new Error("คนนี้รับเงินแล้ว หากต้องแก้เวลากลับ กรุณายกเลิกสถานะรับเงินก่อน");
     }
+    if (event.billingModel === "per_round" && leftAt) {
+      if (currentRow?.billingFinalized) {
+        throw new Error("คนนี้สรุปยอดแล้ว หากต้องแก้เวลากลับ กรุณาแก้ยอดหรือปลดล็อกก่อน");
+      }
+      return snapshotPerRoundDeparture({
+        eventId: event.id,
+        memberId,
+        departureTime: leftAt,
+        cumulativeShuttlecockCount: cumulativeCount,
+      });
+    }
     if (cumulativeCount !== null) {
       await upsertShuttlecockCheckpoint({
         clubId: event.clubId,
@@ -1538,11 +1550,12 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
           function updateDeparture(nextDeparture) {
             const exactCheckpoint = (event.shuttlecockCheckpoints || []).find((item) => item.time === nextDeparture);
-            if (event.billingModel === "time_segmented" && nextDeparture && !exactCheckpoint) {
+            if (nextDeparture && (event.billingModel === "per_round" || (event.billingModel === "time_segmented" && !exactCheckpoint))) {
               const previousCheckpoints = (event.shuttlecockCheckpoints || [])
                 .filter((item) => timePosition(item.time, event.startTime) <= timePosition(nextDeparture, event.startTime))
                 .map((item) => Number(item.cumulativeCount) || 0);
-              const latestCount = previousCheckpoints.length ? Math.max(...previousCheckpoints) : "";
+              const latestCount = exactCheckpoint?.cumulativeCount
+                ?? (previousCheckpoints.length ? Math.max(...previousCheckpoints) : event.shuttlecockCount || 0);
               setPendingDeparture({
                 memberId: member.id,
                 participantName,
@@ -1556,7 +1569,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
               () => saveDepartureAndLock({ memberId: member.id, participantName, plannedArrival, leftAt: nextDeparture }),
               nextDeparture
                 ? event.billingModel === "per_round"
-                  ? `บันทึกเวลากลับของ ${participantName} แล้ว · ยอดจะสรุปหลังจบรอบ`
+                  ? `สร้าง Snapshot และล็อกยอดของ ${participantName} แล้ว`
                   : `บันทึกเวลากลับและล็อกยอดของ ${participantName} แล้ว`
                 : `ยกเลิกเวลากลับของ ${participantName} แล้ว`,
             );
@@ -1685,9 +1698,11 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             leftAt: pendingDeparture.leftAt,
             cumulativeCount: pendingDeparture.cumulativeCount,
           });
-        }, `บันทึกเวลากลับและล็อกยอดของ ${pendingDeparture.participantName} แล้ว`);
+        }, event.billingModel === "per_round"
+          ? `สร้าง Snapshot และล็อกยอดของ ${pendingDeparture.participantName} แล้ว`
+          : `บันทึกเวลากลับและล็อกยอดของ ${pendingDeparture.participantName} แล้ว`);
         if (saved) setPendingDeparture(null);
-      }}><div className="badminton-modal-title"><div><p className="badminton-kicker">ผู้เล่นกลับก่อน</p><h2>{pendingDeparture.participantName} · {pendingDeparture.leftAt} น.</h2></div><button aria-label="ปิด" onClick={() => setPendingDeparture(null)} type="button"><X size={19} /></button></div><p>ตอนเวลานี้ใช้ลูกแบดสะสมไปทั้งหมดกี่ลูก?</p><label>จำนวนลูกแบดสะสม<input autoFocus min="0" onChange={(changeEvent) => setPendingDeparture({ ...pendingDeparture, cumulativeCount: changeEvent.target.value })} placeholder="กรอกจำนวนที่ใช้จริง" required type="number" value={pendingDeparture.cumulativeCount} /></label><small className="badminton-settings-help">บันทึกครั้งเดียว ระบบจะล็อกยอดของคนนี้ให้ทันที และใช้จำนวนลูกนี้ร่วมกับคนที่กลับเวลาเดียวกัน</small><button className="badminton-primary" type="submit"><Check size={17} /> บันทึกและล็อกยอด</button></form></div> : null}
+      }}><div className="badminton-modal-title"><div><p className="badminton-kicker">ผู้เล่นกลับก่อน</p><h2>{pendingDeparture.participantName} · {pendingDeparture.leftAt} น.</h2></div><button aria-label="ปิด" onClick={() => setPendingDeparture(null)} type="button"><X size={19} /></button></div><p>ตอนเวลานี้ใช้ลูกแบดสะสมไปทั้งหมดกี่ลูก?</p><label>จำนวนลูกแบดสะสม<input autoFocus min="0" onChange={(changeEvent) => setPendingDeparture({ ...pendingDeparture, cumulativeCount: changeEvent.target.value })} placeholder="กรอกจำนวนที่ใช้จริง" required type="number" value={pendingDeparture.cumulativeCount} /></label>{event.billingModel === "per_round" ? <small className="badminton-settings-help">ระบบจะเก็บยอดสะสมของทุกคนเป็น Snapshot และล็อกยอดของคนนี้ เกมที่กำลังเล่นครบ 11 นาทีจะนับในช่วงนี้ ส่วนเกมที่ยังไม่ถึง 11 นาทีจะไปคิดช่วงถัดไป</small> : <small className="badminton-settings-help">บันทึกครั้งเดียว ระบบจะล็อกยอดของคนนี้ให้ทันที และใช้จำนวนลูกนี้ร่วมกับคนที่กลับเวลาเดียวกัน</small>}<button className="badminton-primary" type="submit"><Check size={17} /> {event.billingModel === "per_round" ? "บันทึก Snapshot และล็อกยอด" : "บันทึกและล็อกยอด"}</button></form></div> : null}
     </section>
   );
 }
@@ -1784,7 +1799,7 @@ function PricingPanel({ event, mutate, session, settlement }) {
     }
     const nextLabel = nextModel === "per_round" ? "ตามจำนวนรอบที่เล่น" : "ตามเวลาที่อยู่จริง";
     const warning = nextModel === "per_round"
-      ? "ค่าสนาม ลูกแบด และค่าใช้จ่ายส่วนกลางจะหารตามจำนวนเกมที่ผู้เล่นแต่ละคนเล่นจบ และจะสรุปยอดจริงได้หลังจบรอบเท่านั้น"
+      ? "ค่าสนาม ลูกแบด และค่าใช้จ่ายส่วนกลางจะหารตามจำนวนเกมที่เล่น ผู้เล่นที่กลับก่อนสามารถล็อกยอดด้วย Snapshot ส่วนคนที่ยังอยู่จะสรุปยอดเมื่อจบรอบ"
       : "ค่าสนามและลูกแบดจะกลับมาหารตามช่วงเวลาที่ผู้เล่นอยู่จริง";
     if (!window.confirm(`เปลี่ยนวิธีคิดเงินเป็น “${nextLabel}” ใช่ไหม?\n\n${warning}`)) return;
     mutate(async () => {
@@ -1907,8 +1922,8 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
   }
 
   function togglePayment(row) {
-    if (perRoundAwaitingClose) {
-      window.alert("ระบบตามจำนวนรอบจะสรุปยอดจริงได้หลังจบรอบและจบเกมทุกสนามแล้ว");
+    if (perRoundAwaitingClose && !row.billingFinalized) {
+      window.alert("ผู้เล่นที่กลับก่อนให้กำหนดเวลากลับในหน้าผู้เล่นเพื่อสร้าง Snapshot ส่วนคนที่ยังเล่นอยู่จะสรุปยอดได้หลังจบรอบ");
       return undefined;
     }
     if (!row.billingFinalized) {
@@ -2060,7 +2075,7 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
       <div className="badminton-payment-subtabs" role="tablist"><button className="is-active" role="tab" type="button">รอบนี้</button><button onClick={() => setPaymentView("outstanding")} role="tab" type="button">ยอดค้าง <span>{previousOutstanding.count}</span></button></div>
       <div className="badminton-payment-workspace">
         <div className="badminton-card-title"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div></div>
-        {perRoundAwaitingClose ? <div className="badminton-per-round-pending"><Timer size={18} /><div><strong>กำลังคำนวณตามจำนวนรอบ</strong><span>ยอดด้านล่างเป็นยอดประมาณ เมื่อจบเกมทุกสนามและกด “จบรอบ” แล้วจึงจะสรุปยอดจริงได้</span></div></div> : null}
+        {perRoundAwaitingClose ? <div className="badminton-per-round-pending"><Timer size={18} /><div><strong>กำลังคำนวณตามจำนวนรอบ</strong><span>ผู้เล่นที่กลับก่อนสามารถล็อกยอดด้วย Snapshot จากหน้าผู้เล่น ส่วนคนที่ยังเล่นอยู่จะสรุปยอดเมื่อจบรอบ</span></div></div> : null}
         <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
           <div className="badminton-current-round-total"><span>{perRoundAwaitingClose ? "ยอดประมาณรอบนี้" : "ยอดรอบนี้"}</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
           <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousTotal)} บาท</strong></div>
@@ -2079,7 +2094,7 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
             return <article className={`badminton-pay-row ${row.billingFinalized ? "is-billed" : ""} ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
               <div className="badminton-pay-person"><strong>{row.name}</strong><span>{event.billingModel === "per_round" ? `${row.roundsPlayed || 0} รอบ` : formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>{perRoundAwaitingClose ? "ยอดประมาณ · รอจบรอบ" : "ยอดคำนวณสำหรับแอดมิน"}</small>}</div>
               <strong className="badminton-pay-amount">{baht(amount)} บาท{row.billingFinalized && !row.paid ? <button aria-label={`แก้ยอดเรียกเก็บของ ${row.name}`} className="badminton-edit-bill" onClick={() => setBillDraft({ row, amount: String(row.billedAmount) })} title="แก้ยอดเรียกเก็บ" type="button"><Pencil size={13} /></button> : null}</strong>
-              {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} disabled={perRoundAwaitingClose} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : perRoundAwaitingClose ? <Timer size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : perRoundAwaitingClose ? "รอจบรอบ" : "สรุปยอด"}</button>}
+              {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} disabled={perRoundAwaitingClose && !row.billingFinalized} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : perRoundAwaitingClose ? <Timer size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : perRoundAwaitingClose ? "รอจบรอบ" : "สรุปยอด"}</button>}
             </article>;
           })}
         </div>
@@ -2155,8 +2170,16 @@ function mapDashboardToEvent(dashboard) {
     endsAt: court.ends_at.slice(0, 5),
   }));
   const courtHours = totalCourtHours(courts);
+  const snapshottedMatchIds = new Set((dashboard.perRoundSnapshotMatches || []).map((row) => row.match_id));
+  const snapshotByMember = new Map();
+  (dashboard.perRoundSnapshotAllocations || []).forEach((allocation) => {
+    const current = snapshotByMember.get(allocation.member_id) || { roundUnits: 0, sharedAmount: 0 };
+    current.roundUnits += Number(allocation.round_units) || 0;
+    current.sharedAmount += Number(allocation.allocated_shared_amount) || 0;
+    snapshotByMember.set(allocation.member_id, current);
+  });
   const roundsByMember = completedRoundsByMember(
-    dashboard.queueMatches || [],
+    (dashboard.queueMatches || []).filter((match) => !snapshottedMatchIds.has(match.id)),
     dashboard.queueMatchPlayers || [],
   );
   const billableSignups = dashboard.signups.filter((row) => row.status === "coming");
@@ -2169,6 +2192,7 @@ function mapDashboardToEvent(dashboard) {
     const playedMinutes = playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt);
     const billingPercentage = Number(row?.billing_percentage ?? 100);
     const weightedHours = billableHours(playedMinutes, billingPercentage);
+    const snapshot = snapshotByMember.get(signup.member_id) || { roundUnits: 0, sharedAmount: 0 };
     const extraCharges = (dashboard.memberExtras || [])
       .filter((charge) => charge.member_id === signup.member_id)
       .map((charge) => ({ id: charge.id, name: charge.item_name, unitPrice: Number(charge.unit_price), quantity: Number(charge.quantity) }));
@@ -2180,7 +2204,9 @@ function mapDashboardToEvent(dashboard) {
       weight: billingPercentage / 100,
       hours: weightedHours,
       playedMinutes,
-      roundsPlayed: roundsByMember.get(signup.member_id) || 0,
+      roundsPlayed: snapshot.roundUnits + (roundsByMember.get(signup.member_id) || 0),
+      snapshotRoundUnits: snapshot.roundUnits,
+      snapshotSharedAmount: snapshot.sharedAmount,
       billingPercentage,
       paymentExempt: Boolean(member?.payment_exempt),
       arrivedAt: arrivalTime,
@@ -2222,6 +2248,17 @@ function mapDashboardToEvent(dashboard) {
       time: checkpoint.checkpoint_time?.slice(0, 5),
       cumulativeCount: Number(checkpoint.cumulative_count) || 0,
     })),
+    perRoundSnapshots: (dashboard.perRoundSnapshots || []).map((snapshot) => ({
+      id: snapshot.id,
+      checkpointTime: snapshot.checkpoint_time?.slice(0, 5),
+      includedMatches: Number(snapshot.included_match_count) || 0,
+      includedPlayerRounds: Number(snapshot.included_player_rounds) || 0,
+      shuttlecockCount: Number(snapshot.shuttlecock_count_cumulative) || 0,
+      allocatedSharedCost: Number(snapshot.allocated_shared_cost) || 0,
+      deferredSharedCost: Number(snapshot.deferred_shared_cost) || 0,
+    })),
+    snapshotAllocatedSharedTotal: (dashboard.perRoundSnapshotAllocations || [])
+      .reduce((sum, allocation) => sum + Number(allocation.allocated_shared_amount || 0), 0),
     members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, aliases: member.aliases || [], role: member.role, lineUserId: member.line_user_id, active: member.active, paymentExempt: Boolean(member.payment_exempt), skillLevel: member.skill_level || null, playableSkillLevels: member.playable_skill_levels || [], allowLowerLevel: Boolean(member.allow_lower_level), allowHigherLevel: Boolean(member.allow_higher_level), createdAt: member.created_at })),
     signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note, createdAt: row.created_at, submittedByLineUserId: row.submitted_by_line_user_id || "", submittedByLineName: row.submitted_by_line_name || "", skillLevel: row.skill_level_snapshot || null, playableSkillLevels: row.playable_skill_levels_snapshot || [], allowLowerLevel: Boolean(row.allow_lower_level_snapshot), allowHigherLevel: Boolean(row.allow_higher_level_snapshot) })),
     attendance,

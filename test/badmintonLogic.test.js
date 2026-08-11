@@ -270,6 +270,70 @@ test("per-round billing preserves a finalized bill and redistributes only the un
   assert.equal(result.allocatedSharedTotal, 500);
 });
 
+test("per-round billing preserves every snapshot balance and starts a new sharing segment", () => {
+  const result = calculateSettlement(makeEvent({
+    billingModel: "per_round",
+    snapshotAllocatedSharedTotal: 400,
+    costs: [{ amount: 1600 }],
+    attendance: [
+      {
+        memberId: "left",
+        name: "กลับแล้ว",
+        arrived: true,
+        roundsPlayed: 2,
+        snapshotRoundUnits: 2,
+        snapshotSharedAmount: 200,
+        billingFinalized: true,
+        billedAmount: 200,
+        lockedSharedAmount: 200,
+        lockedExtraAmount: 0,
+      },
+      {
+        memberId: "continued",
+        name: "เล่นต่อ",
+        arrived: true,
+        roundsPlayed: 4,
+        snapshotRoundUnits: 2,
+        snapshotSharedAmount: 200,
+      },
+      {
+        memberId: "new",
+        name: "มาเล่นช่วงใหม่",
+        arrived: true,
+        roundsPlayed: 2,
+        snapshotRoundUnits: 0,
+        snapshotSharedAmount: 0,
+      },
+    ],
+  }));
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [200, 800, 600]);
+  assert.equal(result.snapshotAllocatedSharedTotal, 400);
+  assert.equal(result.remainingSharedCost, 1200);
+  assert.equal(result.rows.reduce((sum, row) => sum + row.roundedDue, 0), 1600);
+});
+
+test("per-round billing carries new cost forward when a snapshot segment has no new game", () => {
+  const result = calculateSettlement(makeEvent({
+    billingModel: "per_round",
+    snapshotAllocatedSharedTotal: 400,
+    costs: [{ amount: 500 }],
+    attendance: [
+      {
+        memberId: "continued",
+        name: "รอเกมถัดไป",
+        arrived: true,
+        roundsPlayed: 2,
+        snapshotRoundUnits: 2,
+        snapshotSharedAmount: 400,
+      },
+    ],
+  }));
+
+  assert.equal(result.rows[0].roundedDue, 400);
+  assert.equal(result.unallocatedSharedCost, 100);
+});
+
 test("payment-exempt players still count toward the per-round shared-cost denominator", () => {
   const result = calculateSettlement(makeEvent({
     billingModel: "per_round",

@@ -217,6 +217,8 @@ export function calculatePerRoundSettlement(event) {
       return {
         ...row,
         roundsPlayed,
+        snapshotRoundUnits: Math.min(roundsPlayed, Math.max(0, Number(row.snapshotRoundUnits) || 0)),
+        snapshotSharedAmount: Math.max(0, Number(row.snapshotSharedAmount) || 0),
         paymentRecorded: Boolean(row.paid),
         billedAmount,
         currentExtraAmount,
@@ -229,10 +231,15 @@ export function calculatePerRoundSettlement(event) {
 
   const totalUnits = preparedRows.reduce((sum, row) => sum + row.roundsPlayed, 0);
   const lockedSharedTotal = preparedRows.reduce((sum, row) => sum + Number(row.lockedSharedAmount || 0), 0);
-  const remainingSharedCost = Math.max(0, sharedTotalCost - lockedSharedTotal);
+  const snapshotAllocatedSharedTotal = Math.max(
+    preparedRows.reduce((sum, row) => sum + row.snapshotSharedAmount, 0),
+    Number(event.snapshotAllocatedSharedTotal) || 0,
+  );
+  const allocatedBaseline = Math.max(snapshotAllocatedSharedTotal, lockedSharedTotal);
+  const remainingSharedCost = Math.max(0, sharedTotalCost - allocatedBaseline);
   const openUnits = preparedRows
     .filter((row) => !row.locked)
-    .reduce((sum, row) => sum + row.roundsPlayed, 0);
+    .reduce((sum, row) => sum + Math.max(0, row.roundsPlayed - row.snapshotRoundUnits), 0);
   const unitPrice = openUnits > 0 ? remainingSharedCost / openUnits : 0;
   let roundedOpenSharedTotal = 0;
 
@@ -247,12 +254,15 @@ export function calculatePerRoundSettlement(event) {
         paid: Boolean(row.paymentRecorded),
       };
     }
-    const rawSharedDue = unitPrice * row.roundsPlayed;
-    const sharedDue = Math.round(rawSharedDue);
-    roundedOpenSharedTotal += sharedDue;
+    const currentRoundUnits = Math.max(0, row.roundsPlayed - row.snapshotRoundUnits);
+    const rawCurrentSharedDue = unitPrice * currentRoundUnits;
+    const currentSharedDue = Math.round(rawCurrentSharedDue);
+    const sharedDue = row.snapshotSharedAmount + currentSharedDue;
+    roundedOpenSharedTotal += currentSharedDue;
     return {
       ...row,
-      rawDue: rawSharedDue + row.currentExtraAmount,
+      currentRoundUnits,
+      rawDue: row.snapshotSharedAmount + rawCurrentSharedDue + row.currentExtraAmount,
       sharedDue,
       extraAmount: row.currentExtraAmount,
       roundedDue: sharedDue + Math.round(row.currentExtraAmount),
@@ -260,7 +270,7 @@ export function calculatePerRoundSettlement(event) {
     };
   });
 
-  const lastOpenIndex = rows.findLastIndex((row) => !row.locked && row.roundsPlayed > 0);
+  const lastOpenIndex = rows.findLastIndex((row) => !row.locked && row.currentRoundUnits > 0);
   const delta = openUnits > 0 ? Math.round(remainingSharedCost) - roundedOpenSharedTotal : 0;
   if (lastOpenIndex >= 0 && delta !== 0) {
     rows[lastOpenIndex] = {
@@ -281,6 +291,7 @@ export function calculatePerRoundSettlement(event) {
     totalUnits,
     unitPrice,
     lockedSharedTotal,
+    snapshotAllocatedSharedTotal,
     remainingSharedCost,
     allocatedSharedTotal,
     unallocatedSharedCost: Math.max(0, Math.round(sharedTotalCost) - allocatedSharedTotal),
