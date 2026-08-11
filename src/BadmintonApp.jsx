@@ -113,6 +113,8 @@ import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
 import QueuePanel from "./QueuePanel.jsx";
 import StaffParticipantsPanel from "./StaffParticipantsPanel.jsx";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "./skillLevels.js";
+import { authenticateBackofficeCode } from "./backofficeAuth.js";
+import { selectStaffWorkspace } from "./staffWorkspace.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
 
 const EVENT_STATUS_LABELS = {
@@ -189,7 +191,6 @@ export default function BadmintonApp() {
 }
 
 function AdminLogin() {
-  const [role, setRole] = useState("admin");
   const [accessCode, setAccessCode] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
@@ -198,48 +199,41 @@ function AdminLogin() {
     event.preventDefault();
     setSending(true);
     setMessage("");
-    let error = null;
     try {
-      if (role === "staff") {
-        await signInStaff(accessCode);
-      } else {
-        const result = await supabase.auth.signInWithPassword({
+      await authenticateBackofficeCode(accessCode, {
+        signInOwner: (password) => supabase.auth.signInWithPassword({
           email: import.meta.env.VITE_ADMIN_EMAIL,
-          password: accessCode,
-        });
-        error = result.error;
-      }
+          password,
+        }),
+        signInStaff,
+      });
+      setMessage("เข้าสู่ระบบสำเร็จ");
     } catch (nextError) {
-      error = nextError;
+      setMessage("รหัสเข้าเว็บไม่ถูกต้อง");
     }
     setSending(false);
-    setMessage(error ? "รหัสเข้าเว็บไม่ถูกต้อง" : "เข้าสู่ระบบสำเร็จ");
   }
 
   return (
     <main className="badminton-app badminton-auth-page">
       <section className="badminton-auth-card">
         <div className="badminton-auth-icon"><ShieldCheck size={30} /></div>
-        <p className="badminton-kicker">Admin only</p>
+        <p className="badminton-kicker">สำหรับผู้ดูแล</p>
         <h1>หลังบ้านกลุ่มแบด</h1>
         <p>สมาชิกไม่ต้องเข้าเว็บ การลงชื่อทั้งหมดจะทำผ่าน LINE</p>
-        <div className="badminton-role-switch" aria-label="เลือกสิทธิ์เข้าใช้งาน">
-          <button className={role === "admin" ? "is-active" : ""} onClick={() => { setRole("admin"); setMessage(""); }} type="button">เจ้าของ</button>
-          <button className={role === "staff" ? "is-active" : ""} onClick={() => { setRole("staff"); setMessage(""); }} type="button">สตาฟ</button>
-        </div>
         <form onSubmit={submit}>
           <label htmlFor="admin-code">รหัสเข้าเว็บ</label>
           <input
             autoComplete="current-password"
             id="admin-code"
             onChange={(event) => setAccessCode(event.target.value)}
-            placeholder={role === "staff" ? "กรอกรหัสสตาฟ" : "กรอกรหัสเจ้าของ"}
+            placeholder="กรอกรหัสเข้าเว็บ"
             required
             type="password"
             value={accessCode}
           />
           <button className="badminton-primary" disabled={sending} type="submit">
-            <LogIn size={18} /> {sending ? "กำลังตรวจสอบ..." : role === "staff" ? "เข้าสู่โหมดสตาฟ" : "เข้าสู่หลังบ้าน"}
+            <LogIn size={18} /> {sending ? "กำลังตรวจสอบ..." : "เข้าสู่ระบบ"}
           </button>
         </form>
         {message ? <p className="badminton-form-message">{message}</p> : null}
@@ -270,11 +264,24 @@ function AdminDashboard({ session }) {
     setError("");
     try {
       const nextContexts = await getAdminContexts(session.user.id);
+      const isStaffSession = nextContexts.length > 0 && nextContexts.every((entry) => entry.role === "staff");
       const requestedClubId = options.clubId || selectedClubIdRef.current;
-      const nextContext = nextContexts.find((entry) => entry.club_id === requestedClubId)
-        || nextContexts.find((entry) => !entry.clubs.is_test)
-        || nextContexts[0]
-        || null;
+      let nextContext = null;
+      let nextDashboard = null;
+      if (isStaffSession) {
+        const staffDashboards = Object.fromEntries(await Promise.all(nextContexts.map(async (entry) => [
+          entry.club_id,
+          await loadStaffDashboard(entry.club_id),
+        ])));
+        const selectedWorkspace = selectStaffWorkspace(nextContexts, staffDashboards, options.clubId || null);
+        nextContext = selectedWorkspace?.context || null;
+        nextDashboard = selectedWorkspace?.dashboard || null;
+      } else {
+        nextContext = nextContexts.find((entry) => entry.club_id === requestedClubId)
+          || nextContexts.find((entry) => !entry.clubs.is_test)
+          || nextContexts[0]
+          || null;
+      }
       setAdminContexts(nextContexts);
       selectedClubIdRef.current = nextContext?.club_id || null;
       setContext(nextContext);
@@ -292,9 +299,7 @@ function AdminDashboard({ session }) {
       const targetEventId = isStaffContext ? null : nextEvents.some((event) => event.id === requestedEventId)
         ? requestedEventId
         : nextEvents[0]?.id || null;
-      const nextDashboard = isStaffContext
-        ? await loadStaffDashboard(nextContext.club_id)
-        : await loadDashboard(nextContext.club_id, targetEventId);
+      if (!isStaffContext) nextDashboard = await loadDashboard(nextContext.club_id, targetEventId);
       const outstandingRows = isStaffContext ? [] : await listOutstandingPayments(nextContext.club_id);
       const nextOutstanding = {
         count: outstandingRows.length,

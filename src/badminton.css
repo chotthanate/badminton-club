@@ -4917,31 +4917,6 @@
   }
 }
 
-.badminton-role-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin: 16px 0;
-  padding: 5px;
-  border-radius: 14px;
-  background: #edf3ee;
-}
-
-.badminton-role-switch button {
-  min-height: 44px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: #637064;
-  font-weight: 700;
-}
-
-.badminton-role-switch button.is-active {
-  background: #fff;
-  color: #0f7a52;
-  box-shadow: 0 2px 8px rgb(20 54 38 / 10%);
-}
-
 .badminton-full-button { width: 100%; }
 
 .badminton-upcoming-queues,
