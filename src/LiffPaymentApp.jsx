@@ -39,10 +39,7 @@ export default function LiffPaymentApp() {
         const response = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken(), ...testPayload });
         if (!active) return;
         setData(response);
-        const initialBeneficiary = response.beneficiaries.find((entry) => entry.id === response.profile.memberId && entry.payments.length)
-          || response.beneficiaries.find((entry) => entry.payments.length)
-          || null;
-        setSelectedBeneficiaryIds(initialBeneficiary ? [initialBeneficiary.id] : []);
+        setSelectedBeneficiaryIds([]);
       } catch (nextError) {
         if (active) setError(nextError.message || "เปิดหน้าแจ้งโอนไม่สำเร็จ");
       } finally {
@@ -205,7 +202,7 @@ export default function LiffPaymentApp() {
         {availablePayments.length ? <div className="liff-beneficiary-groups">{selectedBeneficiaries.map((entry) => <section className="liff-beneficiary-group" key={entry.id}>
           <header><div><UserPlus size={16} /><strong>{beneficiaryLabel(entry)}</strong></div><button aria-label={`นำ ${entry.name} ออกจากรายการ`} onClick={() => removeBeneficiary(entry.id)} type="button"><X size={16} /></button></header>
           <div className="liff-due-list">{entry.payments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} บาท</b></label>)}</div>
-        </section>)}</div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? "ยังไม่มียอดค้างทดลอง" : "ไม่มียอดค้างชำระ"}</strong><span>{testMode ? "ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้" : "ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้"}</span></div>}
+        </section>)}</div> : selectableBeneficiaries.length ? <div className="liff-payment-empty"><UserPlus size={31} /><strong>กรุณาเลือกผู้เล่น</strong><span>เลือกชื่อด้านบนก่อน แล้วจึงเลือกรอบที่ต้องการชำระ</span></div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? "ยังไม่มียอดค้างทดลอง" : "ไม่มียอดค้างชำระ"}</strong><span>{testMode ? "ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้" : "ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้"}</span></div>}
         {availablePayments.length ? <>
           <div className="liff-payment-bank">
             <strong>{PAYMENT_BANK_NAME} {PAYMENT_BANK_ACCOUNT_DISPLAY}</strong>
