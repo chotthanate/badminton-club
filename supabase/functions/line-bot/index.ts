@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { buildPaymentSummary, compareCourtNames } from "../_shared/paymentSummary.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -229,7 +230,7 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
 
     if (event.type === "message" && event.message?.type === "text" && groupId) {
       const command = normalizeLineCommand(event.message.text);
-      if (command === "เปิดลงชื่อ" || command === "ลงชื่อ" || command === "รายชื่อตีแบดวันนี้" || command === "แจ้งโอน") {
+      if (command === "เปิดลงชื่อ" || command === "ลงชื่อ" || command === "รายชื่อตีแบดวันนี้" || command === "แจ้งโอน" || command === "ชำระเงิน") {
         await handleSignupCommand({
           admin,
           club: configuredClub,
@@ -342,14 +343,17 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
     return;
   }
 
-  if (command === "แจ้งโอน") {
+  if (command === "แจ้งโอน" || command === "ชำระเงิน") {
+    const paymentSummary = await latestPaymentSummary(admin, club.id);
     await replyLineMessages(event.replyToken, [
+      { type: "text", text: paymentSummary?.text || "ยังไม่มีรายการที่สรุปยอดสำหรับชำระเงิน" },
       buildPaymentMessage(liffId),
     ], lineToken);
     await admin.from("audit_logs").insert({
       club_id: club.id,
+      event_id: paymentSummary?.eventId || null,
       actor_id: null,
-      action: "ส่งการ์ดแจ้งโอนสำหรับเพิ่มเป็นประกาศ",
+      action: "ส่งสรุปยอดและการ์ดชำระเงิน",
       details: { line_user_id: event.source?.userId, source: "line_command" },
     });
     return;
@@ -422,7 +426,7 @@ function normalizeLineCommand(value: unknown) {
 
 function buildSignupMessage(event: any, liffId: string) {
   const courts = [...(event.event_courts || [])]
-    .sort((a, b) => a.position - b.position)
+    .sort(compareCourtNames)
     .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`);
   const courtLines = courts.length ? courts : ["ยังไม่ได้ระบุคอร์ท"];
   const cardDate = thaiLongDate(event.event_date).replace("ที่ ", " ที่ ");
@@ -477,7 +481,7 @@ function buildSignupMessage(event: any, liffId: string) {
 function buildPaymentMessage(liffId: string) {
   return {
     type: "flex",
-    altText: "แจ้งโอนค่าแบด · ตรวจยอดค้างและแนบสลิป",
+    altText: "ชำระค่าแบด · ตรวจยอดค้างและแนบสลิป",
     contents: {
       type: "bubble",
       body: {
@@ -485,8 +489,8 @@ function buildPaymentMessage(liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          { type: "text", text: "💸 แจ้งโอนค่าแบด", weight: "bold", size: "xl", wrap: true },
-          { type: "text", text: "กดปุ่มด้านล่างเพื่อตรวจยอดค้าง เลือกรอบ และแนบสลิป ระบบจะเช็กยอดให้อัตโนมัติ", size: "sm", color: "#637064", wrap: true },
+          { type: "text", text: "💸 ชำระค่าแบด", weight: "bold", size: "xl", wrap: true },
+          { type: "text", text: "กดปุ่มด้านล่างเพื่อเลือกยอดที่ต้องชำระและแนบรูปสลิป", size: "sm", color: "#637064", wrap: true },
           { type: "separator" },
           { type: "text", text: "การ์ดนี้ใช้ได้ต่อเนื่องทุกรอบ สามารถเพิ่มเป็นประกาศของกลุ่มได้เลย", size: "xs", color: "#15966a", wrap: true },
         ],
@@ -500,7 +504,7 @@ function buildPaymentMessage(liffId: string) {
           color: "#15966a",
           action: {
             type: "uri",
-            label: "แจ้งโอน",
+            label: "ชำระเงิน",
             uri: `https://liff.line.me/${liffId}?mode=payment`,
           },
         }],
@@ -511,7 +515,7 @@ function buildPaymentMessage(liffId: string) {
 
 function buildRosterText(event: any, players: Array<{ name: string; arrivalTime: string | null }>) {
   const courts = [...(event.event_courts || [])]
-    .sort((a, b) => a.position - b.position)
+    .sort(compareCourtNames)
     .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)} น.`);
   const playerLines = players.length
     ? players.map((player, index) => `${index + 1}. ${player.name} : ${player.arrivalTime ? `${player.arrivalTime} น.` : "ยังไม่ระบุเวลา"}`)
@@ -523,6 +527,86 @@ function buildRosterText(event: any, players: Array<{ name: string; arrivalTime:
     ...playerLines,
     "🏸 ใครสนใจลงชื่อเพิ่มเติมสามารถคลิกที่ประกาศด้านบนได้เลยนะครับ",
   ].join("\n");
+}
+
+async function latestPaymentSummary(admin: any, clubId: string) {
+  const { data: latestPayment, error: latestPaymentError } = await admin.from("payments")
+    .select("event_id, billed_at")
+    .eq("club_id", clubId)
+    .not("billed_at", "is", null)
+    .order("billed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestPaymentError) throw latestPaymentError;
+  if (!latestPayment?.event_id) return null;
+
+  const eventId = latestPayment.event_id;
+  const [eventResult, courtsResult, paymentsResult, signupsResult, extrasResult] = await Promise.all([
+    admin.from("events").select("id, event_date, venue").eq("id", eventId).eq("club_id", clubId).maybeSingle(),
+    admin.from("event_courts").select("court_name, starts_at, ends_at, position").eq("event_id", eventId),
+    admin.from("payments").select("member_id, amount, billed_at").eq("event_id", eventId).not("billed_at", "is", null),
+    admin.from("signups").select("member_id, created_at").eq("event_id", eventId).order("created_at"),
+    admin.from("member_extra_charges").select("member_id, item_name, unit_price, quantity, created_at").eq("event_id", eventId).order("created_at"),
+  ]);
+  for (const result of [eventResult, courtsResult, paymentsResult, signupsResult, extrasResult]) {
+    if (result.error) throw result.error;
+  }
+  if (!eventResult.data) return null;
+
+  const memberIds = [...new Set((paymentsResult.data || []).map((payment: any) => payment.member_id))];
+  const { data: members, error: membersError } = memberIds.length
+    ? await admin.from("club_members").select("id, nickname, display_name, payment_exempt").in("id", memberIds)
+    : { data: [], error: null };
+  if (membersError) throw membersError;
+
+  const membersById = new Map((members || []).map((member: any) => [member.id, member]));
+  const signupOrder = new Map((signupsResult.data || []).map((signup: any, index: number) => [signup.member_id, index]));
+  const extrasByMember = new Map<string, any[]>();
+  for (const extra of extrasResult.data || []) {
+    const current = extrasByMember.get(extra.member_id) || [];
+    current.push(extra);
+    extrasByMember.set(extra.member_id, current);
+  }
+
+  const rows = (paymentsResult.data || [])
+    .filter((payment: any) => !membersById.get(payment.member_id)?.payment_exempt)
+    .sort((left: any, right: any) => {
+      const leftOrder = signupOrder.get(left.member_id) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = signupOrder.get(right.member_id) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || String(left.billed_at).localeCompare(String(right.billed_at));
+    })
+    .map((payment: any) => {
+      const member: any = membersById.get(payment.member_id);
+      return {
+        name: member?.nickname || member?.display_name || "สมาชิก",
+        amount: Number(payment.amount || 0),
+        extrasText: summarizePaymentExtras(extrasByMember.get(payment.member_id) || []),
+      };
+    });
+
+  return {
+    eventId,
+    text: buildPaymentSummary({
+      date: eventResult.data.event_date,
+      venue: eventResult.data.venue,
+      courts: courtsResult.data || [],
+      rows,
+    }),
+  };
+}
+
+function summarizePaymentExtras(charges: any[]) {
+  const grouped = new Map<string, { quantity: number; amount: number }>();
+  for (const charge of charges) {
+    const name = String(charge.item_name || "รายการอื่น");
+    const current = grouped.get(name) || { quantity: 0, amount: 0 };
+    current.quantity += Number(charge.quantity || 1);
+    current.amount += Number(charge.unit_price || 0) * Number(charge.quantity || 1);
+    grouped.set(name, current);
+  }
+  return [...grouped.entries()]
+    .map(([name, value]) => `${name}${value.quantity > 1 ? `×${value.quantity}` : ""} ${Math.round(value.amount).toLocaleString("th-TH")} บาท`)
+    .join(", ");
 }
 
 async function handlePaymentLiffRequest(payload: any) {
@@ -887,7 +971,7 @@ async function handleLiveQueueRequest(payload: any) {
       playersByMatch.set(player.match_id, rows);
     }
     const playingByCourt = new Map((matchesResult.data || []).filter((match: any) => match.status === "playing").map((match: any) => [match.court_id, match]));
-    const courts = (courtsResult.data || []).map((court: any) => {
+    const courts = [...(courtsResult.data || [])].sort(compareCourtNames).map((court: any) => {
       const match: any = playingByCourt.get(court.id);
       return { id: court.id, name: court.court_name, playing: Boolean(match), startedAt: match?.started_at || null, players: match ? (playersByMatch.get(match.id) || []) : [] };
     });
@@ -1360,7 +1444,7 @@ async function verifyLiffIdToken(idToken: string) {
 function eventForLiff(event: any) {
   const club = Array.isArray(event.clubs) ? event.clubs[0] : event.clubs;
   const courts = [...(event.event_courts || [])]
-    .sort((a, b) => a.position - b.position)
+    .sort(compareCourtNames)
     .map((court) => ({
       name: court.court_name,
       time: `${time(court.starts_at)}–${displayEndTime(court.ends_at)}`,

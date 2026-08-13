@@ -5,6 +5,7 @@ import {
   billableHours,
   buildLineSummary,
   calculateSettlement,
+  compareCourtNames,
   completedRoundsByMember,
   formatPlayedDuration,
   minutesBetween,
@@ -597,6 +598,25 @@ test("buildLineSummary uses the compact transfer format", () => {
   assert.match(summary, /2\.บอย = 50 บาท/);
   assert.doesNotMatch(summary, /ชั่วโมงผู้เล่น|ชม\.|จ่ายแล้ว|รวม 150/);
   assert.match(summary, /โอนเงิน : ธนาคารกสิกร\n389-2-36746-8\nณฐกฤต อินนะใจ$/);
+});
+
+test("court names are ordered naturally in the copied payment summary", () => {
+  const summary = buildLineSummary(makeEvent({
+    venue: "คอร์ทแบดเขาน้อย",
+    courts: [
+      { name: "คอร์ท 11", startsAt: "21:00", endsAt: "00:00" },
+      { name: "คอร์ท 8", startsAt: "22:00", endsAt: "00:30" },
+      { name: "คอร์ท 10", startsAt: "21:00", endsAt: "00:00" },
+      { name: "คอร์ท 9", startsAt: "22:00", endsAt: "00:30" },
+    ],
+    costs: [{ amount: 100 }],
+    attendance: [{ memberId: "a", name: "นิว", arrived: true, hours: 1 }],
+  }));
+
+  assert.ok(summary.indexOf("คอร์ท 8") < summary.indexOf("คอร์ท 9"));
+  assert.ok(summary.indexOf("คอร์ท 9") < summary.indexOf("คอร์ท 10"));
+  assert.ok(summary.indexOf("คอร์ท 10") < summary.indexOf("คอร์ท 11"));
+  assert.ok(compareCourtNames({ court_name: "คอร์ท 8" }, { court_name: "คอร์ท 11" }) < 0);
 });
 
 test("member summary hides rows that an admin has not finalized", () => {

@@ -1,3 +1,5 @@
+import { buildPaymentSummary, compareCourtNames } from "../supabase/functions/_shared/paymentSummary.js";
+
 export const STATUS_LABELS = {
   coming: "มา",
   not_coming: "ไม่มา",
@@ -567,24 +569,21 @@ function minutesToClock(minutes) {
 
 export function buildLineSummary(event) {
   const settlement = calculateSettlement(event);
-  const lines = [
-    `ค่าตีแบต ${formatThaiDate(event.date)}`,
-    event.venue || "",
-    ...(event.courts || []).map((court) => `${court.name} : ${court.startsAt}-${court.endsAt === "00:00" ? "24:00" : court.endsAt}`),
-    "",
-    ...settlement.rows.filter((row) => !row.paymentExempt && row.billingFinalized !== false).map((row, index) => {
-      const extraItems = summarizeExtraCharges(row.extraCharges || []);
-      const extras = extraItems ? ` (${extraItems})` : "";
-      return `${index + 1}.${row.name} = ${baht(row.roundedDue)} บาท${extras}`;
-    }),
-    "",
-    "โอนเงิน : ธนาคารกสิกร",
-    "389-2-36746-8",
-    "ณฐกฤต อินนะใจ",
-  ];
-
-  return lines.join("\n");
+  return buildPaymentSummary({
+    date: event.date,
+    venue: event.venue,
+    courts: event.courts || [],
+    rows: settlement.rows
+      .filter((row) => !row.paymentExempt && row.billingFinalized !== false)
+      .map((row) => ({
+        name: row.name,
+        amount: row.roundedDue,
+        extrasText: summarizeExtraCharges(row.extraCharges || []),
+      })),
+  });
 }
+
+export { compareCourtNames };
 
 function summarizeExtraCharges(charges) {
   const grouped = new Map();

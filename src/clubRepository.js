@@ -5,6 +5,7 @@ import {
   normalizePlayableSkillLevels,
 } from "./skillLevels.js";
 import { buildRandomTestPlayerProfiles } from "./randomTestPlayers.js";
+import { compareCourtNames } from "../supabase/functions/_shared/paymentSummary.js";
 
 function client() {
   if (!supabase) throw new Error("ยังไม่ได้ตั้งค่า Supabase");
@@ -239,7 +240,7 @@ export async function loadDashboard(clubId, eventId = null) {
   return {
     event,
     members: membersResult.data || [],
-    courts: courtsResult.data || [],
+    courts: [...(courtsResult.data || [])].sort(compareCourtNames),
     signups: signupsResult.data || [],
     attendance: attendanceResult.data || [],
     expenses: expensesResult.data || [],
@@ -266,7 +267,7 @@ export async function loadStaffDashboard(clubId) {
   return {
     event: data?.event || null,
     members: data?.members || [],
-    courts: data?.courts || [],
+    courts: [...(data?.courts || [])].sort(compareCourtNames),
     signups: data?.signups || [],
     attendance: data?.attendance || [],
     queuePlayers: data?.queuePlayers || [],
