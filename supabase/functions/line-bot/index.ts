@@ -486,7 +486,7 @@ function buildSignupMessage(event: any, liffId: string) {
 function buildPaymentMessage(liffId: string) {
   return {
     type: "flex",
-    altText: "ชำระค่าแบด · ตรวจยอดค้างและแนบสลิป",
+    altText: "ชำระค่าตีแบด · ตรวจยอดค้างและแนบสลิป",
     contents: {
       type: "bubble",
       body: {
@@ -494,7 +494,7 @@ function buildPaymentMessage(liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          { type: "text", text: "💸 ชำระค่าแบด", weight: "bold", size: "xl", wrap: true },
+          { type: "text", text: "💸 ชำระค่าตีแบด", weight: "bold", size: "xl", wrap: true },
           { type: "text", text: "กดปุ่มด้านล่างเพื่อเลือกยอดที่ต้องชำระและแนบรูปสลิป", size: "sm", color: "#637064", wrap: true },
         ],
       },

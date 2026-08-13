@@ -165,7 +165,7 @@ export default function LiffPaymentApp() {
     <PaymentShell>
       <header className="liff-payment-header">
         <ReceiptText size={25} />
-        <div><h1>ชำระค่าแบด</h1></div>
+        <div><h1>ชำระค่าตีแบด</h1></div>
       </header>
 
       <section className="liff-payment-card">
