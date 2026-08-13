@@ -496,8 +496,6 @@ function buildPaymentMessage(liffId: string) {
         contents: [
           { type: "text", text: "💸 ชำระค่าแบด", weight: "bold", size: "xl", wrap: true },
           { type: "text", text: "กดปุ่มด้านล่างเพื่อเลือกยอดที่ต้องชำระและแนบรูปสลิป", size: "sm", color: "#637064", wrap: true },
-          { type: "separator" },
-          { type: "text", text: "การ์ดนี้ใช้ได้ต่อเนื่องทุกรอบ สามารถเพิ่มเป็นประกาศของกลุ่มได้เลย", size: "xs", color: "#15966a", wrap: true },
         ],
       },
       footer: {
