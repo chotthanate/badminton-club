@@ -39,7 +39,9 @@ export default function LiffPaymentApp() {
         const response = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken(), ...testPayload });
         if (!active) return;
         setData(response);
-        setSelectedBeneficiaryIds([]);
+        const ownBeneficiary = response.beneficiaries.find((entry) =>
+          entry.id === response.profile.memberId && entry.payments.length);
+        setSelectedBeneficiaryIds(ownBeneficiary ? [ownBeneficiary.id] : []);
       } catch (nextError) {
         if (active) setError(nextError.message || "เปิดหน้าแจ้งโอนไม่สำเร็จ");
       } finally {
@@ -104,7 +106,7 @@ export default function LiffPaymentApp() {
     setResult(null);
     setError("");
     try {
-      const nextSlip = await recognizeSlip(file, setProgress);
+      const nextSlip = await recognizeSlip(file, setProgress, total);
       setSlip(nextSlip);
     } catch (nextError) {
       setError(nextError.message || "อ่านข้อความจากสลิปไม่สำเร็จ");

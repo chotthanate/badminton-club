@@ -48,30 +48,47 @@ function normalizeRecipientText(text) {
   return normalized;
 }
 
-export function parseSlipText(text) {
+export function parseSlipText(text, expectedAmount = null) {
   const source = String(text || "").replace(/[๐-๙]/g, (digit) => String("๐๑๒๓๔๕๖๗๘๙".indexOf(digit)));
   return {
-    amount: parseSlipAmount(source),
+    amount: parseSlipAmount(source, expectedAmount),
     date: parseSlipDate(source),
     reference: parseSlipReference(source),
   };
 }
 
-export function parseSlipAmount(text) {
+export function parseSlipAmount(text, expectedAmount = null) {
   const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const preferred = lines.filter((line) => /จำนวนเงิน|ยอดเงิน|ยอดโอน|amount|total|บาท|thb/i.test(line));
-  const candidates = [...preferred, ...lines].flatMap((line, lineIndex) => {
+  const candidates = lines.flatMap((originalLine, lineIndex) => {
+    const line = originalLine.replace(/(\d)\s*\.\s*(\d{1,2})(?!\d)/g, "$1.$2");
     const matches = line.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g) || [];
+    const hasAmountLabel = /จำนวนเงิน|ยอดเงิน|ยอดโอน|ยอดชำระ|amount|total/i.test(line);
+    const hasCurrency = /บาท|thb|฿/i.test(line);
+    const isStandaloneAmount = /^(?:ยอด\s*)?(?:฿|thb)?\s*\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:บาท|thb)?$/i.test(line);
+    const isFee = /ค่าธรรมเนียม|ค่าบริการ|fee/i.test(line);
+    const isAccountOrReference = /บัญชี|account|เลข(?:ที่)?(?:รายการ|อ้างอิง)|รหัสอ้างอิง|หมายเลขอ้างอิง|transaction|reference|ref\.?|x{2,}|\*{2,}/i.test(line);
+    const isDateOrTime = /วันที่|date|เวลา|time|\d{1,2}:\d{2}|\d{1,2}\s*(?:ม\.|ก\.|ส\.|เม\.|มิ\.|ต\.|พ\.|ธ\.)|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/i.test(line);
     return matches.map((value) => ({
       value: Number(value.replace(/,/g, "")),
-      priority: lineIndex < preferred.length ? 2 : 1,
-      hasMoneyKeyword: /จำนวนเงิน|ยอดเงิน|ยอดโอน|amount|total|บาท|thb/i.test(line),
+      lineIndex,
+      matchesExpected: Number.isFinite(Number(expectedAmount))
+        && Math.abs(Number(value.replace(/,/g, "")) - Number(expectedAmount)) < 0.009,
+      score: (hasAmountLabel ? 120 : 0)
+        + (hasCurrency ? 55 : 0)
+        + (isStandaloneAmount ? 90 : 0)
+        + (value.includes(".") ? 20 : 0)
+        - (isFee ? 250 : 0)
+        - (isAccountOrReference ? 250 : 0)
+        - (isDateOrTime ? 180 : 0),
     }));
-  }).filter((entry) => Number.isFinite(entry.value) && entry.value > 0 && entry.value < 1_000_000);
+  }).filter((entry) => Number.isFinite(entry.value)
+    && entry.value > 0
+    && entry.value < 1_000_000
+    && entry.score >= 55);
   candidates.sort((left, right) =>
-    Number(right.hasMoneyKeyword) - Number(left.hasMoneyKeyword)
-    || right.priority - left.priority
-    || right.value - left.value);
+    Number(right.matchesExpected) - Number(left.matchesExpected)
+    || right.score - left.score
+    || left.lineIndex - right.lineIndex);
   return candidates[0]?.value ?? null;
 }
 
@@ -105,7 +122,7 @@ export function normalizeSlipReference(value) {
   return normalized.length >= 6 && normalized.length <= 50 ? normalized : null;
 }
 
-export async function recognizeSlip(file, onProgress = () => {}) {
+export async function recognizeSlip(file, onProgress = () => {}, expectedAmount = null) {
   const optimized = await optimizeSlipImage(file);
   const { createWorker } = await import(/* @vite-ignore */ "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/+esm");
   const worker = await createWorker("tha+eng", 1, {
@@ -116,7 +133,7 @@ export async function recognizeSlip(file, onProgress = () => {}) {
   try {
     const result = await worker.recognize(optimized.blob);
     const text = result.data.text || "";
-    const parsed = parseSlipText(text);
+    const parsed = parseSlipText(text, expectedAmount);
     return {
       ...parsed,
       confidence: Number(result.data.confidence || 0),

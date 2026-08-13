@@ -684,6 +684,30 @@ test("slip parser reads Thai transfer amount and Buddhist date", () => {
   });
 });
 
+test("slip parser ignores masked account digits on a TTB slip", () => {
+  const result = parseSlipText([
+    "โอนเงินสำเร็จ",
+    "13 ส.ค. 69, 20:50 น.",
+    "175.00",
+    "ค่าธรรมเนียม 0.00",
+    "นาย นิกร วัฒนา",
+    "XXX-X-XX974-9",
+    "ttb",
+    "นาย ณฐกฤต อินนะใจ",
+    "XXX-X-XX159-5",
+    "SCB",
+    "รหัสอ้างอิง: 260813205048558617",
+  ].join("\n"));
+
+  assert.equal(result.amount, 175);
+  assert.equal(result.date, "2026-08-13");
+  assert.equal(result.reference, "260813205048558617");
+});
+
+test("slip parser uses the selected total as a safe hint between valid amount candidates", () => {
+  assert.equal(parseSlipText("974\n175", 175).amount, 175);
+});
+
 test("slip parser normalizes a transaction reference for duplicate protection", () => {
   assert.equal(parseSlipReference("เลขที่รายการ: 0100-20260725-ABC123"), "010020260725ABC123");
   assert.equal(parseSlipReference("Transaction ID\nAB12CD345678"), "AB12CD345678");
