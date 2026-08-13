@@ -686,17 +686,13 @@ async function handlePaymentLiffRequest(payload: any) {
     if (submitterError) throw submitterError;
 
     if (payload.action === "get_liff_payments") {
-      const { data: unlinkedMembers, error: memberError } = await admin.from("club_members")
-        .select("id, nickname, display_name")
+      const { data: clubMembers, error: memberError } = await admin.from("club_members")
+        .select("id, nickname, display_name, line_user_id")
         .eq("club_id", clubId)
         .eq("active", true)
-        .is("line_user_id", null)
         .order("created_at");
       if (memberError) throw memberError;
-      const beneficiaryIds = [
-        ...(submitter?.id ? [submitter.id] : []),
-        ...(unlinkedMembers || []).map((member) => member.id),
-      ];
+      const beneficiaryIds = (clubMembers || []).map((member) => member.id);
       const { data: duePayments, error: paymentError } = beneficiaryIds.length
         ? await admin.from("payments")
           .select("id, member_id, event_id, amount, events!inner(event_date, venue)")
@@ -721,21 +717,21 @@ async function handlePaymentLiffRequest(payload: any) {
         paymentsByMember.set(payment.member_id, rows);
       }
       const beneficiaries = [];
-      if (submitter?.id) {
-        beneficiaries.push({
-          id: submitter.id,
-          name: submitter.nickname || submitter.display_name || "ตัวเอง",
-          isSelf: true,
-          payments: paymentsByMember.get(submitter.id) || [],
-        });
-      }
-      for (const member of unlinkedMembers || []) {
+      const orderedMembers = [...(clubMembers || [])].sort((left, right) => {
+        if (left.id === submitter?.id) return -1;
+        if (right.id === submitter?.id) return 1;
+        const leftName = left.nickname || left.display_name || "";
+        const rightName = right.nickname || right.display_name || "";
+        return leftName.localeCompare(rightName, "th");
+      });
+      for (const member of orderedMembers) {
         const payments = paymentsByMember.get(member.id) || [];
         if (!payments.length) continue;
         beneficiaries.push({
           id: member.id,
           name: member.nickname || member.display_name || "สมาชิก",
-          isSelf: false,
+          lineName: member.display_name || "",
+          isSelf: member.id === submitter?.id,
           payments,
         });
       }
@@ -753,32 +749,31 @@ async function handlePaymentLiffRequest(payload: any) {
     if (!submitter?.id) {
       return json({ error: "ยังไม่พบชื่อของคุณในระบบ กรุณาลงชื่อเล่นแบดอย่างน้อย 1 ครั้งก่อนแจ้งโอน" }, 409);
     }
-    const beneficiaryMemberId = String(payload.beneficiaryMemberId || "");
-    const paymentIds = [...new Set(Array.isArray(payload.paymentIds) ? payload.paymentIds.map(String) : [])].slice(0, 12);
-    if (!beneficiaryMemberId || !paymentIds.length) {
+    const paymentIds = [...new Set(Array.isArray(payload.paymentIds) ? payload.paymentIds.map(String) : [])].slice(0, 60);
+    if (!paymentIds.length) {
       return json({ error: "กรุณาเลือกผู้เล่นและรอบที่ต้องการชำระ" }, 400);
     }
-    const { data: beneficiary, error: beneficiaryError } = await admin.from("club_members")
-      .select("id, nickname, display_name, line_user_id")
-      .eq("club_id", clubId)
-      .eq("id", beneficiaryMemberId)
-      .eq("active", true)
-      .maybeSingle();
-    if (beneficiaryError) throw beneficiaryError;
-    if (!beneficiary || (beneficiary.id !== submitter.id && beneficiary.line_user_id !== null)) {
-      return json({ error: "สามารถจ่ายให้ตัวเองหรือเพื่อนที่ไม่ได้เชื่อม LINE เท่านั้น" }, 403);
-    }
-
     const { data: payments, error: paymentError } = await admin.from("payments")
       .select("id, event_id, member_id, amount, paid_at, billed_at, events!inner(event_date)")
       .eq("club_id", clubId)
-      .eq("member_id", beneficiary.id)
       .in("id", paymentIds);
     if (paymentError) throw paymentError;
     if ((payments || []).length !== paymentIds.length
       || (payments || []).some((payment) => payment.paid_at || !payment.billed_at)) {
       return json({ error: "ยอดที่เลือกมีการเปลี่ยนแปลง กรุณาเปิดหน้าแจ้งโอนใหม่" }, 409);
     }
+    const beneficiaryMemberIds = [...new Set((payments || []).map((payment) => String(payment.member_id)))];
+    const { data: beneficiaries, error: beneficiaryError } = await admin.from("club_members")
+      .select("id, nickname, display_name, line_user_id")
+      .eq("club_id", clubId)
+      .eq("active", true)
+      .in("id", beneficiaryMemberIds);
+    if (beneficiaryError) throw beneficiaryError;
+    if ((beneficiaries || []).length !== beneficiaryMemberIds.length) {
+      return json({ error: "มีผู้เล่นที่เลือกไม่อยู่ในระบบแล้ว กรุณาเปิดหน้าชำระเงินใหม่" }, 409);
+    }
+    const primaryBeneficiary = (beneficiaries || []).find((member) => member.id === submitter.id)
+      || (beneficiaries || [])[0];
 
     const slip = payload.slip || {};
     const slipHash = String(slip.hash || "").trim().toLowerCase();
@@ -836,7 +831,6 @@ async function handlePaymentLiffRequest(payload: any) {
     const { data: replacedSlips, error: replacedSlipError } = await admin.from("payment_slips")
       .select("id, storage_path")
       .eq("club_id", clubId)
-      .eq("beneficiary_member_id", beneficiary.id)
       .eq("status", "pending")
       .overlaps("payment_ids", paymentIds);
     if (replacedSlipError) throw replacedSlipError;
@@ -893,7 +887,8 @@ async function handlePaymentLiffRequest(payload: any) {
       id: slipId,
       club_id: clubId,
       submitted_by_member_id: submitter.id,
-      beneficiary_member_id: beneficiary.id,
+      beneficiary_member_id: primaryBeneficiary.id,
+      beneficiary_member_ids: beneficiaryMemberIds,
       payment_ids: paymentIds,
       expected_amount: expectedAmount,
       transferred_amount: transferredAmount,
@@ -952,7 +947,11 @@ async function handlePaymentLiffRequest(payload: any) {
         .is("paid_at", null);
     }
 
-    const beneficiaryName = beneficiary.nickname || beneficiary.display_name || "สมาชิก";
+    const beneficiaryNames = beneficiaryMemberIds.map((memberId) => {
+      const member = (beneficiaries || []).find((entry) => entry.id === memberId);
+      return member?.nickname || member?.display_name || "สมาชิก";
+    });
+    const beneficiaryName = beneficiaryNames.join(", ");
     await admin.from("audit_logs").insert({
       club_id: clubId,
       actor_id: null,
@@ -962,7 +961,8 @@ async function handlePaymentLiffRequest(payload: any) {
       details: {
         source: "liff_payment",
         submitted_by_member_id: submitter.id,
-        beneficiary_member_id: beneficiary.id,
+        beneficiary_member_id: primaryBeneficiary.id,
+        beneficiary_member_ids: beneficiaryMemberIds,
         payment_ids: paymentIds,
         expected_amount: expectedAmount,
         transferred_amount: transferredAmount,

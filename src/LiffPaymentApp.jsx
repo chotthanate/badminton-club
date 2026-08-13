@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, Copy, ImagePlus, LoaderCircle, ReceiptText, ShieldCheck, UserRound, Users } from "lucide-react";
+import { Check, Copy, ImagePlus, LoaderCircle, ReceiptText, ShieldCheck, UserPlus, UserRound, Users, X } from "lucide-react";
 import { baht, formatThaiDate } from "./badmintonLogic.js";
 import { getLiffTestContext } from "./liffSignup.js";
+import { selectedPaymentTotal } from "./paymentSelection.js";
 import { classifySlipRecipient, PAYMENT_RECIPIENT_NAME, recognizeSlip } from "./paymentSlip.js";
 
 const PAYMENT_BANK_NAME = "ธนาคารไทยพาณิชย์";
@@ -13,6 +14,7 @@ export default function LiffPaymentApp() {
   const testPayload = { testMode, testClubId };
   const [data, setData] = useState(null);
   const [beneficiaryId, setBeneficiaryId] = useState("");
+  const [selectedBeneficiaryIds, setSelectedBeneficiaryIds] = useState([]);
   const [selectedPaymentIds, setSelectedPaymentIds] = useState([]);
   const [slip, setSlip] = useState(null);
   const [progress, setProgress] = useState(0);
@@ -37,7 +39,10 @@ export default function LiffPaymentApp() {
         const response = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken(), ...testPayload });
         if (!active) return;
         setData(response);
-        setBeneficiaryId(response.profile.memberId || response.beneficiaries[0]?.id || "");
+        const initialBeneficiary = response.beneficiaries.find((entry) => entry.id === response.profile.memberId && entry.payments.length)
+          || response.beneficiaries.find((entry) => entry.payments.length)
+          || null;
+        setSelectedBeneficiaryIds(initialBeneficiary ? [initialBeneficiary.id] : []);
       } catch (nextError) {
         if (active) setError(nextError.message || "เปิดหน้าแจ้งโอนไม่สำเร็จ");
       } finally {
@@ -48,12 +53,12 @@ export default function LiffPaymentApp() {
     return () => { active = false; };
   }, []);
 
-  const currentBeneficiary = data?.beneficiaries.find((entry) => entry.id === beneficiaryId) || null;
-  const availablePayments = currentBeneficiary?.payments || [];
-  const selectedPayments = availablePayments.filter((payment) => selectedPaymentIds.includes(payment.id));
+  const selectedBeneficiaries = data?.beneficiaries.filter((entry) => selectedBeneficiaryIds.includes(entry.id)) || [];
+  const selectableBeneficiaries = data?.beneficiaries.filter((entry) => entry.payments.length && !selectedBeneficiaryIds.includes(entry.id)) || [];
+  const availablePayments = selectedBeneficiaries.flatMap((entry) => entry.payments);
   const total = useMemo(
-    () => selectedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
-    [selectedPayments],
+    () => selectedPaymentTotal(selectedBeneficiaries, selectedPaymentIds),
+    [selectedBeneficiaries, selectedPaymentIds],
   );
   const recipientStatus = slip ? classifySlipRecipient(slip.text) : "match";
   const amountDifference = slip?.amount === null || slip?.amount === undefined
@@ -62,9 +67,19 @@ export default function LiffPaymentApp() {
   const amountMismatch = amountDifference !== null && Math.abs(amountDifference) >= 0.009;
   const futureTransferDate = Boolean(slip?.date && slip.date > todayIsoLocal());
 
-  function selectBeneficiary(nextId) {
-    setBeneficiaryId(nextId);
-    setSelectedPaymentIds([]);
+  function addBeneficiary(nextId) {
+    if (!nextId) return;
+    setSelectedBeneficiaryIds((current) => current.includes(nextId) ? current : [...current, nextId]);
+    setBeneficiaryId("");
+    setSlip(null);
+    setResult(null);
+    setError("");
+  }
+
+  function removeBeneficiary(memberId) {
+    const paymentIds = new Set(data?.beneficiaries.find((entry) => entry.id === memberId)?.payments.map((payment) => payment.id) || []);
+    setSelectedBeneficiaryIds((current) => current.filter((id) => id !== memberId));
+    setSelectedPaymentIds((current) => current.filter((id) => !paymentIds.has(id)));
     setSlip(null);
     setResult(null);
     setError("");
@@ -102,7 +117,7 @@ export default function LiffPaymentApp() {
   }
 
   async function submitPayment() {
-    if (!beneficiaryId || !selectedPaymentIds.length) {
+    if (!selectedPaymentIds.length) {
       setError("กรุณาเลือกรอบที่ต้องการชำระ");
       return;
     }
@@ -115,7 +130,8 @@ export default function LiffPaymentApp() {
     try {
       const response = await callPaymentApi("submit_liff_payment", {
         idToken: window.liff.getIDToken(),
-        beneficiaryMemberId: beneficiaryId,
+        beneficiaryMemberId: selectedBeneficiaryIds[0] || "",
+        beneficiaryMemberIds: selectedBeneficiaryIds,
         paymentIds: selectedPaymentIds,
         slip: {
           amount: slip.amount,
@@ -133,7 +149,11 @@ export default function LiffPaymentApp() {
       const refreshed = await callPaymentApi("get_liff_payments", { idToken: window.liff.getIDToken(), ...testPayload });
       setData(refreshed);
       setSlip(null);
-      if (response.status === "auto_paid") setSelectedPaymentIds([]);
+      if (response.status === "auto_paid") {
+        setSelectedPaymentIds([]);
+        setSelectedBeneficiaryIds((current) => current.filter((memberId) =>
+          refreshed.beneficiaries.some((entry) => entry.id === memberId && entry.payments.length)));
+      }
     } catch (nextError) {
       setError(nextError.message || "ตรวจสลิปไม่สำเร็จ");
     } finally {
@@ -171,17 +191,21 @@ export default function LiffPaymentApp() {
       <section className="liff-payment-card">
         <div className="liff-payment-profile"><UserRound size={20} /><span>เข้าใช้ด้วย LINE</span><strong>{data.profile.nickname || data.profile.name}</strong></div>
         <label className="liff-beneficiary-select">
-          <span>เลือกผู้เล่น</span>
-          <select onChange={(event) => selectBeneficiary(event.target.value)} value={beneficiaryId}>
-            {data.beneficiaries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+          <span>เพิ่มผู้เล่นที่ต้องการชำระ</span>
+          <select disabled={!selectableBeneficiaries.length} onChange={(event) => addBeneficiary(event.target.value)} value={beneficiaryId}>
+            <option value="">{selectableBeneficiaries.length ? "เลือกชื่อผู้เล่น" : "เลือกผู้เล่นครบแล้ว"}</option>
+            {selectableBeneficiaries.map((entry) => <option key={entry.id} value={entry.id}>{beneficiaryLabel(entry)}</option>)}
           </select>
-          <small><Users size={13} /> รายชื่อจ่ายแทนแสดงเฉพาะคนที่ไม่ได้เชื่อมบัญชี LINE</small>
+          <small><Users size={13} /> เลือกได้หลายคน แล้วโอนยอดรวมเพียงครั้งเดียว</small>
         </label>
       </section>
 
       <section className="liff-payment-card">
-        <div className="liff-payment-section-title"><div><strong>เลือกรอบที่ต้องการจ่าย</strong><span>{availablePayments.length} รอบค้าง</span></div></div>
-        {availablePayments.length ? <div className="liff-due-list">{availablePayments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} บาท</b></label>)}</div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? "ยังไม่มียอดค้างทดลอง" : "ไม่มียอดค้างชำระ"}</strong><span>{testMode ? "ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้" : "ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้"}</span></div>}
+        <div className="liff-payment-section-title"><div><strong>เลือกรอบที่ต้องการจ่าย</strong><span>{selectedBeneficiaries.length} คน · {availablePayments.length} รอบค้าง</span></div></div>
+        {availablePayments.length ? <div className="liff-beneficiary-groups">{selectedBeneficiaries.map((entry) => <section className="liff-beneficiary-group" key={entry.id}>
+          <header><div><UserPlus size={16} /><strong>{beneficiaryLabel(entry)}</strong></div><button aria-label={`นำ ${entry.name} ออกจากรายการ`} onClick={() => removeBeneficiary(entry.id)} type="button"><X size={16} /></button></header>
+          <div className="liff-due-list">{entry.payments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} บาท</b></label>)}</div>
+        </section>)}</div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? "ยังไม่มียอดค้างทดลอง" : "ไม่มียอดค้างชำระ"}</strong><span>{testMode ? "ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้" : "ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้"}</span></div>}
         {availablePayments.length ? <>
           <div className="liff-payment-bank">
             <strong>{PAYMENT_BANK_NAME} {PAYMENT_BANK_ACCOUNT_DISPLAY}</strong>
@@ -228,6 +252,12 @@ async function callPaymentApi(action, payload) {
   const responseData = await response.json().catch(() => ({}));
   if (!response.ok || responseData.error) throw new Error(responseData.error || "เชื่อมต่อระบบไม่สำเร็จ");
   return responseData;
+}
+
+function beneficiaryLabel(entry) {
+  const lineName = String(entry?.lineName || "").trim();
+  const name = String(entry?.name || "สมาชิก").trim();
+  return lineName && lineName !== name ? `${name} · LINE: ${lineName}` : name;
 }
 
 function todayIsoLocal(now = new Date()) {

@@ -4270,6 +4270,58 @@
   font-size: 10px;
 }
 
+.liff-beneficiary-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.liff-beneficiary-group {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid #d4dfd2;
+  border-radius: 12px;
+  background: #f6faf6;
+}
+
+.liff-beneficiary-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.liff-beneficiary-group > header > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #0f7a52;
+}
+
+.liff-beneficiary-group > header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liff-beneficiary-group > header button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #efc9c4;
+  border-radius: 9px;
+  background: #fff8f7;
+  color: #b62d25;
+}
+
+.liff-beneficiary-group .liff-due-list > label {
+  background: #fff;
+}
+
 .liff-payment-section-title {
   display: flex;
   align-items: center;

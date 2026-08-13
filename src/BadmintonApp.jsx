@@ -2291,7 +2291,11 @@ function mapDashboardToEvent(dashboard) {
     attendance,
     paymentSlips: (dashboard.paymentSlips || []).map((slip) => ({
       ...slip,
-      beneficiaryName: memberName(membersById.get(slip.beneficiary_member_id)) || "สมาชิก",
+      beneficiaryName: [...new Set((slip.beneficiary_member_ids?.length
+        ? slip.beneficiary_member_ids
+        : [slip.beneficiary_member_id])
+        .map((memberId) => memberName(membersById.get(memberId)))
+        .filter(Boolean))].join(", ") || "สมาชิก",
     })),
     extraCosts,
     costs: [
