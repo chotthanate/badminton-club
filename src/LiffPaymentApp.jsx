@@ -4,9 +4,9 @@ import { baht, formatThaiDate } from "./badmintonLogic.js";
 import { getLiffTestContext } from "./liffSignup.js";
 import { classifySlipRecipient, PAYMENT_RECIPIENT_NAME, recognizeSlip } from "./paymentSlip.js";
 
-const PAYMENT_BANK_NAME = "ธนาคารกสิกรไทย";
-const PAYMENT_BANK_ACCOUNT_DISPLAY = "389-2-36746-8";
-const PAYMENT_BANK_ACCOUNT_COPY = "3892367468";
+const PAYMENT_BANK_NAME = "ธนาคารไทยพาณิชย์";
+const PAYMENT_BANK_ACCOUNT_DISPLAY = "408-6-96159-5";
+const PAYMENT_BANK_ACCOUNT_COPY = "4086961595";
 
 export default function LiffPaymentApp() {
   const { testMode, testClubId } = getLiffTestContext(window.location.search);

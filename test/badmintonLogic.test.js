@@ -617,7 +617,7 @@ test("buildLineSummary uses the compact transfer format", () => {
   assert.match(summary, /1\.แอดมิน = 100 บาท/);
   assert.match(summary, /2\.บอย = 50 บาท/);
   assert.doesNotMatch(summary, /ชั่วโมงผู้เล่น|ชม\.|จ่ายแล้ว|รวม 150/);
-  assert.match(summary, /โอนเงิน : ธนาคารกสิกร\n389-2-36746-8\nณฐกฤต อินนะใจ$/);
+  assert.match(summary, /โอนเงิน : ธนาคารไทยพาณิชย์\n408-6-96159-5\nณฐกฤต อินนะใจ$/);
 });
 
 test("court names are ordered naturally in the copied payment summary", () => {

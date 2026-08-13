@@ -22,8 +22,8 @@ export function buildPaymentSummary({ date, venue, courts = [], rows = [] }) {
     "",
     ...rows.map((row, index) => `${index + 1}.${row.name} = ${formatBaht(row.amount)} บาท${row.extrasText ? ` (${row.extrasText})` : ""}`),
     "",
-    "โอนเงิน : ธนาคารกสิกร",
-    "389-2-36746-8",
+    "โอนเงิน : ธนาคารไทยพาณิชย์",
+    "408-6-96159-5",
     "ณฐกฤต อินนะใจ",
   ].join("\n");
 }
