@@ -4259,10 +4259,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 11px 12px;
-  border: 1px solid #d9e2d7;
-  border-radius: 10px;
-  background: #f8fbf8;
+  padding: 7px 2px 3px;
 }
 
 .liff-payment-bank > strong {
@@ -4293,9 +4290,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 14px;
-  border-radius: 11px;
-  background: #e8f6ee;
+  padding: 5px 2px 3px;
   color: #0f7a52;
 }
 
