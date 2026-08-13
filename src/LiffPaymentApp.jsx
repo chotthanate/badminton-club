@@ -1,8 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, ImagePlus, LoaderCircle, ReceiptText, ShieldCheck, UserRound, Users } from "lucide-react";
+import { Check, Copy, ImagePlus, LoaderCircle, ReceiptText, ShieldCheck, UserRound, Users } from "lucide-react";
 import { baht, formatThaiDate } from "./badmintonLogic.js";
 import { getLiffTestContext } from "./liffSignup.js";
 import { classifySlipRecipient, PAYMENT_RECIPIENT_NAME, recognizeSlip } from "./paymentSlip.js";
+
+const PAYMENT_BANK_NAME = "ธนาคารกสิกรไทย";
+const PAYMENT_BANK_ACCOUNT_DISPLAY = "389-2-36746-8";
+const PAYMENT_BANK_ACCOUNT_COPY = "3892367468";
 
 export default function LiffPaymentApp() {
   const { testMode, testClubId } = getLiffTestContext(window.location.search);
@@ -15,6 +19,7 @@ export default function LiffPaymentApp() {
   const [loading, setLoading] = useState(true);
   const [reading, setReading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [accountCopied, setAccountCopied] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
 
@@ -143,6 +148,16 @@ export default function LiffPaymentApp() {
     window.setTimeout(() => document.querySelector(".liff-slip-picker")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   }
 
+  async function copyBankAccount() {
+    try {
+      await copyTextToClipboard(PAYMENT_BANK_ACCOUNT_COPY);
+      setAccountCopied(true);
+      window.setTimeout(() => setAccountCopied(false), 1800);
+    } catch (nextError) {
+      setError(nextError.message || "คัดลอกเลขบัญชีไม่สำเร็จ");
+    }
+  }
+
   if (loading) return <PaymentShell><div className="liff-loading"><LoaderCircle size={30} /><strong>กำลังเปิดยอดค้างชำระ...</strong></div></PaymentShell>;
   if (error && !data) return <PaymentShell><div className="liff-error"><strong>เปิดหน้าแจ้งโอนไม่ได้</strong><span>{error}</span></div></PaymentShell>;
 
@@ -150,23 +165,31 @@ export default function LiffPaymentApp() {
     <PaymentShell>
       <header className="liff-payment-header">
         <ReceiptText size={25} />
-        <div><h1>แจ้งโอนค่าแบด</h1><p>ตรวจสลิปเบื้องต้นอัตโนมัติจากชื่อผู้รับ ยอด วันที่ และเลขอ้างอิง</p></div>
+        <div><h1>ชำระค่าแบด</h1></div>
       </header>
 
       <section className="liff-payment-card">
         <div className="liff-payment-profile"><UserRound size={20} /><span>เข้าใช้ด้วย LINE</span><strong>{data.profile.nickname || data.profile.name}</strong></div>
         <label className="liff-beneficiary-select">
-          <span>ต้องการจ่ายให้ใคร</span>
+          <span>เลือกผู้เล่น</span>
           <select onChange={(event) => selectBeneficiary(event.target.value)} value={beneficiaryId}>
-            {data.beneficiaries.map((entry) => <option key={entry.id} value={entry.id}>{entry.isSelf ? `ตัวเอง · ${entry.name}` : `จ่ายแทนเพื่อน · ${entry.name}`}</option>)}
+            {data.beneficiaries.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
           </select>
           <small><Users size={13} /> รายชื่อจ่ายแทนแสดงเฉพาะคนที่ไม่ได้เชื่อมบัญชี LINE</small>
         </label>
       </section>
 
       <section className="liff-payment-card">
-        <div className="liff-payment-section-title"><div><strong>เลือกรอบที่ต้องการจ่าย</strong><span>{availablePayments.length} รอบค้าง</span></div><b>{baht(total)} บาท</b></div>
+        <div className="liff-payment-section-title"><div><strong>เลือกรอบที่ต้องการจ่าย</strong><span>{availablePayments.length} รอบค้าง</span></div></div>
         {availablePayments.length ? <div className="liff-due-list">{availablePayments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} บาท</b></label>)}</div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? "ยังไม่มียอดค้างทดลอง" : "ไม่มียอดค้างชำระ"}</strong><span>{testMode ? "ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้" : "ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้"}</span></div>}
+        {availablePayments.length ? <>
+          <div className="liff-payment-bank">
+            <strong>{PAYMENT_BANK_NAME} {PAYMENT_BANK_ACCOUNT_DISPLAY}</strong>
+            <button onClick={copyBankAccount} type="button"><Copy size={16} /> {accountCopied ? "คัดลอกแล้ว" : "คัดลอก"}</button>
+          </div>
+          <div className="liff-payment-total"><span>ยอดที่ต้องชำระ</span><strong>{baht(total)} บาท</strong></div>
+          <p className="liff-payment-amount-note">จำนวนเงินในสลิปต้องตรงกับยอดที่ต้องชำระเท่านั้น</p>
+        </> : null}
       </section>
 
       {availablePayments.length ? <section className="liff-payment-card">
@@ -212,4 +235,26 @@ function todayIsoLocal(now = new Date()) {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // LINE's in-app browser can deny Clipboard API even on HTTPS.
+    }
+  }
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  input.setSelectionRange(0, value.length);
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (!copied) throw new Error("คัดลอกไม่สำเร็จ กรุณาลองเปิดผ่าน Safari");
 }

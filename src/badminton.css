@@ -4254,6 +4254,73 @@
   white-space: nowrap;
 }
 
+.liff-payment-bank {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid #d9e2d7;
+  border-radius: 10px;
+  background: #f8fbf8;
+}
+
+.liff-payment-bank > strong {
+  min-width: 0;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.liff-payment-bank button {
+  min-height: 42px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 11px;
+  border: 1px solid #9fc5aa;
+  border-radius: 9px;
+  background: #fff;
+  color: #0f7a52;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.liff-payment-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  border-radius: 11px;
+  background: #e8f6ee;
+  color: #0f7a52;
+}
+
+.liff-payment-total span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.liff-payment-total strong {
+  font-size: 23px;
+  white-space: nowrap;
+}
+
+.liff-payment-amount-note {
+  margin: -2px 0 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #fff4c9;
+  color: #765a08;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .liff-due-list {
   display: grid;
   gap: 7px;
