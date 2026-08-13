@@ -446,6 +446,20 @@ export async function updateCourt(courtId, eventId, patch) {
   await syncEventTimes(eventId);
 }
 
+export async function updateCourts(eventId, courts) {
+  const results = await Promise.all(courts.map((court) => client()
+    .from("event_courts")
+    .update({
+      court_name: court.court_name,
+      starts_at: court.starts_at,
+      ends_at: court.ends_at,
+    })
+    .eq("id", court.id)
+    .eq("event_id", eventId)));
+  results.forEach((result) => throwIfError(result.error));
+  await syncEventTimes(eventId);
+}
+
 export async function removeCourt(courtId, eventId) {
   const { error } = await client().from("event_courts").delete().eq("id", courtId);
   throwIfError(error);

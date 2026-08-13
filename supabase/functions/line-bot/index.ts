@@ -230,8 +230,8 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
 
     if (event.type === "message" && event.message?.type === "text") {
       const command = normalizeLineCommand(event.message.text);
-      const groupCommands = ["เปิดลงชื่อ", "ลงชื่อ", "รายชื่อตีแบดวันนี้", "แจ้งโอน", "ชำระเงิน"];
-      const privateCommands = ["ลงชื่อ", "รายชื่อตีแบดวันนี้", "แจ้งโอน", "ชำระเงิน"];
+      const groupCommands = ["เปิดลงชื่อ", "ลงชื่อ", "รายชื่อตีแบดวันนี้", "แจ้งโอน", "ชำระเงิน", "คิว"];
+      const privateCommands = ["ลงชื่อ", "รายชื่อตีแบดวันนี้", "แจ้งโอน", "ชำระเงิน", "คิว"];
       const isPrivateChat = event.source?.type === "user" && !groupId;
       if (isPrivateChat && command === "เปิดลงชื่อ") {
         await replyLine(event.replyToken, "คำสั่งเปิดลงชื่อใช้ในกลุ่มหลักเท่านั้น หากต้องการดูตัวอย่างการ์ดให้พิมพ์ ลงชื่อ", lineToken);
@@ -345,6 +345,25 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
     await replyLineMessages(event.replyToken, [
       buildSignupMessage(currentEvent, liffId),
     ], lineToken);
+    return;
+  }
+
+  if (command === "คิว") {
+    const currentEvent = await latestEvent(admin, club.id, eventFields, "open");
+    if (!currentEvent) {
+      await replyLine(event.replyToken, "ตอนนี้ยังไม่มีรอบที่เปิดใช้งานสนามและคิว", lineToken);
+      return;
+    }
+    await replyLineMessages(event.replyToken, [
+      buildLiveQueueMessage(currentEvent, liffId),
+    ], lineToken);
+    await admin.from("audit_logs").insert({
+      club_id: club.id,
+      event_id: currentEvent.id,
+      actor_id: null,
+      action: "ส่งการ์ดดูสนามและผู้เล่นคิวถัดไป",
+      details: { line_user_id: event.source?.userId, source: "line_command" },
+    });
     return;
   }
 
@@ -509,6 +528,40 @@ function buildPaymentMessage(liffId: string) {
             type: "uri",
             label: "ชำระเงิน",
             uri: `https://liff.line.me/${liffId}?mode=payment`,
+          },
+        }],
+      },
+    },
+  };
+}
+
+function buildLiveQueueMessage(event: any, liffId: string) {
+  return {
+    type: "flex",
+    altText: "ดูสนามและผู้เล่นคิวถัดไป",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "md",
+        contents: [
+          { type: "text", text: "🏸 สนามและคิว", weight: "bold", size: "xl", wrap: true },
+          { type: "text", text: event.venue || "Headshot Badminton", size: "sm", color: "#637064", wrap: true },
+          { type: "text", text: "ดูผู้เล่นในแต่ละสนาม เวลาเล่น คิวถัดไป และผู้เล่นที่กำลังรอ", size: "sm", color: "#637064", wrap: true },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [{
+          type: "button",
+          style: "primary",
+          color: "#15966a",
+          action: {
+            type: "uri",
+            label: "ดูสนามและผู้เล่นคิวถัดไป",
+            uri: `https://liff.line.me/${liffId}?liff=live&event_id=${event.id}`,
           },
         }],
       },

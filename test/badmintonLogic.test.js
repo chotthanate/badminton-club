@@ -572,6 +572,26 @@ test("shuttlecock checkpoints do not charge late arrivals for earlier shuttlecoc
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [285, 95]);
 });
 
+test("shuttlecock cost falls back to played hours when no timed checkpoint was recorded", () => {
+  const result = calculateSettlement({
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    courts: [],
+    courtHourlyRate: 200,
+    shuttlecockCount: 4,
+    shuttlecockUnitPrice: 100,
+    shuttlecockCheckpoints: [],
+    extraCosts: [],
+    attendance: [
+      { memberId: "full", name: "เล่นสามชั่วโมง", arrived: true, arrivedAt: "21:00", leftAt: "00:00", playedMinutes: 180, billingPercentage: 100 },
+      { memberId: "late", name: "เล่นหนึ่งชั่วโมง", arrived: true, arrivedAt: "23:00", leftAt: "00:00", playedMinutes: 60, billingPercentage: 100 },
+    ],
+  });
+
+  assert.deepEqual(result.rows.map((row) => row.roundedDue), [300, 100]);
+  assert.equal(result.rows.reduce((sum, row) => sum + row.roundedDue, 0), 400);
+});
+
 test("buildLineSummary lists personal items instead of a generic extras total", () => {
   const summary = buildLineSummary(makeEvent({
     costs: [{ amount: 100 }],

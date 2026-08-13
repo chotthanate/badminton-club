@@ -548,13 +548,18 @@
 
 .badminton-court-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) 125px 125px 42px 42px;
+  grid-template-columns: minmax(140px, 1fr) 125px 125px 42px;
   gap: 8px;
   align-items: end;
   padding: 9px;
   border: 1px solid #e3eadf;
   border-radius: 9px;
   background: #fbfcf8;
+}
+
+.badminton-courts-save-all {
+  width: 100%;
+  min-height: 46px;
 }
 
 .badminton-court-row.is-new {
@@ -1995,7 +2000,7 @@
 
 .badminton-court-row,
 .badminton-court-row.is-new {
-  grid-template-columns: minmax(100px, 1fr) 112px 112px 38px 38px;
+  grid-template-columns: minmax(100px, 1fr) 112px 112px 38px;
   gap: 6px;
   padding: 6px;
 }
@@ -2562,7 +2567,7 @@
 
   .badminton-court-row,
   .badminton-court-row.is-new {
-    grid-template-columns: minmax(76px, 1fr) 72px 72px 34px 34px;
+    grid-template-columns: minmax(76px, 1fr) 72px 72px 34px;
     gap: 4px;
   }
 
@@ -3013,7 +3018,7 @@
 @media (max-width: 760px) {
   .badminton-court-row,
   .badminton-court-row.is-new {
-    grid-template-columns: minmax(76px, 1fr) 72px 72px 36px 36px;
+    grid-template-columns: minmax(76px, 1fr) 72px 72px 36px;
   }
 
   .badminton-court-row.is-new {
@@ -3431,7 +3436,7 @@
   gap: 7px;
 }
 
-.badminton-exempt-member-form input,
+.badminton-exempt-member-form select,
 .badminton-exempt-member-form button {
   min-height: 42px;
 }
@@ -3458,6 +3463,45 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.badminton-exempt-member-list > span > span {
+  display: grid;
+  min-width: 0;
+}
+
+.badminton-exempt-member-list small {
+  color: #637064;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.badminton-exempt-cost-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-top: 1px solid #dfe8dc;
+  background: #f5f8f3;
+  border-radius: 10px;
+}
+
+.badminton-exempt-cost-summary span {
+  display: grid;
+  gap: 3px;
+}
+
+.badminton-exempt-cost-summary small {
+  color: #637064;
+  font-size: 11px;
+}
+
+.badminton-exempt-cost-summary b {
+  flex: 0 0 auto;
+  color: #0f7a52;
+  font-size: 20px;
 }
 
 .badminton-exempt-member-list button {
