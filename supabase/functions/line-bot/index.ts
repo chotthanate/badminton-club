@@ -228,9 +228,14 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
     }
     if (groupId && configuredClub.line_group_id !== groupId) continue;
 
-    if (event.type === "message" && event.message?.type === "text" && groupId) {
+    if (event.type === "message" && event.message?.type === "text") {
       const command = normalizeLineCommand(event.message.text);
-      if (command === "เปิดลงชื่อ" || command === "ลงชื่อ" || command === "รายชื่อตีแบดวันนี้" || command === "แจ้งโอน" || command === "ชำระเงิน") {
+      const groupCommands = ["เปิดลงชื่อ", "ลงชื่อ", "รายชื่อตีแบดวันนี้", "แจ้งโอน", "ชำระเงิน"];
+      const privateCommands = ["ลงชื่อ", "รายชื่อตีแบดวันนี้", "แจ้งโอน", "ชำระเงิน"];
+      const isPrivateChat = event.source?.type === "user" && !groupId;
+      if (isPrivateChat && command === "เปิดลงชื่อ") {
+        await replyLine(event.replyToken, "คำสั่งเปิดลงชื่อใช้ในกลุ่มหลักเท่านั้น หากต้องการดูตัวอย่างการ์ดให้พิมพ์ ลงชื่อ", lineToken);
+      } else if ((groupId && groupCommands.includes(command)) || (isPrivateChat && privateCommands.includes(command))) {
         await handleSignupCommand({
           admin,
           club: configuredClub,
