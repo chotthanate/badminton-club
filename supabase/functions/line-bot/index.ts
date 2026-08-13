@@ -726,7 +726,10 @@ async function handlePaymentLiffRequest(payload: any) {
       });
       for (const member of orderedMembers) {
         const payments = paymentsByMember.get(member.id) || [];
-        if (!payments.length) continue;
+        // Keep the signed-in member in the response even when they have no balance.
+        // Older LIFF bundles use profile.memberId as the select value; omitting that
+        // option makes iOS display the first other member visually instead.
+        if (!payments.length && member.id !== submitter?.id) continue;
         beneficiaries.push({
           id: member.id,
           name: member.nickname || member.display_name || "สมาชิก",
