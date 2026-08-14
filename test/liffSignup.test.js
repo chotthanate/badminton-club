@@ -9,6 +9,7 @@ import {
   getEventIdFromSearch,
   getLiffTestContext,
   isLatestEventSearch,
+  sortRosterBySignupOrder,
 } from "../src/liffSignup.js";
 
 test("LIFF state event takes priority over a stale direct event", () => {
@@ -66,4 +67,18 @@ test("arrival time options advance by 15 minutes and stop before session end", (
 
 test("arrival time options reject malformed times", () => {
   assert.deepEqual(buildArrivalTimeOptions("bad", "00:00"), []);
+});
+
+test("member signup roster always displays the first signup as number one", () => {
+  const roster = [
+    { name: "คนที่ลงล่าสุด", signupOrder: 3 },
+    { name: "คนที่ลงคนแรก", signupOrder: 1 },
+    { name: "คนที่ลงคนที่สอง", signupOrder: 2 },
+  ];
+
+  assert.deepEqual(sortRosterBySignupOrder(roster).map((entry) => entry.name), [
+    "คนที่ลงคนแรก",
+    "คนที่ลงคนที่สอง",
+    "คนที่ลงล่าสุด",
+  ]);
 });

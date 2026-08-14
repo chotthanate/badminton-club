@@ -21,3 +21,13 @@ test("signup order remains deterministic when timestamps are equal", () => {
 
   assert.deepEqual(sortBySignupOrder(rows).map((row) => row.id), ["signup-a", "signup-b"]);
 });
+
+test("LINE roster obeys the explicit signup sequence even when input is reversed", () => {
+  const rows = [
+    { name: "ล่าสุด", signupOrder: 3 },
+    { name: "คนแรก", signupOrder: 1 },
+    { name: "คนที่สอง", signupOrder: 2 },
+  ];
+
+  assert.deepEqual(sortBySignupOrder(rows).map((row) => row.name), ["คนแรก", "คนที่สอง", "ล่าสุด"]);
+});

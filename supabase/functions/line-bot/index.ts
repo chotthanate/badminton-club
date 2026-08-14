@@ -570,12 +570,13 @@ function buildLiveQueueMessage(event: any, liffId: string) {
   };
 }
 
-function buildRosterText(event: any, players: Array<{ name: string; arrivalTime: string | null }>) {
+function buildRosterText(event: any, players: Array<{ name: string; arrivalTime: string | null; signupOrder?: number }>) {
   const courts = [...(event.event_courts || [])]
     .sort(compareCourtNames)
     .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)} น.`);
-  const playerLines = players.length
-    ? players.map((player, index) => `${index + 1}. ${player.name} : ${player.arrivalTime ? `${player.arrivalTime} น.` : "ยังไม่ระบุเวลา"}`)
+  const orderedPlayers = sortBySignupOrder(players);
+  const playerLines = orderedPlayers.length
+    ? orderedPlayers.map((player, index) => `${index + 1}. ${player.name} : ${player.arrivalTime ? `${player.arrivalTime} น.` : "ยังไม่ระบุเวลา"}`)
     : ["ยังไม่มีผู้ลงชื่อ"];
 
   return [
@@ -1426,11 +1427,11 @@ async function getLiffRoster(admin: any, event: any) {
     member.id,
     String(member.nickname || member.display_name || "สมาชิก").slice(0, 40),
   ]));
-  const coming = orderedSignups.reduce((rows: Array<{ name: string; arrivalTime: string | null; skillLevel: string | null }>, signup: any) => {
+  const coming = orderedSignups.reduce((rows: Array<{ name: string; arrivalTime: string | null; skillLevel: string | null; signupOrder: number }>, signup: any) => {
     const name = names.get(signup.member_id);
-    if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time), skillLevel: signup.skill_level_snapshot || null });
+    if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time), skillLevel: signup.skill_level_snapshot || null, signupOrder: rows.length + 1 });
     return rows;
-  }, [] as Array<{ name: string; arrivalTime: string | null }>);
+  }, [] as Array<{ name: string; arrivalTime: string | null; skillLevel: string | null; signupOrder: number }>);
   return { coming };
 }
 

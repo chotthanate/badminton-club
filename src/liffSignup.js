@@ -61,6 +61,20 @@ export function buildArrivalTimeOptions(startValue, endValue) {
   return options;
 }
 
+export function sortRosterBySignupOrder(entries = []) {
+  return entries
+    .map((entry, originalIndex) => ({ entry, originalIndex }))
+    .sort((left, right) => {
+      const leftOrder = Number(left.entry?.signupOrder);
+      const rightOrder = Number(right.entry?.signupOrder);
+      if (Number.isFinite(leftOrder) && Number.isFinite(rightOrder) && leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+      return left.originalIndex - right.originalIndex;
+    })
+    .map(({ entry }) => entry);
+}
+
 function timeMinutes(value) {
   const match = /^(\d{1,2}):(\d{2})/.exec(String(value || ""));
   if (!match) return null;

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Check, Clock3, Edit3, LoaderCircle, MapPin, Plus, Users, X } from "lucide-react";
-import { buildArrivalTimeOptions, buildLiveQueueUrl, getEventIdFromSearch, getLiffTestContext, isLatestEventSearch } from "./liffSignup.js";
+import { buildArrivalTimeOptions, buildLiveQueueUrl, getEventIdFromSearch, getLiffTestContext, isLatestEventSearch, sortRosterBySignupOrder } from "./liffSignup.js";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels, SKILL_LEVELS } from "./skillLevels.js";
 
@@ -328,9 +328,10 @@ export default function LiffSignupApp() {
 }
 
 function RosterGroup({ entries }) {
+  const orderedEntries = sortRosterBySignupOrder(entries);
   return (
     <div className="liff-roster-group is-coming">
-      {entries.length ? <ol>{entries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${index}`}><b>{index + 1}.</b><strong>{entry.name}</strong>{entry.skillLevel ? <em>{entry.skillLevel}</em> : null}<span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
+      {orderedEntries.length ? <ol>{orderedEntries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${entry.signupOrder || index}`}><b>{index + 1}.</b><strong>{entry.name}</strong>{entry.skillLevel ? <em>{entry.skillLevel}</em> : null}<span>{entry.arrivalTime ? `${entry.arrivalTime} น.` : "ยังไม่ระบุเวลา"}</span></li>)}</ol> : <p>ยังไม่มีคนลงเวลา</p>}
     </div>
   );
 }
