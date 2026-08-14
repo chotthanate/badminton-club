@@ -113,7 +113,7 @@ import { proposeQueueMatch, SKILL_LEVELS } from "./queueLogic.js";
 import { randomTestPlayerCount } from "./randomTestPlayers.js";
 import { loadPlayerSortMode, savePlayerSortMode } from "./playerSortPreference.js";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
-import QueuePanel from "./QueuePanel.jsx";
+import QueuePanel, { OperatorCourtControls } from "./QueuePanel.jsx";
 import StaffParticipantsPanel from "./StaffParticipantsPanel.jsx";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "./skillLevels.js";
 import { authenticateBackofficeCode } from "./backofficeAuth.js";
@@ -314,7 +314,7 @@ function AdminDashboard({ session }) {
       selectedEventIdRef.current = isStaffContext ? nextDashboard.event?.id || null : targetEventId;
       setDashboard(nextDashboard);
       setPreviousOutstanding(nextOutstanding);
-      if (isStaffContext) setActiveTab((current) => ["queue", "players"].includes(current) ? current : "queue");
+      if (isStaffContext) setActiveTab((current) => ["round", "queue", "players"].includes(current) ? current : "queue");
     } catch (nextError) {
       setError(nextError.message);
     } finally {
@@ -445,7 +445,7 @@ function AdminDashboard({ session }) {
   const appEvent = dashboard.event ? mapDashboardToEvent(dashboard) : null;
   const settlement = appEvent && !isStaff ? calculateSettlement(appEvent) : null;
   const hasUnfinishedRound = eventSummaries.some((round) => ["draft", "open"].includes(round.status));
-  const visibleTabs = isStaff ? ADMIN_TABS.filter((tab) => ["queue", "players"].includes(tab.id)) : ADMIN_TABS;
+  const visibleTabs = isStaff ? ADMIN_TABS.filter((tab) => ["round", "players", "queue"].includes(tab.id)) : ADMIN_TABS;
 
   return (
     <main className="badminton-app">
@@ -523,6 +523,8 @@ function AdminDashboard({ session }) {
                 ? <CreateEventCard compact context={context} defaultVenue={dashboard.event.venue} mutate={mutate} session={session} venues={dashboard.venues || []} />
                 : null}
             </> : null}
+
+            {isStaff && activeTab === "round" ? <OperatorCourtControls event={appEvent} mutate={mutate} /> : null}
 
             {activeTab === "players" ? (
               isStaff ? <StaffParticipantsPanel dashboard={dashboard} event={appEvent} mutate={mutate} /> : <ParticipantsPanel

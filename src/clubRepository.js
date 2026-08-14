@@ -281,8 +281,14 @@ export async function loadDashboard(clubId, eventId = null) {
 }
 
 export async function loadStaffDashboard(clubId) {
-  const { data, error } = await client().rpc("load_staff_dashboard", { target_club_id: clubId });
-  throwIfError(error);
+  const [dashboardResult, operationsResult] = await Promise.all([
+    client().rpc("load_staff_dashboard", { target_club_id: clubId }),
+    client().rpc("load_staff_player_operations", { target_club_id: clubId }),
+  ]);
+  throwIfError(dashboardResult.error);
+  throwIfError(operationsResult.error);
+  const data = dashboardResult.data;
+  const operations = operationsResult.data || {};
   return {
     event: data?.event || null,
     members: data?.members || [],
@@ -297,8 +303,8 @@ export async function loadStaffDashboard(clubId) {
     paymentSlips: [],
     auditLogs: [],
     venues: [],
-    extraItems: [],
-    memberExtras: [],
+    extraItems: operations.extraItems || [],
+    memberExtras: operations.memberExtras || [],
     shuttlecockCheckpoints: [],
     perRoundSnapshots: [],
     perRoundSnapshotMatches: [],
@@ -831,6 +837,51 @@ export async function upsertOperatorCourt({ eventId, courtId = null, courtName, 
   });
   throwIfError(error);
   return data;
+}
+
+export async function removeOperatorCourt({ eventId, courtId }) {
+  const { error } = await client().rpc("operator_remove_event_court", {
+    target_event_id: eventId,
+    target_court_id: courtId,
+  });
+  throwIfError(error);
+}
+
+export async function addOperatorParticipant({ eventId, memberId = null, nickname = null, skillLevel = null }) {
+  const { data, error } = await client().rpc("operator_add_event_participant", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+    next_nickname: nickname,
+    next_skill_level: skillLevel,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function removeOperatorParticipant({ eventId, memberId }) {
+  const { error } = await client().rpc("operator_remove_event_participant", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+  });
+  throwIfError(error);
+}
+
+export async function addOperatorMemberExtra({ eventId, memberId, itemId }) {
+  const { data, error } = await client().rpc("operator_add_member_extra", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+    target_item_id: itemId,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function removeOperatorMemberExtra({ eventId, chargeId }) {
+  const { error } = await client().rpc("operator_remove_member_extra", {
+    target_event_id: eventId,
+    target_charge_id: chargeId,
+  });
+  throwIfError(error);
 }
 
 export async function updateAttendance({ clubId, eventId, memberId, patch }) {

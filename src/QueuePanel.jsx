@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, ListOrdered, Pencil, Play, Plus, Save, Settings, Timer, Users, X } from "lucide-react";
+import { Check, ListOrdered, Pencil, Play, Plus, Save, Settings, Timer, Trash2, Users, X } from "lucide-react";
 import {
   approveQueueDraft,
   cancelQueueMatch,
@@ -8,6 +8,7 @@ import {
   moveUpcomingQueue,
   startNextQueueOnCourt,
   updateQueueDraftLineup,
+  removeOperatorCourt,
   upsertOperatorCourt,
 } from "./clubRepository.js";
 import { proposeQueueMatch } from "./queueLogic.js";
@@ -109,7 +110,6 @@ export default function QueuePanel({ dashboard, event, isStaff = false, mutate }
 
   return <section className="badminton-queue-workspace">
     <article className="badminton-card badminton-queue-summary"><div><ListOrdered size={20} /><span>รอเล่น<strong>{waiting.length}</strong></span></div><div><Play size={20} /><span>กำลังเล่น<strong>{playingMatches.length * 4}</strong></span></div><div><Timer size={20} /><span>คิวล่วงหน้า<strong>{upcoming.length}/{event.courts.length}</strong></span></div></article>
-    {isStaff ? <OperatorCourtControls event={event} mutate={mutate} /> : null}
     <div className="badminton-queue-courts">{event.courts.map((court) => {
       const match = playingByCourt.get(court.id);
       const elapsedSeconds = match?.startedAt ? Math.max(0, Math.floor((clock - new Date(match.startedAt).getTime()) / 1000)) : 0;
@@ -150,12 +150,17 @@ function TimeSelect({ label, onChange, value }) {
   return <select aria-label={label} onChange={(event) => onChange(event.target.value)} value={value}>{TIME_OPTIONS.map((time) => <option key={time}>{time}</option>)}</select>;
 }
 
-function OperatorCourtControls({ event, mutate }) {
+export function OperatorCourtControls({ event, mutate }) {
   const [newCourt, setNewCourt] = useState({ name: "", startsAt: event.startTime, endsAt: event.endTime });
-  return <article className="badminton-card badminton-operator-courts"><div className="badminton-card-title"><Settings size={20} /><div><h2>คอร์ทและเวลา</h2><p>เพิ่มคอร์ทหรือขยายเวลาได้ แต่ลบคอร์ทไม่ได้</p></div></div>{event.courts.map((court) => <OperatorCourtRow court={court} eventId={event.id} key={court.id} mutate={mutate} />)}<form className="badminton-court-row badminton-operator-add-court" onSubmit={(eventObject) => { eventObject.preventDefault(); mutate(() => upsertOperatorCourt({ eventId: event.id, courtName: newCourt.name, startsAt: newCourt.startsAt, endsAt: newCourt.endsAt }), "เพิ่มคอร์ทแล้ว"); }}><input aria-label="ชื่อคอร์ทใหม่" onChange={(eventObject) => setNewCourt({ ...newCourt, name: eventObject.target.value })} placeholder="เช่น คอร์ท 13" required value={newCourt.name} /><TimeSelect label="เวลาเริ่มคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, startsAt: value })} value={newCourt.startsAt} /><TimeSelect label="เวลาจบคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, endsAt: value })} value={newCourt.endsAt} /><button className="badminton-primary" type="submit"><Plus size={16} /> เพิ่ม</button></form></article>;
+  async function addCourt(eventObject) {
+    eventObject.preventDefault();
+    const saved = await mutate(() => upsertOperatorCourt({ eventId: event.id, courtName: newCourt.name, startsAt: newCourt.startsAt, endsAt: newCourt.endsAt }), "เพิ่มคอร์ทแล้ว");
+    if (saved) setNewCourt({ name: "", startsAt: event.startTime, endsAt: event.endTime });
+  }
+  return <article className="badminton-card badminton-operator-courts"><div className="badminton-card-title"><Settings size={20} /><div><h2>คอร์ทและเวลา</h2><p>แก้เวลา เพิ่ม หรือลดคอร์ทได้จากหน้านี้</p></div></div>{event.courts.map((court) => <OperatorCourtRow court={court} eventId={event.id} key={court.id} mutate={mutate} />)}<form className="badminton-court-row badminton-operator-add-court" onSubmit={addCourt}><input aria-label="ชื่อคอร์ทใหม่" onChange={(eventObject) => setNewCourt({ ...newCourt, name: eventObject.target.value })} placeholder="เช่น คอร์ท 13" required value={newCourt.name} /><TimeSelect label="เวลาเริ่มคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, startsAt: value })} value={newCourt.startsAt} /><TimeSelect label="เวลาจบคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, endsAt: value })} value={newCourt.endsAt} /><button className="badminton-primary" type="submit"><Plus size={16} /> เพิ่ม</button></form></article>;
 }
 
 function OperatorCourtRow({ court, eventId, mutate }) {
   const [form, setForm] = useState({ name: court.name, startsAt: court.startsAt, endsAt: court.endsAt });
-  return <div className="badminton-court-row"><input aria-label={`ชื่อ ${court.name}`} onChange={(eventObject) => setForm({ ...form, name: eventObject.target.value })} value={form.name} /><TimeSelect label={`เวลาเริ่ม ${court.name}`} onChange={(value) => setForm({ ...form, startsAt: value })} value={form.startsAt} /><TimeSelect label={`เวลาจบ ${court.name}`} onChange={(value) => setForm({ ...form, endsAt: value })} value={form.endsAt} /><button aria-label={`บันทึก ${court.name}`} className="badminton-icon-button" onClick={() => mutate(() => upsertOperatorCourt({ eventId, courtId: court.id, courtName: form.name, startsAt: form.startsAt, endsAt: form.endsAt }), `บันทึก ${form.name} แล้ว`)} type="button"><Save size={16} /></button></div>;
+  return <div className="badminton-court-row"><input aria-label={`ชื่อ ${court.name}`} onChange={(eventObject) => setForm({ ...form, name: eventObject.target.value })} value={form.name} /><TimeSelect label={`เวลาเริ่ม ${court.name}`} onChange={(value) => setForm({ ...form, startsAt: value })} value={form.startsAt} /><TimeSelect label={`เวลาจบ ${court.name}`} onChange={(value) => setForm({ ...form, endsAt: value })} value={form.endsAt} /><div className="badminton-operator-court-actions"><button aria-label={`บันทึก ${court.name}`} className="badminton-icon-button" onClick={() => mutate(() => upsertOperatorCourt({ eventId, courtId: court.id, courtName: form.name, startsAt: form.startsAt, endsAt: form.endsAt }), `บันทึก ${form.name} แล้ว`)} type="button"><Save size={16} /></button><button aria-label={`ลบ ${court.name}`} className="badminton-delete-button" onClick={() => { if (window.confirm(`ลบ ${court.name} ออกจากรอบนี้ใช่ไหม?`)) mutate(() => removeOperatorCourt({ eventId, courtId: court.id }), `ลบ ${court.name} แล้ว`); }} type="button"><Trash2 size={16} /></button></div></div>;
 }
