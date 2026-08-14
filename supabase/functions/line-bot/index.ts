@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildPaymentSummary, compareCourtNames } from "../_shared/paymentSummary.js";
+import { sortBySignupOrder } from "../_shared/signupOrder.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1407,12 +1408,14 @@ async function upsertLiffMember(
 
 async function getLiffRoster(admin: any, event: any) {
   const { data: signups, error: signupError } = await admin.from("signups")
-    .select("member_id, status, arrival_time, skill_level_snapshot, created_at")
+    .select("id, member_id, status, arrival_time, skill_level_snapshot, created_at")
     .eq("event_id", event.id)
     .eq("status", "coming")
-    .order("created_at");
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
   if (signupError) throw signupError;
-  const memberIds = [...new Set((signups || []).map((row: any) => row.member_id))];
+  const orderedSignups = sortBySignupOrder(signups || []);
+  const memberIds = [...new Set(orderedSignups.map((row: any) => row.member_id))];
   if (!memberIds.length) return { coming: [] };
 
   const { data: members, error: memberError } = await admin.from("club_members")
@@ -1423,7 +1426,7 @@ async function getLiffRoster(admin: any, event: any) {
     member.id,
     String(member.nickname || member.display_name || "สมาชิก").slice(0, 40),
   ]));
-  const coming = (signups || []).reduce((rows: Array<{ name: string; arrivalTime: string | null; skillLevel: string | null }>, signup: any) => {
+  const coming = orderedSignups.reduce((rows: Array<{ name: string; arrivalTime: string | null; skillLevel: string | null }>, signup: any) => {
     const name = names.get(signup.member_id);
     if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time), skillLevel: signup.skill_level_snapshot || null });
     return rows;
