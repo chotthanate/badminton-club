@@ -3248,6 +3248,35 @@
   color: #26332a;
 }
 
+.badminton-payment-heading > div {
+  min-width: 0;
+}
+
+.badminton-payment-settings-button {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  margin-left: auto;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #cfdccc;
+  border-radius: 10px;
+  background: #fff;
+  color: #0f7a52;
+}
+
+.badminton-payment-settings-modal {
+  width: min(460px, 100%);
+}
+
+.badminton-payment-settings-modal .badminton-line-payment-summary-toggle {
+  margin-top: 0;
+  padding: 12px;
+  border: 1px solid #dfe8dc;
+  border-radius: 10px;
+  background: #fbfcf8;
+}
+
 .badminton-line-payment-summary-toggle > span {
   display: grid;
   gap: 3px;
