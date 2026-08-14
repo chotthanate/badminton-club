@@ -10,6 +10,12 @@ export function compareCourtNames(left, right) {
 }
 
 export function buildPaymentSummary({ date, venue, courts = [], rows = [] }) {
+  const orderedRows = [...rows].sort((left, right) => {
+    const leftOrder = Number(left.signupOrder);
+    const rightOrder = Number(right.signupOrder);
+    if (!Number.isFinite(leftOrder) || !Number.isFinite(rightOrder)) return 0;
+    return leftOrder - rightOrder;
+  });
   return [
     `ค่าตีแบต ${formatThaiShortDate(date)}`,
     venue || "",
@@ -20,7 +26,11 @@ export function buildPaymentSummary({ date, venue, courts = [], rows = [] }) {
       return `${name} : ${startsAt}-${rawEnd === "00:00" ? "24:00" : rawEnd}`;
     }),
     "",
-    ...rows.map((row, index) => `${index + 1}.${row.name} = ${formatBaht(row.amount)} บาท${row.extrasText ? ` (${row.extrasText})` : ""}`),
+    ...orderedRows.map((row, index) => {
+      const signupOrder = Number(row.signupOrder);
+      const number = Number.isFinite(signupOrder) && signupOrder > 0 ? signupOrder : index + 1;
+      return `${number}.${row.name} = ${formatBaht(row.amount)} บาท${row.extrasText ? ` (${row.extrasText})` : ""}`;
+    }),
     "",
     "โอนเงิน : ธนาคารไทยพาณิชย์",
     "408-6-96159-5",

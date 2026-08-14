@@ -79,6 +79,7 @@ import {
   updateEventPriceAndDefault,
   updateExtraCatalogItem,
   updateExpense,
+  updateLinePaymentSummarySetting,
   updateSignup,
   updateSignupArrival,
   updateQueueDraftLineup,
@@ -110,6 +111,7 @@ import { findExactDuplicateMemberGroups, normalizeMemberSearch, rankMemberSugges
 import { buildLiveQueueUrl, buildTestPaymentLiffUrl, buildTestSignupLiffUrl } from "./liffSignup.js";
 import { proposeQueueMatch, SKILL_LEVELS } from "./queueLogic.js";
 import { randomTestPlayerCount } from "./randomTestPlayers.js";
+import { loadPlayerSortMode, savePlayerSortMode } from "./playerSortPreference.js";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
 import QueuePanel from "./QueuePanel.jsx";
 import StaffParticipantsPanel from "./StaffParticipantsPanel.jsx";
@@ -538,7 +540,7 @@ function AdminDashboard({ session }) {
             ) : null}
 
             {!isStaff && activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} settlement={settlement} /> : null}
-            {!isStaff && activeTab === "payments" ? <SettlementPanel event={appEvent} mutate={mutate} previousOutstanding={previousOutstanding} session={session} settlement={settlement} /> : null}
+            {!isStaff && activeTab === "payments" ? <SettlementPanel context={context} event={appEvent} mutate={mutate} previousOutstanding={previousOutstanding} session={session} settlement={settlement} /> : null}
             {!isStaff && activeTab === "history" ? <AuditPanel actions={appEvent.actions} /> : null}
           </>
         )}
@@ -1113,7 +1115,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [pendingCheckIn, setPendingCheckIn] = useState(null);
   const [pendingDeparture, setPendingDeparture] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [sortMode, setSortMode] = useState("alphabetical");
+  const [sortMode, setSortMode] = useState(loadPlayerSortMode);
   const [exemptMemberId, setExemptMemberId] = useState("");
   const [mergeSourceId, setMergeSourceId] = useState("");
   const [mergeTargetId, setMergeTargetId] = useState("");
@@ -1138,6 +1140,11 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     savedMembers,
     name,
   ).slice(0, 8);
+
+  function changeSortMode(nextMode) {
+    setSortMode(nextMode);
+    savePlayerSortMode(nextMode);
+  }
 
   async function addMember(eventObject) {
     eventObject.preventDefault();
@@ -1482,7 +1489,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
   return (
     <section className="badminton-card badminton-participants-card">
-      <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><div className="badminton-player-title-actions"><label className="badminton-player-sort-icon" title={sortMode === "signup" ? "เรียงตามลำดับการลงชื่อ" : "เรียงตามตัวอักษร"}><ArrowUpDown size={18} /><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => setSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label><button aria-label="ตั้งค่ารายชื่อและสินค้า" className="badminton-player-settings-button" onClick={() => setSettingsOpen(true)} title="ตั้งค่ารายชื่อและสินค้า" type="button"><Settings size={18} /></button></div></div>
+      <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><div className="badminton-player-title-actions"><label className="badminton-player-sort-icon" title={sortMode === "signup" ? "เรียงตามลำดับการลงชื่อ" : "เรียงตามตัวอักษร"}><ArrowUpDown size={18} /><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => changeSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label><button aria-label="ตั้งค่ารายชื่อและสินค้า" className="badminton-player-settings-button" onClick={() => setSettingsOpen(true)} title="ตั้งค่ารายชื่อและสินค้า" type="button"><Settings size={18} /></button></div></div>
       <form className="badminton-inline-form" onSubmit={addMember}>
         <div className="badminton-member-search">
           <input
@@ -1921,13 +1928,16 @@ function PricingPanel({ event, mutate, session, settlement }) {
   );
 }
 
-function SettlementPanel({ event, mutate, previousOutstanding, session, settlement }) {
+function SettlementPanel({ context, event, mutate, previousOutstanding, session, settlement }) {
   const [copied, setCopied] = useState(false);
   const [billDraft, setBillDraft] = useState(null);
   const [paymentView, setPaymentView] = useState("current");
   const lineSummary = useMemo(() => buildLineSummary(event), [event]);
   const perRoundAwaitingClose = event.billingModel === "per_round" && event.status !== "closed";
   const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
+  const collectionRows = [...settlement.rows]
+    .filter((row) => !row.paymentExempt)
+    .sort((left, right) => Number(left.signupOrder || Number.MAX_SAFE_INTEGER) - Number(right.signupOrder || Number.MAX_SAFE_INTEGER));
   const previousRows = (previousOutstanding.rows || []).filter((row) => row.event_id !== event.id);
   const previousTotal = previousRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const combinedTotal = settlement.totalCost + previousTotal;
@@ -2115,17 +2125,18 @@ function SettlementPanel({ event, mutate, previousOutstanding, session, settleme
         {event.paymentSlips?.length ? <div className="badminton-slip-review"><div className="badminton-slip-review-title"><ShieldCheck size={18} /><div><strong>สลิปรอตรวจสอบ</strong><span>{event.paymentSlips.length} รายการ · ตรวจได้จากเว็บนี้ ไม่ต้องย้อนหาใน LINE</span></div></div>{event.paymentSlips.map((slip) => <article key={slip.id}><div><strong>{slip.beneficiaryName}</strong><span>ยอดเรียกเก็บ {baht(slip.expected_amount)} บาท · สลิป {slip.transferred_amount === null ? "อ่านยอดไม่ชัด" : `${baht(slip.transferred_amount)} บาท`}</span><small>{slip.review_reason || "รอตรวจสอบ"}{slip.transferred_on ? ` · ${slip.transferred_on}` : ""}{slip.transaction_reference ? ` · Ref ${slip.transaction_reference}` : ""}</small></div><div>{slip.storage_path ? <button className="badminton-secondary" onClick={() => openSlipImage(slip)} type="button"><Image size={15} /> ดูสลิป</button> : null}<button className="badminton-secondary" onClick={() => reviewSlip(slip, false)} type="button"><X size={15} /> ไม่ผ่าน</button><button className="badminton-primary" onClick={() => reviewSlip(slip, true)} type="button"><Check size={15} /> รับเงิน</button></div></article>)}</div> : null}
         <div className="badminton-card-title badminton-payment-list-title"><WalletCards size={19} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
         <div className="badminton-pay-list">
-          {settlement.rows.map((row) => {
+          {collectionRows.map((row) => {
             const extraLabel = formatExtraItems(row.extraCharges);
             const amount = row.billingFinalized ? row.billedAmount : row.roundedDue;
             return <article className={`badminton-pay-row ${row.billingFinalized ? "is-billed" : ""} ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
-              <div className="badminton-pay-person"><strong>{row.name}</strong><span>{event.billingModel === "per_round" ? `${row.roundsPlayed || 0} รอบ` : formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.paymentExempt ? <small className="badminton-payment-exempt-note">สมาชิกไม่ต้องเก็บเงิน</small> : row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>{perRoundAwaitingClose ? "ยอดประมาณ · รอจบรอบ" : "ยอดคำนวณสำหรับแอดมิน"}</small>}</div>
+              <div className="badminton-pay-person"><strong>{row.signupOrder ? `${row.signupOrder}. ` : ""}{row.name}</strong><span>{event.billingModel === "per_round" ? `${row.roundsPlayed || 0} รอบ` : formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>{perRoundAwaitingClose ? "ยอดประมาณ · รอจบรอบ" : "ยอดคำนวณสำหรับแอดมิน"}</small>}</div>
               <strong className="badminton-pay-amount">{baht(amount)} บาท{row.billingFinalized && !row.paid ? <button aria-label={`แก้ยอดเรียกเก็บของ ${row.name}`} className="badminton-edit-bill" onClick={() => setBillDraft({ row, amount: String(row.billedAmount) })} title="แก้ยอดเรียกเก็บ" type="button"><Pencil size={13} /></button> : null}</strong>
-              {row.paymentExempt ? <button className="is-paid" disabled type="button"><Check size={16} /> ไม่ต้องเก็บเงิน</button> : <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} disabled={perRoundAwaitingClose && !row.billingFinalized} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : perRoundAwaitingClose ? <Timer size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : perRoundAwaitingClose ? "รอจบรอบ" : "สรุปยอด"}</button>}
+              <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} disabled={perRoundAwaitingClose && !row.billingFinalized} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : perRoundAwaitingClose ? <Timer size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : perRoundAwaitingClose ? "รอจบรอบ" : "สรุปยอด"}</button>
             </article>;
           })}
         </div>
         {lineSummary.trim() ? <><textarea readOnly value={lineSummary} /><button className="badminton-primary" onClick={copySummary} type="button"><Copy size={18} /> {copied ? "คัดลอกแล้ว" : "คัดลอกสรุปส่ง LINE"}</button></> : <p className="badminton-note">กด “สรุปยอด” ของผู้เล่นก่อน จึงจะมีข้อความยอดเรียกเก็บสำหรับส่ง LINE</p>}
+        <label className="badminton-line-payment-summary-toggle"><span><strong>คำสั่ง “ชำระเงิน” ส่งรายชื่อพร้อมยอด</strong><small>{context.clubs.line_payment_include_summary !== false ? "เปิดอยู่ · บอทส่งรายชื่อพร้อมยอด แล้วตามด้วยการ์ดชำระเงิน" : "ปิดอยู่ · บอทส่งเฉพาะการ์ดชำระเงิน"}</small></span><input aria-label="ส่งรายชื่อและยอดค่าใช้จ่ายใน LINE" checked={context.clubs.line_payment_include_summary !== false} onChange={(changeEvent) => mutate(() => updateLinePaymentSummarySetting(context.club_id, changeEvent.target.checked), changeEvent.target.checked ? "เปิดส่งรายชื่อพร้อมยอดใน LINE แล้ว" : "ปิดส่งรายชื่อพร้อมยอดใน LINE แล้ว")} type="checkbox" /></label>
       </div>
       {billDraft ? <div className="badminton-modal-backdrop" role="presentation"><form aria-label={`สรุปยอดเรียกเก็บ ${billDraft.row.name}`} className="badminton-custom-charge-modal badminton-bill-modal" onSubmit={confirmBill}><div className="badminton-modal-title"><div><p className="badminton-kicker">ยอดเรียกเก็บรายคน</p><h2>{billDraft.row.name}</h2></div><button aria-label="ปิดหน้าต่างสรุปยอด" onClick={() => setBillDraft(null)} type="button"><X size={19} /></button></div><div className="badminton-calculated-amount"><span>ยอดที่ระบบคำนวณ</span><strong>{baht(billDraft.row.billingFinalized && billDraft.row.calculatedAmount !== null ? billDraft.row.calculatedAmount : billDraft.row.roundedDue)} บาท</strong><small>ข้อมูลนี้แสดงเฉพาะแอดมิน สมาชิกจะไม่เห็น</small></div><label>ยอดเรียกเก็บจริง<input autoFocus inputMode="decimal" min="0" onChange={(changeEvent) => setBillDraft({ ...billDraft, amount: changeEvent.target.value })} required step="1" type="number" value={billDraft.amount} /><span>บาท</span></label><p className="badminton-bill-help">เมื่อยืนยัน สมาชิกจะเห็นเฉพาะยอดเรียกเก็บจริง และระบบตรวจสลิปจะเทียบกับยอดนี้</p><button className="badminton-primary" type="submit"><Check size={17} /> ยืนยันยอดเรียกเก็บ</button></form></div> : null}
     </section>
@@ -2210,7 +2221,7 @@ function mapDashboardToEvent(dashboard) {
     dashboard.queueMatchPlayers || [],
   );
   const billableSignups = dashboard.signups.filter((row) => row.status === "coming");
-  const attendance = billableSignups.map((signup) => {
+  const attendance = billableSignups.map((signup, signupIndex) => {
     const row = attendanceByMember.get(signup.member_id);
     const payment = paymentsByMember.get(signup.member_id);
     const member = membersById.get(signup.member_id);
@@ -2226,6 +2237,7 @@ function mapDashboardToEvent(dashboard) {
     return {
       memberId: signup.member_id,
       name: memberName(member) || "ไม่ทราบชื่อ",
+      signupOrder: signupIndex + 1,
       arrived: true,
       checkedIn: Boolean(row?.arrived),
       weight: billingPercentage / 100,

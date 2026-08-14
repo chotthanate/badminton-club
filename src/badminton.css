@@ -3237,6 +3237,35 @@
   font-weight: 900;
 }
 
+.badminton-line-payment-summary-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 12px 2px 2px;
+  border-top: 1px solid #dfe8dc;
+  color: #26332a;
+}
+
+.badminton-line-payment-summary-toggle > span {
+  display: grid;
+  gap: 3px;
+}
+
+.badminton-line-payment-summary-toggle small {
+  color: #68756b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.badminton-line-payment-summary-toggle input {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  accent-color: #15996b;
+}
+
 .badminton-player-settings-modal .badminton-member-directory-list,
 .badminton-player-settings-modal .badminton-catalog-list {
   padding: 0;

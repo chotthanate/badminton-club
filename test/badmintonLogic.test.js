@@ -135,13 +135,27 @@ test("buildLineSummary omits payment-exempt members", () => {
   const summary = buildLineSummary(makeEvent({
     costs: [{ amount: 300 }],
     attendance: [
-      { memberId: "family", name: "ครอบครัว", arrived: true, hours: 3, paymentExempt: true },
-      { memberId: "member", name: "สมาชิก", arrived: true, hours: 3 },
+      { memberId: "family", name: "ครอบครัว", signupOrder: 1, arrived: true, hours: 3, paymentExempt: true },
+      { memberId: "member", name: "สมาชิก", signupOrder: 2, arrived: true, hours: 3 },
     ],
   }));
 
   assert.doesNotMatch(summary, /ครอบครัว/);
-  assert.match(summary, /1\.สมาชิก = 150 บาท/);
+  assert.match(summary, /2\.สมาชิก = 150 บาท/);
+});
+
+test("payment summary keeps original signup numbers and leaves exemption gaps", () => {
+  const summary = buildLineSummary(makeEvent({
+    costs: [{ amount: 300 }],
+    attendance: [
+      { memberId: "third", name: "คนที่สาม", signupOrder: 3, arrived: true, hours: 1 },
+      { memberId: "first", name: "คนแรก", signupOrder: 1, arrived: true, hours: 1 },
+      { memberId: "second", name: "ยกเว้น", signupOrder: 2, arrived: true, hours: 1, paymentExempt: true },
+    ],
+  }));
+
+  assert.ok(summary.indexOf("1.คนแรก") < summary.indexOf("3.คนที่สาม"));
+  assert.doesNotMatch(summary, /2\.ยกเว้น/);
 });
 
 test("calculateSettlement keeps an early payment locked when later costs increase", () => {

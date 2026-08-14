@@ -216,7 +216,7 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
   );
 
   const { data: configuredClub, error: clubError } = await admin.from("clubs")
-    .select("id, name, line_group_id")
+    .select("id, name, line_group_id, line_payment_include_summary")
     .eq("id", clubId)
     .maybeSingle();
   if (clubError || !configuredClub) return json({ error: "Configured club was not found" }, 500);
@@ -370,16 +370,20 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
 
   if (command === "แจ้งโอน" || command === "ชำระเงิน") {
     const paymentSummary = await latestPaymentSummary(admin, club.id);
-    await replyLineMessages(event.replyToken, [
-      { type: "text", text: paymentSummary?.text || "ยังไม่มีรายการที่สรุปยอดสำหรับชำระเงิน" },
-      buildPaymentMessage(liffId),
-    ], lineToken);
+    const includeSummary = club.line_payment_include_summary !== false;
+    const messages = includeSummary
+      ? [
+        { type: "text", text: paymentSummary?.text || "ยังไม่มีรายการที่สรุปยอดสำหรับชำระเงิน" },
+        buildPaymentMessage(liffId),
+      ]
+      : [buildPaymentMessage(liffId)];
+    await replyLineMessages(event.replyToken, messages, lineToken);
     await admin.from("audit_logs").insert({
       club_id: club.id,
       event_id: paymentSummary?.eventId || null,
       actor_id: null,
-      action: "ส่งสรุปยอดและการ์ดชำระเงิน",
-      details: { line_user_id: event.source?.userId, source: "line_command" },
+      action: includeSummary ? "ส่งสรุปยอดและการ์ดชำระเงิน" : "ส่งการ์ดชำระเงิน",
+      details: { line_user_id: event.source?.userId, source: "line_command", include_summary: includeSummary },
     });
     return;
   }
@@ -638,6 +642,7 @@ async function latestPaymentSummary(admin: any, clubId: string) {
       return {
         name: member?.nickname || member?.display_name || "สมาชิก",
         amount: Number(payment.amount || 0),
+        signupOrder: (signupOrder.get(payment.member_id) ?? -1) + 1,
         extrasText: summarizePaymentExtras(extrasByMember.get(payment.member_id) || []),
       };
     });

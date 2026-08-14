@@ -19,6 +19,17 @@ function throwIfError(error) {
 export async function getAdminContexts(userId) {
   const { data, error } = await client().rpc("get_backoffice_contexts");
   throwIfError(error);
+  const adminClubIds = [...new Set((data || [])
+    .filter((row) => row.role === "admin")
+    .map((row) => row.club_id))];
+  const settingsByClub = new Map();
+  if (adminClubIds.length) {
+    const settingsResult = await client().from("clubs")
+      .select("id, line_payment_include_summary")
+      .in("id", adminClubIds);
+    throwIfError(settingsResult.error);
+    (settingsResult.data || []).forEach((club) => settingsByClub.set(club.id, club));
+  }
   return (data || []).map((row) => ({
     id: row.member_id,
     club_id: row.club_id,
@@ -35,8 +46,16 @@ export async function getAdminContexts(userId) {
       default_saturday_court_hourly_rate: row.default_saturday_court_hourly_rate,
       default_other_court_hourly_rate: row.default_other_court_hourly_rate,
       default_shuttlecock_unit_price: row.default_shuttlecock_unit_price,
+      line_payment_include_summary: settingsByClub.get(row.club_id)?.line_payment_include_summary !== false,
     },
   }));
+}
+
+export async function updateLinePaymentSummarySetting(clubId, enabled) {
+  const { error } = await client().from("clubs")
+    .update({ line_payment_include_summary: Boolean(enabled) })
+    .eq("id", clubId);
+  throwIfError(error);
 }
 
 export async function signInStaff(password) {

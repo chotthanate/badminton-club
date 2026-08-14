@@ -578,6 +578,7 @@ export function buildLineSummary(event) {
       .map((row) => ({
         name: row.name,
         amount: row.roundedDue,
+        signupOrder: row.signupOrder,
         extrasText: summarizeExtraCharges(row.extraCharges || []),
       })),
   });
