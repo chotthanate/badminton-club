@@ -876,6 +876,17 @@ export async function addOperatorMemberExtra({ eventId, memberId, itemId }) {
   return data;
 }
 
+export async function addOperatorCustomMemberExtra({ eventId, memberId, itemName, unitPrice }) {
+  const { data, error } = await client().rpc("operator_add_custom_member_extra", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+    next_item_name: itemName,
+    next_unit_price: unitPrice,
+  });
+  throwIfError(error);
+  return data;
+}
+
 export async function removeOperatorMemberExtra({ eventId, chargeId }) {
   const { error } = await client().rpc("operator_remove_member_extra", {
     target_event_id: eventId,
