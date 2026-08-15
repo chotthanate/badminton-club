@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildPaymentSummary, compareCourtNames } from "../_shared/paymentSummary.js";
 import { sortBySignupOrder } from "../_shared/signupOrder.js";
+import { courtHasStarted } from "../_shared/liveQueueTime.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1037,9 +1038,11 @@ async function handleLiveQueueRequest(payload: any) {
       playersByMatch.set(player.match_id, rows);
     }
     const playingByCourt = new Map((matchesResult.data || []).filter((match: any) => match.status === "playing").map((match: any) => [match.court_id, match]));
-    const courts = [...(courtsResult.data || [])].sort(compareCourtNames).map((court: any) => {
+    const courts = [...(courtsResult.data || [])]
+      .filter((court: any) => courtHasStarted(event.event_date, event.starts_at, court.starts_at))
+      .sort(compareCourtNames).map((court: any) => {
       const match: any = playingByCourt.get(court.id);
-      return { id: court.id, name: court.court_name, playing: Boolean(match), startedAt: match?.started_at || null, players: match ? (playersByMatch.get(match.id) || []) : [] };
+      return { id: court.id, name: court.court_name, startsAt: shortTime(court.starts_at), playing: Boolean(match), startedAt: match?.started_at || null, players: match ? (playersByMatch.get(match.id) || []) : [] };
     });
     const upcoming = (matchesResult.data || []).filter((match: any) => match.status === "approved").sort((a: any, b: any) => a.queue_position - b.queue_position).map((match: any) => ({ id: match.id, position: match.queue_position, players: playersByMatch.get(match.id) || [] }));
     const waitingRows = (queuePlayersResult.data || []).filter((row: any) => row.status === "waiting");

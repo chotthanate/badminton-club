@@ -751,8 +751,16 @@ export async function createQueueDraft({ eventId, memberIds, teamAIds }) {
   return data;
 }
 
+export async function createManualQueueDraft(eventId) {
+  const { data, error } = await client().rpc("create_manual_queue_draft", {
+    target_event_id: eventId,
+  });
+  throwIfError(error);
+  return data;
+}
+
 export async function updateQueueDraftLineup({ matchId, slots }) {
-  const { error } = await client().rpc("update_queue_draft_lineup", {
+  const { error } = await client().rpc("update_manual_queue_draft_lineup", {
     target_match_id: matchId,
     slot_assignments: slots.map((slot) => ({
       member_id: slot.memberId,
