@@ -256,6 +256,18 @@ export async function loadDashboard(clubId, eventId = null) {
   [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, perRoundSnapshotsResult, perRoundSnapshotMatchesResult, perRoundSnapshotAllocationsResult]
     .forEach((result) => throwIfError(result.error));
 
+  const pendingPaymentIds = [...new Set((paymentSlipsResult.data || [])
+    .flatMap((slip) => Array.isArray(slip.payment_ids) ? slip.payment_ids : []))];
+  let paymentSlipPayments = [];
+  if (pendingPaymentIds.length) {
+    const { data, error } = await client()
+      .from("payments")
+      .select("id, event_id, events!inner(event_date, venue)")
+      .in("id", pendingPaymentIds);
+    throwIfError(error);
+    paymentSlipPayments = data || [];
+  }
+
   return {
     event,
     members: membersResult.data || [],
@@ -264,8 +276,11 @@ export async function loadDashboard(clubId, eventId = null) {
     attendance: attendanceResult.data || [],
     expenses: expensesResult.data || [],
     payments: paymentsResult.data || [],
-    paymentSlips: (paymentSlipsResult.data || []).filter((slip) =>
-      (slip.payment_ids || []).some((paymentId) => (paymentsResult.data || []).some((payment) => payment.id === paymentId))),
+    // Pending slips belong to the club, not only to the round currently selected
+    // in the round switcher. Keeping every pending slip here prevents older-round
+    // transfers from disappearing from the admin review screen.
+    paymentSlips: paymentSlipsResult.data || [],
+    paymentSlipPayments,
     auditLogs: auditResult.data || [],
     venues: venuesResult.data || [],
     extraItems: extraItemsResult.data || [],

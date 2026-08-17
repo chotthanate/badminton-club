@@ -13,6 +13,17 @@ const THAI_MONTHS = new Map([
   ["ธ.ค.", 12], ["ธค", 12], ["ธันวาคม", 12],
 ]);
 
+const ENGLISH_MONTHS = new Map([
+  ["jan", 1], ["january", 1], ["feb", 2], ["february", 2],
+  ["mar", 3], ["march", 3], ["apr", 4], ["april", 4],
+  ["may", 5], ["jun", 6], ["june", 6], ["jul", 7], ["july", 7],
+  ["aug", 8], ["august", 8], ["sep", 9], ["sept", 9], ["september", 9],
+  ["oct", 10], ["october", 10], ["nov", 11], ["november", 11],
+  ["dec", 12], ["december", 12],
+]);
+
+const SLIP_MONTHS = new Map([...THAI_MONTHS, ...ENGLISH_MONTHS]);
+
 export const PAYMENT_RECIPIENT_NAME = "นาย ณฐกฤต อินนะใจ";
 
 export function slipRecipientMatches(text) {
@@ -22,7 +33,9 @@ export function slipRecipientMatches(text) {
 export function classifySlipRecipient(text) {
   const source = String(text || "").normalize("NFKC");
   const normalized = normalizeRecipientText(source);
-  if (normalized.includes("ณฐกฤตอินนะใจ")) return "match";
+  const recipientNames = ["ณฐกฤตอินนะใจ", "nathakritinnajai"];
+  if (recipientNames.some((name) => normalized.includes(name)
+    || containsApproximateText(normalized, name, 2))) return "match";
 
   const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const recipientMarker = /(บัญชีผู้รับ|ผู้รับ|ไปยัง|recipient|receiver|transfer(?:red)?\s+to)/i;
@@ -48,6 +61,32 @@ function normalizeRecipientText(text) {
   return normalized;
 }
 
+function containsApproximateText(source, expected, maxDistance) {
+  if (!source || !expected) return false;
+  const minimumLength = Math.max(1, expected.length - maxDistance);
+  const maximumLength = expected.length + maxDistance;
+  for (let length = minimumLength; length <= maximumLength; length += 1) {
+    for (let index = 0; index + length <= source.length; index += 1) {
+      if (levenshteinWithin(source.slice(index, index + length), expected, maxDistance)) return true;
+    }
+  }
+  return false;
+}
+
+function levenshteinWithin(left, right, maxDistance) {
+  if (Math.abs(left.length - right.length) > maxDistance) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitution = previous[rightIndex - 1] + Number(left[leftIndex - 1] !== right[rightIndex - 1]);
+      current[rightIndex] = Math.min(previous[rightIndex] + 1, current[rightIndex - 1] + 1, substitution);
+    }
+    previous = current;
+  }
+  return previous[right.length] <= maxDistance;
+}
+
 export function parseSlipText(text, expectedAmount = null) {
   const source = String(text || "").replace(/[๐-๙]/g, (digit) => String("๐๑๒๓๔๕๖๗๘๙".indexOf(digit)));
   return {
@@ -63,28 +102,41 @@ export function parseSlipAmount(text, expectedAmount = null) {
     const line = originalLine.replace(/(\d)\s*\.\s*(\d{1,2})(?!\d)/g, "$1.$2");
     const matches = line.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g) || [];
     const hasAmountLabel = /จำนวนเงิน|ยอดเงิน|ยอดโอน|ยอดชำระ|amount|total/i.test(line);
-    const hasCurrency = /บาท|thb|฿/i.test(line);
+    const hasCurrency = /บาท|บา[ทต]|บท|baht|thb|฿/i.test(line);
     const isStandaloneAmount = /^(?:ยอด\s*)?(?:฿|thb)?\s*\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:บาท|thb)?$/i.test(line);
     const isFee = /ค่าธรรมเนียม|ค่าบริการ|fee/i.test(line);
     const isAccountOrReference = /บัญชี|account|เลข(?:ที่)?(?:รายการ|อ้างอิง)|รหัสอ้างอิง|หมายเลขอ้างอิง|transaction|reference|ref\.?|x{2,}|\*{2,}/i.test(line);
     const isDateOrTime = /วันที่|date|เวลา|time|\d{1,2}:\d{2}|\d{1,2}\s*(?:ม\.|ก\.|ส\.|เม\.|มิ\.|ต\.|พ\.|ธ\.)|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/i.test(line);
-    return matches.map((value) => ({
-      value: Number(value.replace(/,/g, "")),
-      lineIndex,
-      matchesExpected: Number.isFinite(Number(expectedAmount))
-        && Math.abs(Number(value.replace(/,/g, "")) - Number(expectedAmount)) < 0.009,
-      score: (hasAmountLabel ? 120 : 0)
-        + (hasCurrency ? 55 : 0)
-        + (isStandaloneAmount ? 90 : 0)
-        + (value.includes(".") ? 20 : 0)
-        - (isFee ? 250 : 0)
-        - (isAccountOrReference ? 250 : 0)
-        - (isDateOrTime ? 180 : 0),
-    }));
+    const isBalance = /ยอดคงเหลือ|คงเหลือ|วงเงิน|balance|available/i.test(line);
+    return matches.map((value) => {
+      const number = Number(value.replace(/,/g, ""));
+      const matchesExpected = Number.isFinite(Number(expectedAmount))
+        && Math.abs(number - Number(expectedAmount)) < 0.009;
+      const safeExpectedMatch = matchesExpected
+        && !isFee
+        && !isAccountOrReference
+        && !isDateOrTime
+        && !isBalance;
+      return {
+        value: number,
+        lineIndex,
+        matchesExpected,
+        safeExpectedMatch,
+        score: (hasAmountLabel ? 120 : 0)
+          + (hasCurrency ? 55 : 0)
+          + (isStandaloneAmount ? 90 : 0)
+          + (value.includes(".") ? 20 : 0)
+          + (safeExpectedMatch ? 80 : 0)
+          - (isFee ? 250 : 0)
+          - (isAccountOrReference ? 250 : 0)
+          - (isDateOrTime ? 180 : 0)
+          - (isBalance ? 250 : 0),
+      };
+    });
   }).filter((entry) => Number.isFinite(entry.value)
     && entry.value > 0
     && entry.value < 1_000_000
-    && entry.score >= 55);
+    && (entry.score >= 55 || entry.safeExpectedMatch));
   candidates.sort((left, right) =>
     Number(right.matchesExpected) - Number(left.matchesExpected)
     || right.score - left.score
@@ -93,15 +145,17 @@ export function parseSlipAmount(text, expectedAmount = null) {
 }
 
 export function parseSlipDate(text) {
-  const source = String(text || "");
+  const source = String(text || "")
+    // OCR sometimes places a stray Thai vowel between the July abbreviation.
+    .replace(/ก\s*\.\s*[ุู]\s*ค\s*\./g, "ก.ค.");
   const numeric = /(?:^|\D)(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\D|$)/.exec(source);
   if (numeric) return isoDate(numeric[1], numeric[2], numeric[3]);
 
-  const monthNames = [...THAI_MONTHS.keys()].sort((left, right) => right.length - left.length)
+  const monthNames = [...SLIP_MONTHS.keys()].sort((left, right) => right.length - left.length)
     .map(escapeRegExp).join("|");
   const textual = new RegExp(`(?:^|\\D)(\\d{1,2})\\s*(${monthNames})\\s*(\\d{2,4})(?:\\D|$)`, "i").exec(source);
   if (!textual) return null;
-  return isoDate(textual[1], THAI_MONTHS.get(textual[2].toLowerCase()), textual[3]);
+  return isoDate(textual[1], SLIP_MONTHS.get(textual[2].toLowerCase()), textual[3]);
 }
 
 export function parseSlipReference(text) {
@@ -132,11 +186,48 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
   });
   try {
     const result = await worker.recognize(optimized.blob);
-    const text = result.data.text || "";
-    const parsed = parseSlipText(text, expectedAmount);
+    let text = result.data.text || "";
+    let confidence = Number(result.data.confidence || 0);
+    let parsed = parseSlipText(text, expectedAmount);
+    const needsRetry = parsed.amount === null
+      || parsed.date === null
+      || parsed.reference === null
+      || classifySlipRecipient(text) !== "match";
+    if (needsRetry && optimized.retryBlob) {
+      onProgress(0);
+      const retryResult = await worker.recognize(optimized.retryBlob);
+      const retryText = retryResult.data.text || "";
+      const retryParsed = parseSlipText(retryText, expectedAmount);
+      text = [text, retryText].filter(Boolean).join("\n");
+      confidence = Math.max(confidence, Number(retryResult.data.confidence || 0));
+      parsed = {
+        amount: parsed.amount ?? retryParsed.amount,
+        date: parsed.date ?? retryParsed.date,
+        reference: parsed.reference ?? retryParsed.reference,
+      };
+    }
+    if (parsed.amount === null && optimized.amountBlob) {
+      onProgress(0);
+      await worker.setParameters({ tessedit_pageseg_mode: "6" });
+      const amountResult = await worker.recognize(optimized.amountBlob);
+      const amountText = amountResult.data.text || "";
+      text = [text, amountText].filter(Boolean).join("\n");
+      confidence = Math.max(confidence, Number(amountResult.data.confidence || 0));
+      parsed.amount = parseSlipAmount(amountText, expectedAmount);
+    }
+    if (parsed.date === null && optimized.dateBlob) {
+      onProgress(0);
+      await worker.setParameters({ tessedit_pageseg_mode: "6" });
+      const dateResult = await worker.recognize(optimized.dateBlob);
+      const dateText = dateResult.data.text || "";
+      text = [text, dateText].filter(Boolean).join("\n");
+      confidence = Math.max(confidence, Number(dateResult.data.confidence || 0));
+      parsed.date = parseSlipDate(dateText);
+      parsed.reference ??= parseSlipReference(dateText);
+    }
     return {
       ...parsed,
-      confidence: Number(result.data.confidence || 0),
+      confidence,
       text,
       dataUrl: optimized.dataUrl,
       mimeType: optimized.blob.type,
@@ -149,7 +240,7 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
 
 async function optimizeSlipImage(file) {
   const image = await createImageBitmap(file);
-  const maxSide = 1600;
+  const maxSide = 2000;
   const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
   const width = Math.max(1, Math.round(image.width * scale));
   const height = Math.max(1, Math.round(image.height * scale));
@@ -161,9 +252,79 @@ async function optimizeSlipImage(file) {
   context.fillRect(0, 0, width, height);
   context.drawImage(image, 0, 0, width, height);
   image.close();
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
   if (!blob) throw new Error("เตรียมรูปสลิปไม่สำเร็จ");
-  return { blob, dataUrl: await blobToDataUrl(blob) };
+
+  const cropHeight = Math.max(1, Math.round(height * 0.62));
+  const retryScale = Math.min(2, 1500 / width);
+  const retryCanvas = document.createElement("canvas");
+  retryCanvas.width = Math.max(1, Math.round(width * retryScale));
+  retryCanvas.height = Math.max(1, Math.round(cropHeight * retryScale));
+  const retryContext = retryCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+  retryContext.fillStyle = "#fff";
+  retryContext.fillRect(0, 0, retryCanvas.width, retryCanvas.height);
+  retryContext.drawImage(canvas, 0, 0, width, cropHeight, 0, 0, retryCanvas.width, retryCanvas.height);
+  enhanceMonochromeContrast(retryContext, retryCanvas.width, retryCanvas.height);
+  const retryBlob = await new Promise((resolve) => retryCanvas.toBlob(resolve, "image/png"));
+
+  // Several Thai bank slips render the transfer amount as a large isolated line
+  // over a patterned background. Whole-page OCR may skip it even when the rest of
+  // the slip is readable, so keep a tighter header crop for a final amount-only pass.
+  const amountSourceX = Math.round(width * 0.07);
+  const amountSourceY = Math.round(height * 0.04);
+  const amountSourceWidth = Math.max(1, Math.round(width * 0.86));
+  const amountSourceHeight = Math.max(1, Math.round(height * 0.29));
+  const amountScale = Math.min(2.5, 1500 / amountSourceWidth);
+  const amountCanvas = document.createElement("canvas");
+  amountCanvas.width = Math.max(1, Math.round(amountSourceWidth * amountScale));
+  amountCanvas.height = Math.max(1, Math.round(amountSourceHeight * amountScale));
+  const amountContext = amountCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+  amountContext.fillStyle = "#fff";
+  amountContext.fillRect(0, 0, amountCanvas.width, amountCanvas.height);
+  amountContext.drawImage(
+    canvas,
+    amountSourceX,
+    amountSourceY,
+    amountSourceWidth,
+    amountSourceHeight,
+    0,
+    0,
+    amountCanvas.width,
+    amountCanvas.height,
+  );
+  enhanceMonochromeContrast(amountContext, amountCanvas.width, amountCanvas.height);
+  const amountBlob = await new Promise((resolve) => amountCanvas.toBlob(resolve, "image/png"));
+
+  const dateSourceY = Math.round(height * 0.56);
+  const dateSourceHeight = Math.max(1, height - dateSourceY);
+  const dateScale = Math.min(2, 1500 / width);
+  const dateCanvas = document.createElement("canvas");
+  dateCanvas.width = Math.max(1, Math.round(width * dateScale));
+  dateCanvas.height = Math.max(1, Math.round(dateSourceHeight * dateScale));
+  const dateContext = dateCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+  dateContext.fillStyle = "#fff";
+  dateContext.fillRect(0, 0, dateCanvas.width, dateCanvas.height);
+  dateContext.drawImage(canvas, 0, dateSourceY, width, dateSourceHeight, 0, 0, dateCanvas.width, dateCanvas.height);
+  enhanceMonochromeContrast(dateContext, dateCanvas.width, dateCanvas.height);
+  const dateBlob = await new Promise((resolve) => dateCanvas.toBlob(resolve, "image/png"));
+  return { blob, retryBlob, amountBlob, dateBlob, dataUrl: await blobToDataUrl(blob) };
+}
+
+function enhanceMonochromeContrast(context, width, height) {
+  try {
+    const imageData = context.getImageData(0, 0, width, height);
+    const pixels = imageData.data;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const luminance = (pixels[index] * 0.299) + (pixels[index + 1] * 0.587) + (pixels[index + 2] * 0.114);
+      const contrasted = Math.max(0, Math.min(255, ((luminance - 128) * 1.65) + 128));
+      pixels[index] = contrasted;
+      pixels[index + 1] = contrasted;
+      pixels[index + 2] = contrasted;
+    }
+    context.putImageData(imageData, 0, 0);
+  } catch {
+    // The enlarged crop still helps when a browser cannot expose canvas pixels.
+  }
 }
 
 function isoDate(dayValue, monthValue, yearValue) {

@@ -501,7 +501,7 @@ function AdminDashboard({ session }) {
             /> : null}
             <nav aria-label="เมนูหลังบ้าน" className="badminton-tabs">
               {visibleTabs.map(({ id, label, icon: Icon }) => (
-                <button className={activeTab === id ? "is-active" : ""} key={id} onClick={() => setActiveTab(id)} type="button"><Icon size={18} /><span>{label}</span></button>
+                <button className={activeTab === id ? "is-active" : ""} key={id} onClick={() => setActiveTab(id)} type="button"><Icon size={18} /><span>{label}</span>{id === "payments" && appEvent.paymentSlips?.length ? <b className="badminton-tab-count" title={`${appEvent.paymentSlips.length} สลิปรอตรวจสอบ`}>{appEvent.paymentSlips.length}</b> : null}</button>
               ))}
             </nav>
 
@@ -1935,6 +1935,7 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
   const [billDraft, setBillDraft] = useState(null);
   const [paymentView, setPaymentView] = useState("current");
   const [paymentSettingsOpen, setPaymentSettingsOpen] = useState(false);
+  const pendingSlipCount = event.paymentSlips?.length || 0;
   const lineSummary = useMemo(() => buildLineSummary(event), [event]);
   const perRoundAwaitingClose = event.billingModel === "per_round" && event.status !== "closed";
   const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
@@ -2049,11 +2050,23 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
   }
 
   function reviewSlip(slip, approved) {
+    const roundCount = slip.paymentRounds?.length || slip.payment_ids?.length || 1;
+    const expectedAmount = Number(slip.expected_amount || 0);
+    const transferredAmount = slip.transferred_amount === null || slip.transferred_amount === undefined
+      ? null
+      : Number(slip.transferred_amount);
+    const amountLabel = transferredAmount === null
+      ? `${baht(expectedAmount)} บาท`
+      : `${baht(transferredAmount)} บาท`;
+    const message = approved
+      ? `ยืนยันรับเงิน ${amountLabel} ให้ ${slip.beneficiaryName} จำนวน ${roundCount} รอบ?\n\nระบบจะตัดยอดของทุกรอบที่เลือกพร้อมกัน`
+      : `ปฏิเสธสลิปของ ${slip.beneficiaryName} ใช่ไหม?\n\nยอด ${baht(expectedAmount)} บาทจะกลับไปรอชำระ และสมาชิกสามารถส่งสลิปใหม่ได้`;
+    if (!window.confirm(message)) return undefined;
     return mutate(async () => {
       await reviewPaymentSlip({ slip, approved, userId: session.user.id });
       await recordAudit({
         clubId: event.clubId,
-        eventId: event.id,
+        eventId: slip.paymentRounds?.[0]?.id || event.id,
         userId: session.user.id,
         action: `${approved ? "อนุมัติ" : "ปฏิเสธ"}สลิปของ ${slip.beneficiaryName}`,
         details: {
@@ -2093,10 +2106,29 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
     }, `รับเงินยอดค้างของ ${name} แล้ว`);
   }
 
+  function PaymentSubtabs() {
+    return (
+      <div className="badminton-payment-subtabs" role="tablist">
+        <button aria-selected={paymentView === "current"} className={paymentView === "current" ? "is-active" : ""} onClick={() => setPaymentView("current")} role="tab" type="button">รอบนี้</button>
+        <button aria-selected={paymentView === "outstanding"} className={paymentView === "outstanding" ? "is-active" : ""} onClick={() => setPaymentView("outstanding")} role="tab" type="button">ยอดค้าง <span>{previousOutstanding.count}</span></button>
+        <button aria-selected={paymentView === "slips"} className={paymentView === "slips" ? "is-active" : ""} onClick={() => setPaymentView("slips")} role="tab" type="button">ตรวจสอบสลิป <span className={pendingSlipCount ? "has-pending" : ""}>{pendingSlipCount}</span></button>
+      </div>
+    );
+  }
+
+  if (paymentView === "slips") {
+    return (
+      <section className="badminton-card badminton-settlement-card" id="settlement">
+        <PaymentSubtabs />
+        <SlipReviewPanel onOpen={openSlipImage} onReview={reviewSlip} showEmpty slips={event.paymentSlips} />
+      </section>
+    );
+  }
+
   if (paymentView === "outstanding") {
     return (
       <section className="badminton-card badminton-settlement-card" id="settlement">
-        <div className="badminton-payment-subtabs" role="tablist"><button onClick={() => setPaymentView("current")} role="tab" type="button">รอบนี้</button><button className="is-active" role="tab" type="button">ยอดค้าง <span>{previousOutstanding.count}</span></button></div>
+        <PaymentSubtabs />
         <div className="badminton-card-title"><WalletCards size={20} /><div><h2>คนที่ค้างจ่าย</h2><p>{outstandingGroups.length} คน · {previousOutstanding.count} รอบ</p></div><strong>{baht(previousOutstanding.total)} บาท</strong></div>
         <div className="badminton-outstanding-list">
           {outstandingGroups.length ? outstandingGroups.map((group) => {
@@ -2112,7 +2144,7 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
 
   return (
     <section className="badminton-card badminton-settlement-card" id="settlement">
-      <div className="badminton-payment-subtabs" role="tablist"><button className="is-active" role="tab" type="button">รอบนี้</button><button onClick={() => setPaymentView("outstanding")} role="tab" type="button">ยอดค้าง <span>{previousOutstanding.count}</span></button></div>
+      <PaymentSubtabs />
       <div className="badminton-payment-workspace">
         <div className="badminton-card-title badminton-payment-heading"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div><button aria-label="ตั้งค่าข้อความชำระเงินใน LINE" className="badminton-payment-settings-button" onClick={() => setPaymentSettingsOpen(true)} title="ตั้งค่าข้อความชำระเงินใน LINE" type="button"><Settings size={18} /></button></div>
         {perRoundAwaitingClose ? <div className="badminton-per-round-pending"><Timer size={18} /><div><strong>กำลังคำนวณตามจำนวนรอบ</strong><span>ผู้เล่นที่กลับก่อนสามารถล็อกยอดด้วย Snapshot จากหน้าผู้เล่น ส่วนคนที่ยังเล่นอยู่จะสรุปยอดเมื่อจบรอบ</span></div></div> : null}
@@ -2125,7 +2157,6 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
             <span>{paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ"}</span>
           </div>
         </div>
-        {event.paymentSlips?.length ? <div className="badminton-slip-review"><div className="badminton-slip-review-title"><ShieldCheck size={18} /><div><strong>สลิปรอตรวจสอบ</strong><span>{event.paymentSlips.length} รายการ · ตรวจได้จากเว็บนี้ ไม่ต้องย้อนหาใน LINE</span></div></div>{event.paymentSlips.map((slip) => <article key={slip.id}><div><strong>{slip.beneficiaryName}</strong><span>ยอดเรียกเก็บ {baht(slip.expected_amount)} บาท · สลิป {slip.transferred_amount === null ? "อ่านยอดไม่ชัด" : `${baht(slip.transferred_amount)} บาท`}</span><small>{slip.review_reason || "รอตรวจสอบ"}{slip.transferred_on ? ` · ${slip.transferred_on}` : ""}{slip.transaction_reference ? ` · Ref ${slip.transaction_reference}` : ""}</small></div><div>{slip.storage_path ? <button className="badminton-secondary" onClick={() => openSlipImage(slip)} type="button"><Image size={15} /> ดูสลิป</button> : null}<button className="badminton-secondary" onClick={() => reviewSlip(slip, false)} type="button"><X size={15} /> ไม่ผ่าน</button><button className="badminton-primary" onClick={() => reviewSlip(slip, true)} type="button"><Check size={15} /> รับเงิน</button></div></article>)}</div> : null}
         <div className="badminton-card-title badminton-payment-list-title"><WalletCards size={19} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
         <div className="badminton-pay-list">
           {collectionRows.map((row) => {
@@ -2144,6 +2175,35 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
       {billDraft ? <div className="badminton-modal-backdrop" role="presentation"><form aria-label={`สรุปยอดเรียกเก็บ ${billDraft.row.name}`} className="badminton-custom-charge-modal badminton-bill-modal" onSubmit={confirmBill}><div className="badminton-modal-title"><div><p className="badminton-kicker">ยอดเรียกเก็บรายคน</p><h2>{billDraft.row.name}</h2></div><button aria-label="ปิดหน้าต่างสรุปยอด" onClick={() => setBillDraft(null)} type="button"><X size={19} /></button></div><div className="badminton-calculated-amount"><span>ยอดที่ระบบคำนวณ</span><strong>{baht(billDraft.row.billingFinalized && billDraft.row.calculatedAmount !== null ? billDraft.row.calculatedAmount : billDraft.row.roundedDue)} บาท</strong><small>ข้อมูลนี้แสดงเฉพาะแอดมิน สมาชิกจะไม่เห็น</small></div><label>ยอดเรียกเก็บจริง<input autoFocus inputMode="decimal" min="0" onChange={(changeEvent) => setBillDraft({ ...billDraft, amount: changeEvent.target.value })} required step="1" type="number" value={billDraft.amount} /><span>บาท</span></label><p className="badminton-bill-help">เมื่อยืนยัน สมาชิกจะเห็นเฉพาะยอดเรียกเก็บจริง และระบบตรวจสลิปจะเทียบกับยอดนี้</p><button className="badminton-primary" type="submit"><Check size={17} /> ยืนยันยอดเรียกเก็บ</button></form></div> : null}
     </section>
   );
+}
+
+function SlipReviewPanel({ slips = [], onOpen, onReview, showEmpty = false }) {
+  if (!slips.length) return showEmpty ? <div className="badminton-slip-review is-empty" id="pending-slip-review"><ShieldCheck size={28} /><strong>ไม่มีสลิปรอตรวจสอบ</strong><span>สลิปที่ผ่านอัตโนมัติจะตัดยอดทันที ส่วนรายการที่อ่านไม่ชัดจะมาแสดงที่นี่</span></div> : null;
+  const orderedSlips = [...slips].sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
+  const expectedTotal = orderedSlips.reduce((sum, slip) => sum + Number(slip.expected_amount || 0), 0);
+  const readableAmountCount = orderedSlips.filter((slip) => slip.transferred_amount !== null && slip.transferred_amount !== undefined).length;
+  return <div className="badminton-slip-review" id="pending-slip-review">
+    <div className="badminton-slip-review-title"><ShieldCheck size={20} /><div><strong>สลิปรออนุมัติ</strong><span>รวมสลิปจากทุกรอบไว้ที่นี่ ตรวจรูปและเหตุผลก่อนตัดยอด</span></div></div>
+    <div className="badminton-slip-review-summary"><span><small>รอตรวจ</small><strong>{orderedSlips.length} รายการ</strong></span><span><small>ยอดที่เลือกชำระ</small><strong>{baht(expectedTotal)} บาท</strong></span><span><small>อ่านยอดได้</small><strong>{readableAmountCount}/{orderedSlips.length}</strong></span></div>
+    {orderedSlips.map((slip, index) => {
+      const expectedAmount = Number(slip.expected_amount || 0);
+      const transferredAmount = slip.transferred_amount === null || slip.transferred_amount === undefined
+        ? null
+        : Number(slip.transferred_amount);
+      const amountMatches = transferredAmount !== null && Math.abs(transferredAmount - expectedAmount) < 0.009;
+      const amountDifference = transferredAmount === null ? null : transferredAmount - expectedAmount;
+      const submittedAt = slip.created_at ? new Date(slip.created_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "";
+      return <article className="badminton-slip-review-card" key={slip.id}>
+        <div className="badminton-slip-review-card-heading"><span className="badminton-slip-review-number">{index + 1}</span><div><strong>{slip.beneficiaryName}</strong><small>{slip.submittedByName ? `ส่งโดย ${slip.submittedByName}` : ""}{submittedAt ? `${slip.submittedByName ? " · " : ""}${submittedAt}` : ""}</small></div><b>รอตรวจ</b></div>
+        {slip.paymentRounds?.length ? <div className="badminton-slip-round-list">{slip.paymentRounds.map((round) => <span key={round.id}><CalendarDays size={13} /><strong>{formatRoundOption(round.date)}</strong>{round.venue ? <small>{round.venue}</small> : null}</span>)}</div> : <p className="badminton-slip-missing-data">ไม่พบข้อมูลรอบ กรุณาดูรูปก่อนอนุมัติ</p>}
+        <div className="badminton-slip-amount-comparison"><span><small>ยอดที่ระบบเรียกเก็บ</small><strong>{baht(expectedAmount)} บาท</strong></span><span className={transferredAmount === null ? "is-unclear" : amountMatches ? "is-matched" : "is-mismatched"}><small>ยอดที่อ่านจากสลิป</small><strong>{transferredAmount === null ? "อ่านไม่ชัด" : `${baht(transferredAmount)} บาท`}</strong></span></div>
+        {amountDifference !== null && !amountMatches ? <p className="badminton-slip-warning">ยอดในสลิป{amountDifference > 0 ? "มากกว่า" : "น้อยกว่า"}ยอดที่เลือก {baht(Math.abs(amountDifference))} บาท</p> : null}
+        <div className="badminton-slip-review-reason"><strong>เหตุผลที่ต้องตรวจ</strong><span>{slip.review_reason || "ระบบไม่สามารถยืนยันข้อมูลครบทุกเงื่อนไขได้"}</span></div>
+        <div className="badminton-slip-review-meta">{slip.transferred_on ? <span>วันที่โอน {formatRoundOption(slip.transferred_on)}</span> : <span className="is-unclear">วันที่อ่านไม่ชัด</span>}{slip.transaction_reference ? <span>อ้างอิง …{String(slip.transaction_reference).slice(-6)}</span> : <span className="is-unclear">เลขอ้างอิงอ่านไม่ชัด</span>}{Number.isFinite(Number(slip.ocr_confidence)) ? <span>ความชัด {Math.round(Number(slip.ocr_confidence))}%</span> : null}</div>
+        <div className="badminton-slip-review-actions">{slip.storage_path ? <button className="badminton-secondary" onClick={() => onOpen(slip)} type="button"><Image size={16} /> เปิดรูปสลิป</button> : <span className="badminton-slip-no-image">ไม่มีรูปสลิป</span>}<button className="badminton-secondary is-reject" onClick={() => onReview(slip, false)} type="button"><X size={16} /> ปฏิเสธ</button><button className="badminton-primary" disabled={!slip.storage_path} onClick={() => onReview(slip, true)} type="button"><Check size={16} /> อนุมัติและตัดยอด</button></div>
+      </article>;
+    })}
+  </div>;
 }
 
 function AuditPanel({ actions }) {
@@ -2196,6 +2256,7 @@ async function calculatePreviousOutstanding(clubId, eventIds) {
 
 function mapDashboardToEvent(dashboard) {
   const paymentsByMember = new Map(dashboard.payments.map((payment) => [payment.member_id, payment]));
+  const slipPaymentsById = new Map((dashboard.paymentSlipPayments || []).map((payment) => [payment.id, payment]));
   const membersById = new Map(dashboard.members.map((member) => [member.id, member]));
   const attendanceByMember = new Map(dashboard.attendance.map((row) => [row.member_id, row]));
   const startTime = dashboard.event.starts_at.slice(0, 5);
@@ -2306,11 +2367,17 @@ function mapDashboardToEvent(dashboard) {
     attendance,
     paymentSlips: (dashboard.paymentSlips || []).map((slip) => ({
       ...slip,
+      submittedByName: memberName(membersById.get(slip.submitted_by_member_id)),
       beneficiaryName: [...new Set((slip.beneficiary_member_ids?.length
         ? slip.beneficiary_member_ids
         : [slip.beneficiary_member_id])
         .map((memberId) => memberName(membersById.get(memberId)))
         .filter(Boolean))].join(", ") || "สมาชิก",
+      paymentRounds: [...new Map((slip.payment_ids || []).map((paymentId) => {
+        const payment = slipPaymentsById.get(paymentId);
+        const relatedEvent = Array.isArray(payment?.events) ? payment.events[0] : payment?.events;
+        return relatedEvent ? [payment.event_id, { id: payment.event_id, date: relatedEvent.event_date, venue: relatedEvent.venue }] : [paymentId, null];
+      }).filter(([, round]) => round)).values()].sort((left, right) => String(left.date).localeCompare(String(right.date))),
     })),
     extraCosts,
     costs: [

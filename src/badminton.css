@@ -1746,6 +1746,7 @@
 }
 
 .badminton-tabs button {
+  position: relative;
   min-width: 0;
   min-height: 48px;
   display: grid;
@@ -1759,6 +1760,22 @@
   color: #637064;
   font-size: 11px;
   font-weight: 900;
+}
+
+.badminton-tab-count {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  min-width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #b42318;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
 }
 
 .badminton-tabs button.is-active {
@@ -4021,7 +4038,7 @@
 
 .badminton-payment-subtabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   margin-bottom: 14px;
   padding: 4px;
@@ -4032,6 +4049,7 @@
 
 .badminton-payment-subtabs button {
   min-height: 46px;
+  padding: 4px 6px;
   border: 0;
   border-radius: 9px;
   background: transparent;
@@ -4055,6 +4073,11 @@
   border-radius: 999px;
   background: #dff1e5;
   font-size: 11px;
+}
+
+.badminton-payment-subtabs span.has-pending {
+  background: #f7df82;
+  color: #765a08;
 }
 
 .badminton-outstanding-list {
@@ -4174,60 +4197,267 @@
 
 .badminton-slip-review {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin: 12px 0;
-  padding: 10px;
-  border: 1px solid #e4ca7d;
+  padding: 12px;
+  border: 1px solid #d7dfd4;
   border-radius: 12px;
-  background: #fff9e6;
+  background: #f5f8f4;
+}
+
+.badminton-slip-review.is-empty {
+  min-height: 180px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 24px;
+  text-align: center;
+  color: #637064;
+  border-color: #d5dfd2;
+  background: #f7f9f6;
+}
+
+.badminton-slip-review.is-empty > span {
+  max-width: 420px;
+  color: #6d756e;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .badminton-slip-review-title,
-.badminton-slip-review > article,
-.badminton-slip-review > article > div:last-child {
+.badminton-slip-review-card-heading,
+.badminton-slip-review-actions {
   display: flex;
   align-items: center;
 }
 
 .badminton-slip-review-title {
   gap: 8px;
-  color: #765a08;
+  color: #176f50;
 }
 
-.badminton-slip-review-title > div,
-.badminton-slip-review > article > div:first-child {
+.badminton-slip-review-title > div {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.badminton-slip-review-title span,
-.badminton-slip-review > article span,
-.badminton-slip-review > article small {
-  color: #6d654d;
+.badminton-slip-review-title span {
+  color: #687268;
   font-size: 11px;
 }
 
-.badminton-slip-review > article {
-  justify-content: space-between;
-  gap: 9px;
+.badminton-slip-review-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.badminton-slip-review-summary > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
   padding: 9px;
-  border: 1px solid #eadba8;
   border-radius: 9px;
+  background: #fff;
+  text-align: center;
+}
+
+.badminton-slip-review-summary small {
+  color: #6d756e;
+  font-size: 10px;
+}
+
+.badminton-slip-review-summary strong {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-slip-review-card {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid #dce4da;
+  border-radius: 11px;
   background: #fff;
 }
 
-.badminton-slip-review > article > div:last-child {
-  flex: 0 0 auto;
-  gap: 5px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+.badminton-slip-review-card-heading {
+  min-width: 0;
+  gap: 8px;
 }
 
-.badminton-slip-review > article button {
-  min-height: 38px;
-  padding: 0 9px;
+.badminton-slip-review-card-heading > div {
+  min-width: 0;
+  display: grid;
+  flex: 1;
+  gap: 1px;
+}
+
+.badminton-slip-review-card-heading > div > strong,
+.badminton-slip-review-card-heading > div > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-slip-review-card-heading > div > small {
+  color: #6d756e;
+  font-size: 10px;
+}
+
+.badminton-slip-review-card-heading > b {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #fff0bd;
+  color: #795d0c;
+  font-size: 10px;
+}
+
+.badminton-slip-review-number {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  background: #e6f3e9;
+  color: #176f50;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.badminton-slip-round-list {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.badminton-slip-round-list > span {
+  min-width: max-content;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 1px 5px;
+  padding: 6px 8px;
+  border: 1px solid #dae4d7;
+  border-radius: 8px;
+  background: #f7faf6;
+  color: #176f50;
   font-size: 11px;
+}
+
+.badminton-slip-round-list small {
+  grid-column: 1 / -1;
+  color: #687268;
+  font-size: 9px;
+}
+
+.badminton-slip-amount-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.badminton-slip-amount-comparison > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 9px;
+  border-radius: 9px;
+  background: #f3f6f2;
+}
+
+.badminton-slip-amount-comparison small {
+  color: #687268;
+  font-size: 10px;
+}
+
+.badminton-slip-amount-comparison strong {
+  font-size: 16px;
+}
+
+.badminton-slip-amount-comparison > span.is-matched {
+  background: #e8f6ec;
+  color: #0f7a52;
+}
+
+.badminton-slip-amount-comparison > span.is-mismatched,
+.badminton-slip-amount-comparison > span.is-unclear {
+  background: #fff5d7;
+  color: #765a08;
+}
+
+.badminton-slip-warning,
+.badminton-slip-missing-data {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #fff0e9;
+  color: #a53c26;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.badminton-slip-review-reason {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  padding: 8px 9px;
+  border-left: 3px solid #dfbd50;
+  border-radius: 6px;
+  background: #fff9e8;
+  color: #6e591b;
+  font-size: 11px;
+}
+
+.badminton-slip-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.badminton-slip-review-meta > span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #eef3ed;
+  color: #5f6a60;
+  font-size: 9px;
+}
+
+.badminton-slip-review-meta > span.is-unclear {
+  background: #fff5d7;
+  color: #765a08;
+}
+
+.badminton-slip-review-actions {
+  gap: 6px;
+}
+
+.badminton-slip-review-actions button {
+  min-height: 42px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.badminton-slip-review-actions .badminton-primary {
+  flex: 1;
+}
+
+.badminton-slip-review-actions .is-reject {
+  border-color: #efc9c3;
+  color: #ae3025;
+}
+
+.badminton-slip-no-image {
+  color: #a53c26;
+  font-size: 10px;
+  font-weight: 800;
 }
 
 /* LIFF payment flow */
@@ -5119,13 +5349,26 @@
 }
 
 @media (max-width: 520px) {
-  .badminton-slip-review > article {
-    align-items: stretch;
-    flex-direction: column;
+  .badminton-payment-subtabs button {
+    font-size: 12px;
   }
 
-  .badminton-slip-review > article > div:last-child button {
-    flex: 1;
+  .badminton-slip-review {
+    padding: 9px;
+  }
+
+  .badminton-slip-review-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .badminton-slip-review-actions .badminton-primary {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .badminton-slip-review-actions .badminton-secondary {
+    width: 100%;
   }
 
   .liff-payment-card {

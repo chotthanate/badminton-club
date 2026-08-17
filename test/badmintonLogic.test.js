@@ -698,6 +698,14 @@ test("slip parser reads Thai transfer amount and Buddhist date", () => {
   });
 });
 
+test("slip parser reads an English abbreviated bank date", () => {
+  assert.equal(parseSlipText("Transfer Completed\n16 Aug 26 11:07 AM\nAmount 200.00 Baht").date, "2026-08-16");
+});
+
+test("slip parser tolerates a stray Thai vowel in a July abbreviation", () => {
+  assert.equal(parseSlipText("วันที่ทํารายการ 26 ก.ุค. 2569 - 12:47").date, "2026-07-26");
+});
+
 test("slip parser ignores masked account digits on a TTB slip", () => {
   const result = parseSlipText([
     "โอนเงินสำเร็จ",
@@ -722,6 +730,16 @@ test("slip parser uses the selected total as a safe hint between valid amount ca
   assert.equal(parseSlipText("974\n175", 175).amount, 175);
 });
 
+test("slip parser tolerates common OCR damage around the selected amount", () => {
+  assert.equal(parseSlipText("160.00า๓8\nค่าธรรมเนียม 0.00 THB", 160).amount, 160);
+  assert.equal(parseSlipText("190.00 บท รวๆ 8.\n0.00 บาท", 190).amount, 190);
+  assert.equal(parseSlipText("Amount:\n290.00 Baht\n0.00 Baht", 290).amount, 290);
+});
+
+test("slip parser does not use the selected total from account, fee, date, or balance lines", () => {
+  assert.equal(parseSlipText("บัญชี 160.00\nค่าธรรมเนียม 160.00\nยอดคงเหลือ 160.00", 160).amount, null);
+});
+
 test("slip parser normalizes a transaction reference for duplicate protection", () => {
   assert.equal(parseSlipReference("เลขที่รายการ: 0100-20260725-ABC123"), "010020260725ABC123");
   assert.equal(parseSlipReference("Transaction ID\nAB12CD345678"), "AB12CD345678");
@@ -731,6 +749,8 @@ test("slip parser normalizes a transaction reference for duplicate protection", 
 test("slip recipient accepts only the configured full recipient name", () => {
   assert.equal(slipRecipientMatches("ผู้รับ\nนาย ณฐกฤต อินนะใจ"), true);
   assert.equal(slipRecipientMatches("ไปยัง ณฐกฤต\nอินนะใจ"), true);
+  assert.equal(slipRecipientMatches("Transfer to MR. NATHAKRIT INNAJAI"), true);
+  assert.equal(slipRecipientMatches("ผู้รับ นาย ณฐกฤต อินนะไจ"), true);
   assert.equal(slipRecipientMatches("ผู้รับ นาย สมชาย ใจดี"), false);
   assert.equal(slipRecipientMatches("ผู้รับ ณฐกฤต อ."), false);
   assert.equal(classifySlipRecipient("ผู้รับ\nนาย สมชาย ใจดี"), "mismatch");

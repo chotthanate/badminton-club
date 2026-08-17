@@ -31,3 +31,6 @@ Thumbs.db
 # Local Supabase and Codex tooling
 supabase/.temp/
 work/
+
+# Private OCR fixtures may contain names, account details, and transaction references
+private-test-data/
