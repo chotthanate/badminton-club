@@ -17,7 +17,7 @@ import {
   totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
-import { classifySlipRecipient, parseSlipReference, parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
+import { buildSlipRoundBreakdown, classifySlipRecipient, parseSlipReference, parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
 import { getLiffMode } from "../src/liffMode.js";
 
 function makeEvent({ attendance = [], costs = [], ...overrides } = {}) {
@@ -756,6 +756,35 @@ test("slip recipient accepts only the configured full recipient name", () => {
   assert.equal(classifySlipRecipient("ผู้รับ\nนาย สมชาย ใจดี"), "mismatch");
   assert.equal(classifySlipRecipient("ผู้รับ\nณฐกฤต อ."), "unclear");
   assert.equal(classifySlipRecipient("ข้อความในสลิปอ่านไม่ออก"), "unclear");
+});
+
+test("slip review groups selected payments by round and shows each round amount", () => {
+  const payments = new Map([
+    ["p1", { event_id: "e1", amount: 120, paid_at: "2026-08-18T01:00:00Z", events: { event_date: "2026-08-01", venue: "Court A" } }],
+    ["p2", { event_id: "e2", amount: 145, paid_at: "2026-08-18T01:00:00Z", events: { event_date: "2026-08-08", venue: "Court A" } }],
+    ["p3", { event_id: "e2", amount: 155, paid_at: "2026-08-18T01:00:00Z", events: { event_date: "2026-08-08", venue: "Court A" } }],
+  ]);
+  const result = buildSlipRoundBreakdown(["p3", "p1", "p2"], payments);
+  assert.deepEqual(result.rounds, [
+    { id: "e1", date: "2026-08-01", venue: "Court A", amount: 120 },
+    { id: "e2", date: "2026-08-08", venue: "Court A", amount: 300 },
+  ]);
+  assert.equal(result.allPaymentsPaid, true);
+  assert.equal(result.hasMissingPaymentData, false);
+});
+
+test("slip review does not mark a partially paid selection as fully paid", () => {
+  const payments = new Map([
+    ["p1", { event_id: "e1", amount: 120, paid_at: "2026-08-18T01:00:00Z", events: { event_date: "2026-08-01" } }],
+    ["p2", { event_id: "e2", amount: 145, paid_at: null, events: { event_date: "2026-08-08" } }],
+  ]);
+  assert.equal(buildSlipRoundBreakdown(["p1", "p2"], payments).allPaymentsPaid, false);
+});
+
+test("slip review identifies deleted or missing payment rows as old data", () => {
+  const result = buildSlipRoundBreakdown(["deleted-payment"], new Map());
+  assert.equal(result.allPaymentsPaid, false);
+  assert.equal(result.hasMissingPaymentData, true);
 });
 
 test("LIFF payment mode overrides the signup mode from the configured endpoint", () => {

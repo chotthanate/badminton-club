@@ -26,6 +26,38 @@ const SLIP_MONTHS = new Map([...THAI_MONTHS, ...ENGLISH_MONTHS]);
 
 export const PAYMENT_RECIPIENT_NAME = "นาย ณฐกฤต อินนะใจ";
 
+export function buildSlipRoundBreakdown(paymentIds = [], paymentsById = new Map()) {
+  const uniquePaymentIds = [...new Set(Array.isArray(paymentIds) ? paymentIds : [])];
+  const roundsByEvent = new Map();
+  let resolvedPaymentCount = 0;
+  let paidPaymentCount = 0;
+
+  uniquePaymentIds.forEach((paymentId) => {
+    const payment = paymentsById instanceof Map ? paymentsById.get(paymentId) : paymentsById?.[paymentId];
+    if (!payment) return;
+    resolvedPaymentCount += 1;
+    if (payment.paid_at) paidPaymentCount += 1;
+    const relatedEvent = Array.isArray(payment.events) ? payment.events[0] : payment.events;
+    if (!relatedEvent || !payment.event_id) return;
+    const existing = roundsByEvent.get(payment.event_id) || {
+      id: payment.event_id,
+      date: relatedEvent.event_date,
+      venue: relatedEvent.venue,
+      amount: 0,
+    };
+    existing.amount += Math.max(0, Number(payment.amount) || 0);
+    roundsByEvent.set(payment.event_id, existing);
+  });
+
+  return {
+    rounds: [...roundsByEvent.values()].sort((left, right) => String(left.date || "").localeCompare(String(right.date || ""))),
+    allPaymentsPaid: uniquePaymentIds.length > 0
+      && resolvedPaymentCount === uniquePaymentIds.length
+      && paidPaymentCount === uniquePaymentIds.length,
+    hasMissingPaymentData: uniquePaymentIds.length === 0 || resolvedPaymentCount !== uniquePaymentIds.length,
+  };
+}
+
 export function slipRecipientMatches(text) {
   return classifySlipRecipient(text) === "match";
 }

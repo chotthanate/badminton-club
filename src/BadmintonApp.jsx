@@ -90,6 +90,7 @@ import {
   moveUpcomingQueue,
   upsertShuttlecockCheckpoint,
 } from "./clubRepository.js";
+import { buildSlipRoundBreakdown } from "./paymentSlip.js";
 import {
   baht,
   billableHours,
@@ -2059,8 +2060,12 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
       ? `${baht(expectedAmount)} บาท`
       : `${baht(transferredAmount)} บาท`;
     const message = approved
-      ? `ยืนยันรับเงิน ${amountLabel} ให้ ${slip.beneficiaryName} จำนวน ${roundCount} รอบ?\n\nระบบจะตัดยอดของทุกรอบที่เลือกพร้อมกัน`
-      : `ปฏิเสธสลิปของ ${slip.beneficiaryName} ใช่ไหม?\n\nยอด ${baht(expectedAmount)} บาทจะกลับไปรอชำระ และสมาชิกสามารถส่งสลิปใหม่ได้`;
+      ? slip.allPaymentsPaid
+        ? `ยอดของ ${slip.beneficiaryName} ถูกบันทึกว่ารับเงินแล้ว\n\nยืนยันปิดรายการสลิปนี้ออกจากหน้าตรวจสอบโดยไม่ตัดยอดซ้ำ?`
+        : `ยืนยันรับเงิน ${amountLabel} ให้ ${slip.beneficiaryName} จำนวน ${roundCount} รอบ?\n\nระบบจะตัดยอดของทุกรอบที่เลือกพร้อมกัน`
+      : slip.hasMissingPaymentData
+        ? `ยืนยันปิดรายการเก่าของ ${slip.beneficiaryName}?\n\nระบบไม่พบยอดที่เคยผูกกับสลิปนี้ การปิดรายการจะไม่แก้สถานะรับเงินของรอบใด`
+        : `ปฏิเสธสลิปของ ${slip.beneficiaryName} ใช่ไหม?\n\nยอด ${baht(expectedAmount)} บาทจะกลับไปรอชำระ และสมาชิกสามารถส่งสลิปใหม่ได้`;
     if (!window.confirm(message)) return undefined;
     return mutate(async () => {
       await reviewPaymentSlip({ slip, approved, userId: session.user.id });
@@ -2195,12 +2200,13 @@ function SlipReviewPanel({ slips = [], onOpen, onReview, showEmpty = false }) {
       const submittedAt = slip.created_at ? new Date(slip.created_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "";
       return <article className="badminton-slip-review-card" key={slip.id}>
         <div className="badminton-slip-review-card-heading"><span className="badminton-slip-review-number">{index + 1}</span><div><strong>{slip.beneficiaryName}</strong><small>{slip.submittedByName ? `ส่งโดย ${slip.submittedByName}` : ""}{submittedAt ? `${slip.submittedByName ? " · " : ""}${submittedAt}` : ""}</small></div><b>รอตรวจ</b></div>
-        {slip.paymentRounds?.length ? <div className="badminton-slip-round-list">{slip.paymentRounds.map((round) => <span key={round.id}><CalendarDays size={13} /><strong>{formatRoundOption(round.date)}</strong>{round.venue ? <small>{round.venue}</small> : null}</span>)}</div> : <p className="badminton-slip-missing-data">ไม่พบข้อมูลรอบ กรุณาดูรูปก่อนอนุมัติ</p>}
+        {slip.paymentRounds?.length ? <div className="badminton-slip-round-list">{slip.paymentRounds.map((round) => <span key={round.id}><CalendarDays size={13} /><strong>{formatRoundOption(round.date)}</strong><b>{baht(round.amount)} บาท</b>{round.venue ? <small>{round.venue}</small> : null}</span>)}</div> : <p className="badminton-slip-missing-data">ไม่พบยอดที่ผูกกับสลิป อาจเป็นรายการเก่าที่ลบรอบไปแล้ว สามารถกด “ปิดรายการเก่า” ได้</p>}
+        {slip.allPaymentsPaid ? <p className="badminton-slip-already-paid"><Check size={15} /> ยอดทุกรอบถูกบันทึกว่ารับเงินแล้ว สามารถปิดรายการนี้ได้โดยไม่ตัดเงินซ้ำ</p> : null}
         <div className="badminton-slip-amount-comparison"><span><small>ยอดที่ระบบเรียกเก็บ</small><strong>{baht(expectedAmount)} บาท</strong></span><span className={transferredAmount === null ? "is-unclear" : amountMatches ? "is-matched" : "is-mismatched"}><small>ยอดที่อ่านจากสลิป</small><strong>{transferredAmount === null ? "อ่านไม่ชัด" : `${baht(transferredAmount)} บาท`}</strong></span></div>
         {amountDifference !== null && !amountMatches ? <p className="badminton-slip-warning">ยอดในสลิป{amountDifference > 0 ? "มากกว่า" : "น้อยกว่า"}ยอดที่เลือก {baht(Math.abs(amountDifference))} บาท</p> : null}
         <div className="badminton-slip-review-reason"><strong>เหตุผลที่ต้องตรวจ</strong><span>{slip.review_reason || "ระบบไม่สามารถยืนยันข้อมูลครบทุกเงื่อนไขได้"}</span></div>
         <div className="badminton-slip-review-meta">{slip.transferred_on ? <span>วันที่โอน {formatRoundOption(slip.transferred_on)}</span> : <span className="is-unclear">วันที่อ่านไม่ชัด</span>}{slip.transaction_reference ? <span>อ้างอิง …{String(slip.transaction_reference).slice(-6)}</span> : <span className="is-unclear">เลขอ้างอิงอ่านไม่ชัด</span>}{Number.isFinite(Number(slip.ocr_confidence)) ? <span>ความชัด {Math.round(Number(slip.ocr_confidence))}%</span> : null}</div>
-        <div className="badminton-slip-review-actions">{slip.storage_path ? <button className="badminton-secondary" onClick={() => onOpen(slip)} type="button"><Image size={16} /> เปิดรูปสลิป</button> : <span className="badminton-slip-no-image">ไม่มีรูปสลิป</span>}<button className="badminton-secondary is-reject" onClick={() => onReview(slip, false)} type="button"><X size={16} /> ปฏิเสธ</button><button className="badminton-primary" disabled={!slip.storage_path} onClick={() => onReview(slip, true)} type="button"><Check size={16} /> อนุมัติและตัดยอด</button></div>
+        <div className="badminton-slip-review-actions">{slip.storage_path ? <button className="badminton-secondary" onClick={() => onOpen(slip)} type="button"><Image size={16} /> เปิดรูปสลิป</button> : <span className="badminton-slip-no-image">ไม่มีรูปสลิป</span>}<button className="badminton-secondary is-reject" onClick={() => onReview(slip, false)} type="button"><X size={16} /> {slip.hasMissingPaymentData ? "ปิดรายการเก่า" : "ปฏิเสธ"}</button>{!slip.hasMissingPaymentData ? <button className="badminton-primary" disabled={!slip.storage_path && !slip.allPaymentsPaid} onClick={() => onReview(slip, true)} type="button"><Check size={16} /> {slip.allPaymentsPaid ? "ปิดรายการที่รับเงินแล้ว" : "อนุมัติและตัดยอด"}</button> : null}</div>
       </article>;
     })}
   </div>;
@@ -2365,20 +2371,21 @@ function mapDashboardToEvent(dashboard) {
     members: dashboard.members.map((member) => ({ id: member.id, name: memberName(member), lineName: member.display_name, nickname: member.nickname, aliases: member.aliases || [], role: member.role, lineUserId: member.line_user_id, active: member.active, paymentExempt: Boolean(member.payment_exempt), skillLevel: member.skill_level || null, playableSkillLevels: member.playable_skill_levels || [], allowLowerLevel: Boolean(member.allow_lower_level), allowHigherLevel: Boolean(member.allow_higher_level), createdAt: member.created_at })),
     signups: dashboard.signups.map((row) => ({ memberId: row.member_id, status: row.status, arrivalTime: row.arrival_time?.slice(0, 5) || "", note: row.note, createdAt: row.created_at, submittedByLineUserId: row.submitted_by_line_user_id || "", submittedByLineName: row.submitted_by_line_name || "", skillLevel: row.skill_level_snapshot || null, playableSkillLevels: row.playable_skill_levels_snapshot || [], allowLowerLevel: Boolean(row.allow_lower_level_snapshot), allowHigherLevel: Boolean(row.allow_higher_level_snapshot) })),
     attendance,
-    paymentSlips: (dashboard.paymentSlips || []).map((slip) => ({
-      ...slip,
-      submittedByName: memberName(membersById.get(slip.submitted_by_member_id)),
-      beneficiaryName: [...new Set((slip.beneficiary_member_ids?.length
-        ? slip.beneficiary_member_ids
-        : [slip.beneficiary_member_id])
-        .map((memberId) => memberName(membersById.get(memberId)))
-        .filter(Boolean))].join(", ") || "สมาชิก",
-      paymentRounds: [...new Map((slip.payment_ids || []).map((paymentId) => {
-        const payment = slipPaymentsById.get(paymentId);
-        const relatedEvent = Array.isArray(payment?.events) ? payment.events[0] : payment?.events;
-        return relatedEvent ? [payment.event_id, { id: payment.event_id, date: relatedEvent.event_date, venue: relatedEvent.venue }] : [paymentId, null];
-      }).filter(([, round]) => round)).values()].sort((left, right) => String(left.date).localeCompare(String(right.date))),
-    })),
+    paymentSlips: (dashboard.paymentSlips || []).map((slip) => {
+      const paymentBreakdown = buildSlipRoundBreakdown(slip.payment_ids, slipPaymentsById);
+      return {
+        ...slip,
+        submittedByName: memberName(membersById.get(slip.submitted_by_member_id)),
+        beneficiaryName: [...new Set((slip.beneficiary_member_ids?.length
+          ? slip.beneficiary_member_ids
+          : [slip.beneficiary_member_id])
+          .map((memberId) => memberName(membersById.get(memberId)))
+          .filter(Boolean))].join(", ") || "สมาชิก",
+        paymentRounds: paymentBreakdown.rounds,
+        allPaymentsPaid: paymentBreakdown.allPaymentsPaid,
+        hasMissingPaymentData: paymentBreakdown.hasMissingPaymentData,
+      };
+    }),
     extraCosts,
     costs: [
       { id: "computed-court", type: "court", label: `ค่าคอร์ดรวม ${courtHours} ชม.`, amount: courtHours * courtHourlyRate },

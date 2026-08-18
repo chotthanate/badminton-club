@@ -262,7 +262,7 @@ export async function loadDashboard(clubId, eventId = null) {
   if (pendingPaymentIds.length) {
     const { data, error } = await client()
       .from("payments")
-      .select("id, event_id, events!inner(event_date, venue)")
+      .select("id, event_id, amount, paid_at, payment_status, events!inner(event_date, venue)")
       .in("id", pendingPaymentIds);
     throwIfError(error);
     paymentSlipPayments = data || [];

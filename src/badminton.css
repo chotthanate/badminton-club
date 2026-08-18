@@ -4341,7 +4341,7 @@
 .badminton-slip-round-list > span {
   min-width: max-content;
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: auto auto auto;
   align-items: center;
   gap: 1px 5px;
   padding: 6px 8px;
@@ -4352,10 +4352,29 @@
   font-size: 11px;
 }
 
+.badminton-slip-round-list b {
+  color: #13251c;
+  font-size: 11px;
+}
+
 .badminton-slip-round-list small {
   grid-column: 1 / -1;
   color: #687268;
   font-size: 9px;
+}
+
+.badminton-slip-already-paid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: #e7f6ec;
+  color: #176f50;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .badminton-slip-amount-comparison {
