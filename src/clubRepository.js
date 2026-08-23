@@ -1004,6 +1004,20 @@ export async function setEventShuttlecockCount({ eventId, count, checkpointTime 
   return data?.[0] || null;
 }
 
+export async function correctEventShuttlecockCount({ eventId, count, checkpointTime }) {
+  const amount = Number(count);
+  if (!Number.isInteger(amount) || amount < 0 || amount > 1000) {
+    throw new Error("จำนวนลูกแบดรวมต้องอยู่ระหว่าง 0 ถึง 1,000 ลูก");
+  }
+  const { data, error } = await client().rpc("correct_event_shuttlecock_count", {
+    target_event_id: eventId,
+    replacement_count: amount,
+    checkpoint_at: `${String(checkpointTime).slice(0, 5)}:00`,
+  });
+  throwIfError(error);
+  return data?.[0] || null;
+}
+
 export async function removeShuttlecockCheckpoint(checkpointId, eventId) {
   const { error } = await client().from("shuttlecock_checkpoints").delete().eq("id", checkpointId);
   throwIfError(error);

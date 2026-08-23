@@ -564,6 +564,44 @@ test("shuttlecock checkpoints charge later shuttlecocks only to players still pr
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [285, 475]);
 });
 
+test("corrected shuttlecock checkpoints give equal totals to players with equal attendance", () => {
+  const result = calculateSettlement({
+    ...makeEvent(),
+    billingModel: "time_segmented",
+    endTime: "01:30",
+    courts: [
+      { startsAt: "21:00", endsAt: "01:30" },
+      { startsAt: "21:00", endsAt: "01:30" },
+      { startsAt: "21:00", endsAt: "01:30" },
+    ],
+    courtHourlyRate: 150,
+    shuttlecockCount: 16,
+    shuttlecockUnitPrice: 95,
+    shuttlecockCheckpoints: [
+      { time: "21:15", cumulativeCount: 3 },
+      { time: "22:15", cumulativeCount: 5 },
+      { time: "23:00", cumulativeCount: 8 },
+      { time: "23:45", cumulativeCount: 10 },
+      { time: "00:00", cumulativeCount: 11 },
+      { time: "00:30", cumulativeCount: 15 },
+      { time: "01:30", cumulativeCount: 16 },
+    ],
+    extraCosts: [],
+    attendance: [
+      { memberId: "one", name: "คนแรก", arrived: true, arrivedAt: "21:00", leftAt: "01:15", playedMinutes: 255, billingPercentage: 100 },
+      { memberId: "two", name: "คนที่สอง", arrived: true, arrivedAt: "21:00", leftAt: "01:15", playedMinutes: 255, billingPercentage: 100 },
+      { memberId: "stayed", name: "อยู่ถึงจบ", arrived: true, arrivedAt: "21:00", leftAt: "01:30", playedMinutes: 270, billingPercentage: 100 },
+    ],
+  });
+
+  const first = result.rows.find((row) => row.memberId === "one").roundedDue;
+  const second = result.rows.find((row) => row.memberId === "two").roundedDue;
+  const stayed = result.rows.find((row) => row.memberId === "stayed").roundedDue;
+  assert.equal(first, second);
+  assert.ok(first <= stayed);
+  assert.equal(result.rows.reduce((sum, row) => sum + row.roundedDue, 0), 3545);
+});
+
 test("shuttlecock checkpoints do not charge late arrivals for earlier shuttlecocks", () => {
   const result = calculateSettlement({
     ...makeEvent(),

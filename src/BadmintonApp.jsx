@@ -43,6 +43,7 @@ import {
   createEvent,
   createQueueDraft,
   createTestClub,
+  correctEventShuttlecockCount,
   deleteCompletedEvent,
   finalizeMemberBill,
   getAdminContexts,
@@ -1801,11 +1802,18 @@ function PricingPanel({ event, mutate, session, settlement }) {
       return;
     }
     if (nextCount === currentCount) return;
-    const lockedCount = settlement.rows.filter((row) => row.billingFinalized).length;
-    const lockedWarning = lockedCount
-      ? `\n\nมีผู้เล่น ${lockedCount} คนที่สรุปยอดแล้ว ยอดเหล่านั้นจะไม่เปลี่ยน แต่คนที่ยังไม่สรุปจะคำนวณใหม่`
+    const finalizedRows = settlement.rows.filter((row) => row.billingFinalized);
+    const paidAffectedRows = finalizedRows.filter((row) => row.paid && Number(row.shuttlecockCountSnapshot || 0) > nextCount);
+    if (nextCount < currentCount && paidAffectedRows.length) {
+      window.alert(`แก้เป็น ${nextCount} ลูกไม่ได้ เพราะมีผู้เล่น ${paidAffectedRows.length} คนชำระเงินจากยอดลูกแบดเดิมแล้ว\n\nกรุณาตรวจสอบยอดที่รับเงินจริงก่อนแก้ข้อมูล`);
+      setShuttleTotalDraft(String(currentCount));
+      return;
+    }
+    const unpaidFinalizedCount = finalizedRows.filter((row) => !row.paid).length;
+    const correctionWarning = nextCount < currentCount && unpaidFinalizedCount
+      ? `\n\nระบบจะเปิดยอดค้างที่สรุปแล้ว ${unpaidFinalizedCount} คนกลับมาคำนวณใหม่ทั้งหมด เพื่อไม่ให้แต่ละคนใช้ฐานจำนวนลูกไม่เท่ากัน หลังแก้แล้วต้องตรวจและสรุปยอดคนเหล่านี้อีกครั้ง`
       : "";
-    if (!window.confirm(`ยืนยันแก้จำนวนลูกแบดรวมจาก ${currentCount} เป็น ${nextCount} ลูก?\n\nใช้เมนูนี้เฉพาะกรณีบันทึกยอดผิด${lockedWarning}`)) {
+    if (!window.confirm(`ยืนยันแก้จำนวนลูกแบดรวมจาก ${currentCount} เป็น ${nextCount} ลูก?\n\nใช้เมนูนี้เฉพาะกรณีบันทึกยอดผิด${correctionWarning}`)) {
       setShuttleTotalDraft(String(currentCount));
       return;
     }
@@ -1814,10 +1822,15 @@ function PricingPanel({ event, mutate, session, settlement }) {
     setShuttleBusy(true);
     const checkpointTime = currentShuttleCheckpointTime();
     try {
-      await mutate(
-        () => setEventShuttlecockCount({ eventId: event.id, count: nextCount, checkpointTime }),
-        `แก้จำนวนลูกแบดรวมเป็น ${nextCount} ลูกแล้ว`,
-      );
+      const useSafeCorrection = nextCount < currentCount && finalizedRows.length > 0;
+      await mutate(async () => {
+        const result = useSafeCorrection
+          ? await correctEventShuttlecockCount({ eventId: event.id, count: nextCount, checkpointTime })
+          : await setEventShuttlecockCount({ eventId: event.id, count: nextCount, checkpointTime });
+        return result;
+      }, useSafeCorrection
+        ? `แก้จำนวนลูกแบดเป็น ${nextCount} ลูก และเปิดยอดค้างกลับมาคำนวณใหม่แล้ว`
+        : `แก้จำนวนลูกแบดรวมเป็น ${nextCount} ลูกแล้ว`);
     } finally {
       shuttleMutationRef.current = false;
       setShuttleBusy(false);
@@ -1906,7 +1919,7 @@ function PricingPanel({ event, mutate, session, settlement }) {
             <button className="badminton-secondary" type="submit"><Plus size={16} /> บันทึก</button>
           </form>
           <div className="badminton-checkpoint-list">
-            {(event.shuttlecockCheckpoints || []).length ? event.shuttlecockCheckpoints.map((item) => <span key={item.id}><strong>{item.time}</strong> {item.cumulativeCount} ลูก<button aria-label={`ลบจุดบันทึกเวลา ${item.time}`} onClick={() => { const lockedCount = settlement.rows.filter((row) => row.billingFinalized).length; const message = lockedCount ? `มีผู้เล่น ${lockedCount} คนที่สรุปยอดแล้ว ยอดเหล่านั้นจะไม่เปลี่ยน แต่คนที่ยังไม่สรุปจะคำนวณใหม่\n\nลบข้อมูลลูกแบดเวลา ${item.time} ใช่ไหม?` : `ลบข้อมูลลูกแบดเวลา ${item.time} ใช่ไหม?`; if (window.confirm(message)) mutate(() => removeShuttlecockCheckpoint(item.id, event.id), "ลบจุดบันทึกลูกแบดแล้ว"); }} type="button"><X size={14} /></button></span>) : <small>ยังไม่มีจุดบันทึก ระบบจะใช้จำนวนสุดท้ายตอนจบรอบ</small>}
+            {(event.shuttlecockCheckpoints || []).length ? event.shuttlecockCheckpoints.map((item) => <span key={item.id}><strong>{item.time}</strong> {item.cumulativeCount} ลูก<button aria-label={`ลบจุดบันทึกเวลา ${item.time}`} onClick={() => { const lockedCount = settlement.rows.filter((row) => row.billingFinalized).length; if (lockedCount) { window.alert(`ลบจุดบันทึกไม่ได้ เพราะมีผู้เล่น ${lockedCount} คนที่สรุปยอดแล้ว\n\nหากจำนวนรวมผิด ให้ใช้ช่อง “แก้ยอดรวม” เพื่อให้ระบบเปิดยอดค้างและคำนวณใหม่อย่างปลอดภัย`); return; } if (window.confirm(`ลบข้อมูลลูกแบดเวลา ${item.time} ใช่ไหม?`)) mutate(() => removeShuttlecockCheckpoint(item.id, event.id), "ลบจุดบันทึกลูกแบดแล้ว"); }} type="button"><X size={14} /></button></span>) : <small>ยังไม่มีจุดบันทึก ระบบจะใช้จำนวนสุดท้ายตอนจบรอบ</small>}
           </div>
         </div>
       ) : null}
