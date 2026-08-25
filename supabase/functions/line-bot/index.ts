@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildPaymentSummary, compareCourtNames } from "../_shared/paymentSummary.js";
 import { sortBySignupOrder } from "../_shared/signupOrder.js";
 import { courtHasStarted } from "../_shared/liveQueueTime.js";
+import { reconcileSlipAmount } from "../_shared/slipAmount.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -819,7 +820,9 @@ async function handlePaymentLiffRequest(payload: any) {
     }
 
     const expectedAmount = (payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const transferredAmount = finiteNumber(slip.amount);
+    const submittedOcrAmount = finiteNumber(slip.amount);
+    const reconciledAmount = reconcileSlipAmount(submittedOcrAmount, expectedAmount, slip.text);
+    const transferredAmount = reconciledAmount.amount;
     const transferredOn = isoDateValue(slip.transferredOn);
     const confidence = finiteNumber(slip.confidence);
     const recipientStatus = classifySlipRecipient(slip.text);
@@ -977,6 +980,8 @@ async function handlePaymentLiffRequest(payload: any) {
         payment_ids: paymentIds,
         expected_amount: expectedAmount,
         transferred_amount: transferredAmount,
+        submitted_ocr_amount: submittedOcrAmount,
+        decimal_point_recovered: reconciledAmount.decimalPointRecovered,
         overpayment_amount: overpaymentAmount,
         transferred_on: transferredOn,
         slip_id: slipId,

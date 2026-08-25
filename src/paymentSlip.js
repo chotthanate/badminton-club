@@ -129,28 +129,42 @@ export function parseSlipText(text, expectedAmount = null) {
 }
 
 export function parseSlipAmount(text, expectedAmount = null) {
+  const normalizedExpectedAmount = Number(expectedAmount);
+  const hasExpectedAmount = Number.isFinite(normalizedExpectedAmount) && normalizedExpectedAmount > 0;
   const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const candidates = lines.flatMap((originalLine, lineIndex) => {
     const line = originalLine.replace(/(\d)\s*\.\s*(\d{1,2})(?!\d)/g, "$1.$2");
     const matches = line.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g) || [];
     const hasAmountLabel = /จำนวนเงิน|ยอดเงิน|ยอดโอน|ยอดชำระ|amount|total/i.test(line);
     const hasCurrency = /บาท|บา[ทต]|บท|baht|thb|฿/i.test(line);
-    const isStandaloneAmount = /^(?:ยอด\s*)?(?:฿|thb)?\s*\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:บาท|thb)?$/i.test(line);
+    const isStandaloneAmount = /^(?:ยอด\s*)?(?:฿|thb)?\s*(?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{1,2})?\s*(?:บาท|thb)?$/i.test(line);
     const isFee = /ค่าธรรมเนียม|ค่าบริการ|fee/i.test(line);
     const isAccountOrReference = /บัญชี|account|เลข(?:ที่)?(?:รายการ|อ้างอิง)|รหัสอ้างอิง|หมายเลขอ้างอิง|transaction|reference|ref\.?|x{2,}|\*{2,}/i.test(line);
     const isDateOrTime = /วันที่|date|เวลา|time|\d{1,2}:\d{2}|\d{1,2}\s*(?:ม\.|ก\.|ส\.|เม\.|มิ\.|ต\.|พ\.|ธ\.)|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/i.test(line);
     const isBalance = /ยอดคงเหลือ|คงเหลือ|วงเงิน|balance|available/i.test(line);
     return matches.map((value) => {
       const number = Number(value.replace(/,/g, ""));
-      const matchesExpected = Number.isFinite(Number(expectedAmount))
-        && Math.abs(number - Number(expectedAmount)) < 0.009;
+      // Mobile OCR commonly drops the decimal point from a large isolated bank
+      // amount (for example 100.00 becomes 10000). Only repair that specific
+      // shape when the selected payment total supplies an exact, safe hint.
+      const decimalPointWasDropped = hasExpectedAmount
+        && !/[.,]/.test(value)
+        && Math.abs(number - (normalizedExpectedAmount * 100)) < 0.009
+        && (hasAmountLabel || hasCurrency || isStandaloneAmount)
+        && !isFee
+        && !isAccountOrReference
+        && !isDateOrTime
+        && !isBalance;
+      const normalizedNumber = decimalPointWasDropped ? normalizedExpectedAmount : number;
+      const matchesExpected = hasExpectedAmount
+        && Math.abs(normalizedNumber - normalizedExpectedAmount) < 0.009;
       const safeExpectedMatch = matchesExpected
         && !isFee
         && !isAccountOrReference
         && !isDateOrTime
         && !isBalance;
       return {
-        value: number,
+        value: normalizedNumber,
         lineIndex,
         matchesExpected,
         safeExpectedMatch,
@@ -221,7 +235,11 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
     let text = result.data.text || "";
     let confidence = Number(result.data.confidence || 0);
     let parsed = parseSlipText(text, expectedAmount);
+    const amountDoesNotMatchExpected = Number.isFinite(Number(expectedAmount))
+      && parsed.amount !== null
+      && Math.abs(Number(parsed.amount) - Number(expectedAmount)) >= 0.009;
     const needsRetry = parsed.amount === null
+      || amountDoesNotMatchExpected
       || parsed.date === null
       || parsed.reference === null
       || classifySlipRecipient(text) !== "match";
@@ -233,19 +251,22 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
       text = [text, retryText].filter(Boolean).join("\n");
       confidence = Math.max(confidence, Number(retryResult.data.confidence || 0));
       parsed = {
-        amount: parsed.amount ?? retryParsed.amount,
+        amount: chooseRecognizedAmount(parsed.amount, retryParsed.amount, expectedAmount),
         date: parsed.date ?? retryParsed.date,
         reference: parsed.reference ?? retryParsed.reference,
       };
     }
-    if (parsed.amount === null && optimized.amountBlob) {
+    const shouldReadAmountCrop = parsed.amount === null
+      || (Number.isFinite(Number(expectedAmount))
+        && Math.abs(Number(parsed.amount) - Number(expectedAmount)) >= 0.009);
+    if (shouldReadAmountCrop && optimized.amountBlob) {
       onProgress(0);
       await worker.setParameters({ tessedit_pageseg_mode: "6" });
       const amountResult = await worker.recognize(optimized.amountBlob);
       const amountText = amountResult.data.text || "";
       text = [text, amountText].filter(Boolean).join("\n");
       confidence = Math.max(confidence, Number(amountResult.data.confidence || 0));
-      parsed.amount = parseSlipAmount(amountText, expectedAmount);
+      parsed.amount = chooseRecognizedAmount(parsed.amount, parseSlipAmount(amountText, expectedAmount), expectedAmount);
     }
     if (parsed.date === null && optimized.dateBlob) {
       onProgress(0);
@@ -268,6 +289,15 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
   } finally {
     await worker.terminate();
   }
+}
+
+function chooseRecognizedAmount(currentAmount, candidateAmount, expectedAmount) {
+  const expected = Number(expectedAmount);
+  if (Number.isFinite(expected) && expected > 0) {
+    if (candidateAmount !== null && Math.abs(Number(candidateAmount) - expected) < 0.009) return candidateAmount;
+    if (currentAmount !== null && Math.abs(Number(currentAmount) - expected) < 0.009) return currentAmount;
+  }
+  return currentAmount ?? candidateAmount;
 }
 
 async function optimizeSlipImage(file) {

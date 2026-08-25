@@ -774,6 +774,15 @@ test("slip parser tolerates common OCR damage around the selected amount", () =>
   assert.equal(parseSlipText("Amount:\n290.00 Baht\n0.00 Baht", 290).amount, 290);
 });
 
+test("slip parser recovers a decimal point dropped from the selected amount", () => {
+  assert.equal(parseSlipText("รายการโอนเงินสำเร็จ\nจำนวนเงิน\n10000\n14 ส.ค. 2569", 100).amount, 100);
+  assert.equal(parseSlipText("ยอดโอน 17500 บาท", 175).amount, 175);
+});
+
+test("slip parser does not repair decimal loss from unsafe numeric fields", () => {
+  assert.equal(parseSlipText("เลขอ้างอิง 10000\nค่าธรรมเนียม 10000", 100).amount, null);
+});
+
 test("slip parser does not use the selected total from account, fee, date, or balance lines", () => {
   assert.equal(parseSlipText("บัญชี 160.00\nค่าธรรมเนียม 160.00\nยอดคงเหลือ 160.00", 160).amount, null);
 });
