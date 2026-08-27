@@ -461,11 +461,12 @@ function buildSignupMessage(event: any, liffId: string) {
     .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`);
   const courtLines = courts.length ? courts : ["ยังไม่ได้ระบุคอร์ท"];
   const cardDate = thaiLongDate(event.event_date).replace("ที่ ", " ที่ ");
+  const englishCardDate = englishLongDate(event.event_date);
   const title = `🏸 ลงชื่อเล่นแบดมินตัน : ${cardDate}`;
 
   return {
     type: "flex",
-    altText: `${title}\nสถานที่ : ${event.venue}\n${courtLines.join("\n")}`,
+    altText: `${title}\nBadminton registration · ${englishCardDate}\nสถานที่ / Venue : ${event.venue}\n${courtLines.join("\n")}`,
     contents: {
       type: "bubble",
       body: {
@@ -473,10 +474,15 @@ function buildSignupMessage(event: any, liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          languageCardHeading("🏸 ลงชื่อเล่นแบดมินตัน", `https://liff.line.me/${liffId}?event_id=${event.id}&lang=en`),
+          languageCardHeading(
+            "🏸 ลงชื่อเล่นแบดมินตัน",
+            "Badminton Registration",
+            `https://liff.line.me/${liffId}?event_id=${event.id}&lang=en`,
+          ),
           { type: "text", text: cardDate, color: "#15966a", weight: "bold" },
+          { type: "text", text: englishCardDate, color: "#637064", size: "xs" },
           { type: "separator" },
-          { type: "text", text: `สถานที่ : ${event.venue}`, size: "sm", wrap: true },
+          { type: "text", text: `สถานที่ / Venue : ${event.venue}`, size: "sm", wrap: true },
           ...courtLines.map((court) => ({
             type: "text",
             text: court,
@@ -499,7 +505,7 @@ function buildSignupMessage(event: any, liffId: string) {
             color: "#15966a",
             action: {
               type: "uri",
-              label: "ลงเวลา",
+              label: "ลงเวลา / Register",
               uri: `https://liff.line.me/${liffId}?event_id=${event.id}`,
             },
           },
@@ -512,7 +518,7 @@ function buildSignupMessage(event: any, liffId: string) {
 function buildPaymentMessage(liffId: string) {
   return {
     type: "flex",
-    altText: "ชำระค่าตีแบด · ตรวจยอดค้างและแนบสลิป",
+    altText: "ชำระค่าตีแบด / Badminton Payment",
     contents: {
       type: "bubble",
       body: {
@@ -520,8 +526,13 @@ function buildPaymentMessage(liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          languageCardHeading("💸 ชำระค่าตีแบด", `https://liff.line.me/${liffId}?mode=payment&lang=en`),
+          languageCardHeading(
+            "💸 ชำระค่าตีแบด",
+            "Badminton Payment",
+            `https://liff.line.me/${liffId}?mode=payment&lang=en`,
+          ),
           { type: "text", text: "กดปุ่มด้านล่างเพื่อเลือกยอดที่ต้องชำระและแนบรูปสลิป", size: "sm", color: "#637064", wrap: true },
+          { type: "text", text: "Select your balance and upload the transfer slip.", size: "xs", color: "#637064", wrap: true },
         ],
       },
       footer: {
@@ -533,7 +544,7 @@ function buildPaymentMessage(liffId: string) {
           color: "#15966a",
           action: {
             type: "uri",
-            label: "ชำระเงิน",
+            label: "ชำระเงิน / Pay",
             uri: `https://liff.line.me/${liffId}?mode=payment`,
           },
         }],
@@ -545,7 +556,7 @@ function buildPaymentMessage(liffId: string) {
 function buildLiveQueueMessage(event: any, liffId: string) {
   return {
     type: "flex",
-    altText: "ดูสนามและผู้เล่นคิวถัดไป",
+    altText: "สนามและคิว / Courts & Queues",
     contents: {
       type: "bubble",
       body: {
@@ -553,9 +564,14 @@ function buildLiveQueueMessage(event: any, liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          languageCardHeading("🏸 สนามและคิว", `https://liff.line.me/${liffId}?liff=live&event_id=${event.id}&lang=en`),
+          languageCardHeading(
+            "🏸 สนามและคิว",
+            "Courts & Queues",
+            `https://liff.line.me/${liffId}?liff=live&event_id=${event.id}&lang=en`,
+          ),
           { type: "text", text: event.venue || "Headshot Badminton", size: "sm", color: "#637064", wrap: true },
           { type: "text", text: "ดูผู้เล่นในแต่ละสนาม เวลาเล่น คิวถัดไป และผู้เล่นที่กำลังรอ", size: "sm", color: "#637064", wrap: true },
+          { type: "text", text: "View active courts, upcoming queues, and waiting players.", size: "xs", color: "#637064", wrap: true },
         ],
       },
       footer: {
@@ -567,7 +583,7 @@ function buildLiveQueueMessage(event: any, liffId: string) {
           color: "#15966a",
           action: {
             type: "uri",
-            label: "ดูสนามและผู้เล่นคิวถัดไป",
+            label: "ดูสนามและคิว / View",
             uri: `https://liff.line.me/${liffId}?liff=live&event_id=${event.id}`,
           },
         }],
@@ -576,20 +592,35 @@ function buildLiveQueueMessage(event: any, liffId: string) {
   };
 }
 
-function languageCardHeading(title: string, englishUrl: string) {
+function languageCardHeading(title: string, englishTitle: string, englishUrl: string) {
   return {
     type: "box",
     layout: "horizontal",
-    alignItems: "center",
+    alignItems: "flex-start",
     spacing: "sm",
     contents: [
-      { type: "text", text: title, weight: "bold", size: "xl", wrap: true, flex: 1 },
       {
-        type: "button",
-        style: "secondary",
-        height: "sm",
-        flex: 0,
+        type: "box",
+        layout: "vertical",
+        spacing: "none",
+        flex: 1,
+        contents: [
+          { type: "text", text: title, weight: "bold", size: "xl", wrap: true },
+          { type: "text", text: englishTitle, weight: "bold", size: "xs", color: "#15966a", wrap: true },
+        ],
+      },
+      {
+        type: "box",
+        layout: "vertical",
+        width: "58px",
+        height: "30px",
+        backgroundColor: "#eef4f0",
+        cornerRadius: "15px",
+        justifyContent: "center",
         action: { type: "uri", label: "EN", uri: englishUrl },
+        contents: [
+          { type: "text", text: "English", size: "xxs", weight: "bold", color: "#15966a", align: "center" },
+        ],
       },
     ],
   };
@@ -1729,6 +1760,11 @@ function safeJson(value: string) {
 
 function thaiLongDate(isoDate: string) {
   return new Intl.DateTimeFormat("th-TH", { weekday: "long", day: "numeric", month: "long" })
+    .format(new Date(`${isoDate}T12:00:00+07:00`));
+}
+
+function englishLongDate(isoDate: string) {
+  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" })
     .format(new Date(`${isoDate}T12:00:00+07:00`));
 }
 
