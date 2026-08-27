@@ -26,7 +26,7 @@ export function buildTestPaymentLiffUrl({ liffId, testClubId }) {
   return `https://liff.line.me/${encodeURIComponent(liffId)}?${params}`;
 }
 
-export function buildLiveQueueUrl({ eventId = null, testClubId = null, origin = window.location.origin + window.location.pathname } = {}) {
+export function buildLiveQueueUrl({ eventId = null, testClubId = null, language = null, origin = window.location.origin + window.location.pathname } = {}) {
   const params = new URLSearchParams({ liff: "live" });
   if (eventId) params.set("event_id", eventId);
   else params.set("latest", "1");
@@ -34,6 +34,7 @@ export function buildLiveQueueUrl({ eventId = null, testClubId = null, origin = 
     params.set("test", "1");
     params.set("test_club_id", testClubId);
   }
+  if (language === "en" || language === "th") params.set("lang", language);
   return `${origin}?${params}`;
 }
 

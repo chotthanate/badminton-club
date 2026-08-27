@@ -55,6 +55,10 @@ test("live queue links use latest production or an isolated test round", () => {
     buildLiveQueueUrl({ origin: "https://example.com/badminton-club/", eventId: "event-1", testClubId: "club-1" }),
     "https://example.com/badminton-club/?liff=live&event_id=event-1&test=1&test_club_id=club-1",
   );
+  assert.equal(
+    buildLiveQueueUrl({ origin: "https://example.com/badminton-club/", language: "en" }),
+    "https://example.com/badminton-club/?liff=live&latest=1&lang=en",
+  );
 });
 
 test("arrival time options advance by 15 minutes and stop before session end", () => {

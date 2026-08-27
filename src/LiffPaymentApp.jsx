@@ -4,12 +4,16 @@ import { baht, formatThaiDate } from "./badmintonLogic.js";
 import { getLiffTestContext } from "./liffSignup.js";
 import { selectedPaymentTotal } from "./paymentSelection.js";
 import { classifySlipRecipient, PAYMENT_RECIPIENT_NAME, recognizeSlip } from "./paymentSlip.js";
+import LanguageToggle from "./LanguageToggle.jsx";
+import { formatMemberDate, localizeError, pickLanguage, useLanguage } from "./language.js";
 
 const PAYMENT_BANK_NAME = "ธนาคารไทยพาณิชย์";
 const PAYMENT_BANK_ACCOUNT_DISPLAY = "408-6-96159-5";
 const PAYMENT_BANK_ACCOUNT_COPY = "4086961595";
 
 export default function LiffPaymentApp() {
+  const { language, setLanguage } = useLanguage();
+  const tr = (thai, english) => pickLanguage(language, thai, english);
   const { testMode, testClubId } = getLiffTestContext(window.location.search);
   const testPayload = { testMode, testClubId };
   const [data, setData] = useState(null);
@@ -30,7 +34,7 @@ export default function LiffPaymentApp() {
     async function start() {
       try {
         const liffId = import.meta.env.VITE_LINE_LIFF_ID;
-        if (!liffId || !window.liff) throw new Error("ระบบแจ้งโอน LINE ยังตั้งค่าไม่ครบ");
+        if (!liffId || !window.liff) throw new Error(tr("ระบบแจ้งโอน LINE ยังตั้งค่าไม่ครบ", "LINE payment is not configured."));
         await window.liff.init({ liffId });
         if (!window.liff.isLoggedIn()) {
           window.liff.login({ redirectUri: window.location.href });
@@ -43,7 +47,7 @@ export default function LiffPaymentApp() {
           entry.id === response.profile.memberId && entry.payments.length);
         setSelectedBeneficiaryIds(ownBeneficiary ? [ownBeneficiary.id] : []);
       } catch (nextError) {
-        if (active) setError(nextError.message || "เปิดหน้าแจ้งโอนไม่สำเร็จ");
+        if (active) setError(localizeError(nextError.message, language, tr("เปิดหน้าแจ้งโอนไม่สำเร็จ", "Unable to open the payment page.")));
       } finally {
         if (active) setLoading(false);
       }
@@ -97,7 +101,7 @@ export default function LiffPaymentApp() {
     changeEvent.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setError("กรุณาเลือกรูปสลิป");
+      setError(tr("กรุณาเลือกรูปสลิป", "Please choose a slip image."));
       return;
     }
     setReading(true);
@@ -109,7 +113,7 @@ export default function LiffPaymentApp() {
       const nextSlip = await recognizeSlip(file, setProgress, total);
       setSlip(nextSlip);
     } catch (nextError) {
-      setError(nextError.message || "อ่านข้อความจากสลิปไม่สำเร็จ");
+      setError(localizeError(nextError.message, language, tr("อ่านข้อความจากสลิปไม่สำเร็จ", "Unable to read the slip.")));
     } finally {
       setReading(false);
     }
@@ -117,11 +121,11 @@ export default function LiffPaymentApp() {
 
   async function submitPayment() {
     if (!selectedPaymentIds.length) {
-      setError("กรุณาเลือกรอบที่ต้องการชำระ");
+      setError(tr("กรุณาเลือกรอบที่ต้องการชำระ", "Please select at least one session to pay."));
       return;
     }
     if (!slip) {
-      setError("กรุณาแนบรูปสลิป");
+      setError(tr("กรุณาแนบรูปสลิป", "Please attach your transfer slip."));
       return;
     }
     setSubmitting(true);
@@ -154,7 +158,7 @@ export default function LiffPaymentApp() {
           refreshed.beneficiaries.some((entry) => entry.id === memberId && entry.payments.length)));
       }
     } catch (nextError) {
-      setError(nextError.message || "ตรวจสลิปไม่สำเร็จ");
+      setError(localizeError(nextError.message, language, tr("ตรวจสลิปไม่สำเร็จ", "Unable to verify the slip.")));
     } finally {
       setSubmitting(false);
     }
@@ -173,73 +177,73 @@ export default function LiffPaymentApp() {
       setAccountCopied(true);
       window.setTimeout(() => setAccountCopied(false), 1800);
     } catch (nextError) {
-      setError(nextError.message || "คัดลอกเลขบัญชีไม่สำเร็จ");
+      setError(tr("คัดลอกเลขบัญชีไม่สำเร็จ", "Unable to copy the account number."));
     }
   }
 
-  if (loading) return <PaymentShell><div className="liff-loading"><LoaderCircle size={30} /><strong>กำลังเปิดยอดค้างชำระ...</strong></div></PaymentShell>;
-  if (error && !data) return <PaymentShell><div className="liff-error"><strong>เปิดหน้าแจ้งโอนไม่ได้</strong><span>{error}</span></div></PaymentShell>;
+  if (loading) return <PaymentShell language={language} setLanguage={setLanguage}><div className="liff-loading"><LoaderCircle size={30} /><strong>{tr("กำลังเปิดยอดค้างชำระ...", "Loading outstanding balances...")}</strong></div></PaymentShell>;
+  if (error && !data) return <PaymentShell language={language} setLanguage={setLanguage}><div className="liff-error"><strong>{tr("เปิดหน้าแจ้งโอนไม่ได้", "Unable to open payment")}</strong><span>{error}</span></div></PaymentShell>;
 
   return (
-    <PaymentShell>
+    <PaymentShell language={language} setLanguage={setLanguage}>
       <header className="liff-payment-header">
         <ReceiptText size={25} />
-        <div><h1>ชำระค่าตีแบด</h1></div>
+        <div><h1>{tr("ชำระค่าตีแบด", "Badminton payment")}</h1></div>
       </header>
 
       <section className="liff-payment-card">
-        <div className="liff-payment-profile"><UserRound size={20} /><span>เข้าใช้ด้วย LINE</span><strong>{data.profile.nickname || data.profile.name}</strong></div>
+        <div className="liff-payment-profile"><UserRound size={20} /><span>{tr("เข้าใช้ด้วย LINE", "Signed in with LINE")}</span><strong>{data.profile.nickname || data.profile.name}</strong></div>
         <label className="liff-beneficiary-select">
-          <span>เพิ่มผู้เล่นที่ต้องการชำระ</span>
+          <span>{tr("เพิ่มผู้เล่นที่ต้องการชำระ", "Add players to this payment")}</span>
           <select disabled={!selectableBeneficiaries.length} onChange={(event) => addBeneficiary(event.target.value)} value={beneficiaryId}>
-            <option value="">{selectableBeneficiaries.length ? "เลือกชื่อผู้เล่น" : "เลือกผู้เล่นครบแล้ว"}</option>
+            <option value="">{selectableBeneficiaries.length ? tr("เลือกชื่อผู้เล่น", "Select a player") : tr("เลือกผู้เล่นครบแล้ว", "All players selected")}</option>
             {selectableBeneficiaries.map((entry) => <option key={entry.id} value={entry.id}>{beneficiaryLabel(entry)}</option>)}
           </select>
-          <small><Users size={13} /> เลือกได้หลายคน แล้วโอนยอดรวมเพียงครั้งเดียว</small>
+          <small><Users size={13} /> {tr("เลือกได้หลายคน แล้วโอนยอดรวมเพียงครั้งเดียว", "Select multiple players and make one combined transfer.")}</small>
         </label>
       </section>
 
       <section className="liff-payment-card">
-        <div className="liff-payment-section-title"><div><strong>เลือกรอบที่ต้องการจ่าย</strong><span>{selectedBeneficiaries.length} คน · {availablePayments.length} รอบค้าง</span></div></div>
+        <div className="liff-payment-section-title"><div><strong>{tr("เลือกรอบที่ต้องการจ่าย", "Select sessions to pay")}</strong><span>{selectedBeneficiaries.length} {tr("คน", "players")} · {availablePayments.length} {tr("รอบค้าง", "outstanding sessions")}</span></div></div>
         {availablePayments.length ? <div className="liff-beneficiary-groups">{selectedBeneficiaries.map((entry) => <section className="liff-beneficiary-group" key={entry.id}>
-          <header><div><UserPlus size={16} /><strong>{beneficiaryLabel(entry)}</strong></div><button aria-label={`นำ ${entry.name} ออกจากรายการ`} onClick={() => removeBeneficiary(entry.id)} type="button"><X size={16} /></button></header>
-          <div className="liff-due-list">{entry.payments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} บาท</b></label>)}</div>
-        </section>)}</div> : selectableBeneficiaries.length ? <div className="liff-payment-empty"><UserPlus size={31} /><strong>กรุณาเลือกผู้เล่น</strong><span>เลือกชื่อด้านบนก่อน แล้วจึงเลือกรอบที่ต้องการชำระ</span></div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? "ยังไม่มียอดค้างทดลอง" : "ไม่มียอดค้างชำระ"}</strong><span>{testMode ? "ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้" : "ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้"}</span></div>}
+          <header><div><UserPlus size={16} /><strong>{beneficiaryLabel(entry)}</strong></div><button aria-label={`${tr("นำ", "Remove")} ${entry.name}`} onClick={() => removeBeneficiary(entry.id)} type="button"><X size={16} /></button></header>
+          <div className="liff-due-list">{entry.payments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{language === "en" ? formatMemberDate(payment.eventDate, language) : formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} {tr("บาท", "THB")}</b></label>)}</div>
+        </section>)}</div> : selectableBeneficiaries.length ? <div className="liff-payment-empty"><UserPlus size={31} /><strong>{tr("กรุณาเลือกผู้เล่น", "Select a player")}</strong><span>{tr("เลือกชื่อด้านบนก่อน แล้วจึงเลือกรอบที่ต้องการชำระ", "Choose a player above, then select the sessions to pay.")}</span></div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? tr("ยังไม่มียอดค้างทดลอง", "No test balance yet") : tr("ไม่มียอดค้างชำระ", "No outstanding balance")}</strong><span>{testMode ? tr("ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้", "Register through the test link and ask the admin to finalize your test balance first.") : tr("ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้", "Paid or unfinished balances are not shown here.")}</span></div>}
         {availablePayments.length ? <>
           <div className="liff-payment-bank">
-            <strong>{PAYMENT_BANK_NAME} {PAYMENT_BANK_ACCOUNT_DISPLAY}</strong>
-            <button onClick={copyBankAccount} type="button"><Copy size={16} /> {accountCopied ? "คัดลอกแล้ว" : "คัดลอก"}</button>
+            <strong>{language === "en" ? "Siam Commercial Bank" : PAYMENT_BANK_NAME} {PAYMENT_BANK_ACCOUNT_DISPLAY}</strong>
+            <button onClick={copyBankAccount} type="button"><Copy size={16} /> {accountCopied ? tr("คัดลอกแล้ว", "Copied") : tr("คัดลอก", "Copy")}</button>
           </div>
-          <div className="liff-payment-total"><span>ยอดที่ต้องชำระ</span><strong>{baht(total)} บาท</strong></div>
-          <p className="liff-payment-amount-note">จำนวนเงินในสลิปต้องตรงกับยอดที่ต้องชำระเท่านั้น</p>
+          <div className="liff-payment-total"><span>{tr("ยอดที่ต้องชำระ", "Amount due")}</span><strong>{baht(total)} {tr("บาท", "THB")}</strong></div>
+          <p className="liff-payment-amount-note">{tr("จำนวนเงินในสลิปต้องตรงกับยอดที่ต้องชำระเท่านั้น", "The amount on the slip must exactly match the amount due.")}</p>
         </> : null}
       </section>
 
       {availablePayments.length ? <section className="liff-payment-card">
-        <div className="liff-payment-section-title"><div><strong>แนบรูปสลิป</strong><span>รองรับภาพจากแอปธนาคาร</span></div></div>
+        <div className="liff-payment-section-title"><div><strong>{tr("แนบรูปสลิป", "Attach transfer slip")}</strong><span>{tr("รองรับภาพจากแอปธนาคาร", "Use an image from your banking app")}</span></div></div>
         <label className={`liff-slip-picker ${slip ? "has-slip" : ""}`}>
           <input accept="image/*" disabled={reading || submitting} onChange={readSlip} type="file" />
-          {reading ? <><LoaderCircle className="is-spinning" size={28} /><strong>กำลังอ่านข้อความ {progress}%</strong></> : slip ? <><Check size={29} /><strong>อ่านสลิปแล้ว</strong><span>ยอด {slip.amount === null ? "อ่านไม่ชัด" : `${baht(slip.amount)} บาท`} · วันที่ {slip.date || "อ่านไม่ชัด"} · เลขอ้างอิง {slip.reference || "อ่านไม่ชัด"}</span></> : <><ImagePlus size={29} /><strong>เลือกรูปสลิป</strong><span>แตะเพื่อเลือกรูปจากเครื่อง</span></>}
+          {reading ? <><LoaderCircle className="is-spinning" size={28} /><strong>{tr("กำลังอ่านข้อความ", "Reading slip")} {progress}%</strong></> : slip ? <><Check size={29} /><strong>{tr("อ่านสลิปแล้ว", "Slip read")}</strong><span>{tr("ยอด", "Amount")} {slip.amount === null ? tr("อ่านไม่ชัด", "unclear") : `${baht(slip.amount)} ${tr("บาท", "THB")}`} · {tr("วันที่", "Date")} {slip.date || tr("อ่านไม่ชัด", "unclear")} · {tr("เลขอ้างอิง", "Reference")} {slip.reference || tr("อ่านไม่ชัด", "unclear")}</span></> : <><ImagePlus size={29} /><strong>{tr("เลือกรูปสลิป", "Choose slip image")}</strong><span>{tr("แตะเพื่อเลือกรูปจากเครื่อง", "Tap to choose an image")}</span></>}
         </label>
-        {slip && recipientStatus === "mismatch" ? <p className="liff-slip-warning">บัญชีผู้รับไม่ถูกต้อง กรุณาตรวจสอบว่าโอนไปยัง {PAYMENT_RECIPIENT_NAME}</p> : null}
-        {slip && recipientStatus === "unclear" ? <p className="liff-slip-warning">ระบบอ่านชื่อบัญชีผู้รับไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
-        {slip && slip.amount === null ? <p className="liff-slip-warning">ระบบอ่านยอดเงินไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
-        {slip && amountDifference !== null && amountDifference < -0.009 ? <p className="liff-slip-warning">ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากน้อยกว่ายอดที่ต้องจ่ายจริง ต้องชำระ {baht(total)} บาท แต่สลิปเป็น {baht(slip.amount)} บาท</p> : null}
-        {slip && amountDifference !== null && amountDifference > 0.009 ? <p className="liff-slip-warning">ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากมากกว่ายอดที่ต้องจ่ายจริง ต้องชำระ {baht(total)} บาท แต่สลิปเป็น {baht(slip.amount)} บาท</p> : null}
-        {slip && !slip.date ? <p className="liff-slip-warning">ระบบอ่านวันที่ไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
-        {slip && futureTransferDate ? <p className="liff-slip-warning">วันที่บนสลิปเป็นวันอนาคต รายการจะไปรอแอดมินตรวจสอบ</p> : null}
-        {slip && !slip.reference ? <p className="liff-slip-warning">ระบบอ่านเลขอ้างอิงไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ</p> : null}
+        {slip && recipientStatus === "mismatch" ? <p className="liff-slip-warning">{tr(`บัญชีผู้รับไม่ถูกต้อง กรุณาตรวจสอบว่าโอนไปยัง ${PAYMENT_RECIPIENT_NAME}`, `Incorrect recipient. Please make sure the transfer is sent to ${PAYMENT_RECIPIENT_NAME}.`)}</p> : null}
+        {slip && recipientStatus === "unclear" ? <p className="liff-slip-warning">{tr("ระบบอ่านชื่อบัญชีผู้รับไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ", "The recipient name is unclear. You can submit it for admin review.")}</p> : null}
+        {slip && slip.amount === null ? <p className="liff-slip-warning">{tr("ระบบอ่านยอดเงินไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ", "The amount is unclear. You can submit it for admin review.")}</p> : null}
+        {slip && amountDifference !== null && amountDifference < -0.009 ? <p className="liff-slip-warning">{tr(`ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากน้อยกว่ายอดที่ต้องจ่ายจริง ต้องชำระ ${baht(total)} บาท แต่สลิปเป็น ${baht(slip.amount)} บาท`, `The transferred amount is too low. Amount due: ${baht(total)} THB; slip: ${baht(slip.amount)} THB.`)}</p> : null}
+        {slip && amountDifference !== null && amountDifference > 0.009 ? <p className="liff-slip-warning">{tr(`ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากมากกว่ายอดที่ต้องจ่ายจริง ต้องชำระ ${baht(total)} บาท แต่สลิปเป็น ${baht(slip.amount)} บาท`, `The transferred amount is too high. Amount due: ${baht(total)} THB; slip: ${baht(slip.amount)} THB.`)}</p> : null}
+        {slip && !slip.date ? <p className="liff-slip-warning">{tr("ระบบอ่านวันที่ไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ", "The transfer date is unclear. You can submit it for admin review.")}</p> : null}
+        {slip && futureTransferDate ? <p className="liff-slip-warning">{tr("วันที่บนสลิปเป็นวันอนาคต รายการจะไปรอแอดมินตรวจสอบ", "The slip date is in the future and requires admin review.")}</p> : null}
+        {slip && !slip.reference ? <p className="liff-slip-warning">{tr("ระบบอ่านเลขอ้างอิงไม่ชัด สามารถส่งได้ แต่รายการจะไปรอแอดมินตรวจสอบ", "The transaction reference is unclear. You can submit it for admin review.")}</p> : null}
         {error ? <div className="liff-inline-error">{error}</div> : null}
-        <button className="liff-payment-submit" disabled={!selectedPaymentIds.length || !slip || recipientStatus === "mismatch" || amountMismatch || reading || submitting} onClick={submitPayment} type="button">{submitting ? "กำลังตรวจสอบ..." : `ยืนยันแจ้งโอน ${baht(total)} บาท`}</button>
+        <button className="liff-payment-submit" disabled={!selectedPaymentIds.length || !slip || recipientStatus === "mismatch" || amountMismatch || reading || submitting} onClick={submitPayment} type="button">{submitting ? tr("กำลังตรวจสอบ...", "Verifying...") : tr(`ยืนยันแจ้งโอน ${baht(total)} บาท`, `Submit payment of ${baht(total)} THB`)}</button>
       </section> : null}
 
-      {result ? <section className={`liff-payment-result is-${result.status}`}><Check size={25} /><div><strong>{result.status === "auto_paid" ? "บันทึกว่าชำระแล้ว" : "ส่งให้แอดมินตรวจสอบแล้ว"}</strong><span>{result.message}</span>{result.status === "pending" ? <button onClick={sendNewSlip} type="button"><ImagePlus size={16} /> ส่งสลิปใหม่</button> : null}</div></section> : null}
+      {result ? <section className={`liff-payment-result is-${result.status}`}><Check size={25} /><div><strong>{result.status === "auto_paid" ? tr("บันทึกว่าชำระแล้ว", "Payment recorded") : tr("ส่งให้แอดมินตรวจสอบแล้ว", "Sent for admin review")}</strong><span>{language === "en" ? (result.status === "auto_paid" ? "Your selected balances have been marked as paid." : "Your balances remain unpaid until the admin approves this slip.") : result.message}</span>{result.status === "pending" ? <button onClick={sendNewSlip} type="button"><ImagePlus size={16} /> {tr("ส่งสลิปใหม่", "Send another slip")}</button> : null}</div></section> : null}
     </PaymentShell>
   );
 }
 
-function PaymentShell({ children }) {
-  return <main className="badminton-app liff-signup-page liff-payment-page"><div className="liff-signup-shell">{children}</div></main>;
+function PaymentShell({ children, language, setLanguage }) {
+  return <main className="badminton-app liff-signup-page liff-payment-page"><div className="liff-signup-shell"><div className="public-language-bar"><LanguageToggle language={language} setLanguage={setLanguage} /></div>{children}</div></main>;
 }
 
 async function callPaymentApi(action, payload) {

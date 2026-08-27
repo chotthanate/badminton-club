@@ -473,7 +473,7 @@ function buildSignupMessage(event: any, liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          { type: "text", text: "🏸 ลงชื่อเล่นแบดมินตัน", weight: "bold", size: "xl", wrap: true },
+          languageCardHeading("🏸 ลงชื่อเล่นแบดมินตัน", `https://liff.line.me/${liffId}?event_id=${event.id}&lang=en`),
           { type: "text", text: cardDate, color: "#15966a", weight: "bold" },
           { type: "separator" },
           { type: "text", text: `สถานที่ : ${event.venue}`, size: "sm", wrap: true },
@@ -520,7 +520,7 @@ function buildPaymentMessage(liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          { type: "text", text: "💸 ชำระค่าตีแบด", weight: "bold", size: "xl", wrap: true },
+          languageCardHeading("💸 ชำระค่าตีแบด", `https://liff.line.me/${liffId}?mode=payment&lang=en`),
           { type: "text", text: "กดปุ่มด้านล่างเพื่อเลือกยอดที่ต้องชำระและแนบรูปสลิป", size: "sm", color: "#637064", wrap: true },
         ],
       },
@@ -553,7 +553,7 @@ function buildLiveQueueMessage(event: any, liffId: string) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          { type: "text", text: "🏸 สนามและคิว", weight: "bold", size: "xl", wrap: true },
+          languageCardHeading("🏸 สนามและคิว", `https://liff.line.me/${liffId}?liff=live&event_id=${event.id}&lang=en`),
           { type: "text", text: event.venue || "Headshot Badminton", size: "sm", color: "#637064", wrap: true },
           { type: "text", text: "ดูผู้เล่นในแต่ละสนาม เวลาเล่น คิวถัดไป และผู้เล่นที่กำลังรอ", size: "sm", color: "#637064", wrap: true },
         ],
@@ -573,6 +573,25 @@ function buildLiveQueueMessage(event: any, liffId: string) {
         }],
       },
     },
+  };
+}
+
+function languageCardHeading(title: string, englishUrl: string) {
+  return {
+    type: "box",
+    layout: "horizontal",
+    alignItems: "center",
+    spacing: "sm",
+    contents: [
+      { type: "text", text: title, weight: "bold", size: "xl", wrap: true, flex: 1 },
+      {
+        type: "button",
+        style: "secondary",
+        height: "sm",
+        flex: 0,
+        action: { type: "uri", label: "EN", uri: englishUrl },
+      },
+    ],
   };
 }
 
@@ -1528,6 +1547,7 @@ function eventForLiff(event: any) {
   return {
     id: event.id,
     clubName: club?.name || "Headshot Badminton",
+    date: event.event_date,
     dateLabel: thaiLongDate(event.event_date),
     venue: event.venue,
     status: event.status,

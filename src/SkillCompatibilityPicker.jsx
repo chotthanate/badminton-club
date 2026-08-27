@@ -1,7 +1,7 @@
 import React from "react";
 import { SKILL_LEVELS, normalizePlayableSkillLevels } from "./skillLevels.js";
 
-export default function SkillCompatibilityPicker({ skillLevel, value, onChange, className = "" }) {
+export default function SkillCompatibilityPicker({ skillLevel, value, onChange, className = "", language = "th" }) {
   if (!skillLevel) return null;
   const selected = new Set(normalizePlayableSkillLevels(skillLevel, value));
 
@@ -15,7 +15,7 @@ export default function SkillCompatibilityPicker({ skillLevel, value, onChange, 
 
   return (
     <fieldset className={`skill-compatibility-picker ${className}`.trim()}>
-      <legend>ระดับที่สามารถเล่นด้วยได้</legend>
+      <legend>{language === "en" ? "Skill levels you can play with" : "ระดับที่สามารถเล่นด้วยได้"}</legend>
       <div>
         {SKILL_LEVELS.map((level) => {
           const ownLevel = level === skillLevel;
