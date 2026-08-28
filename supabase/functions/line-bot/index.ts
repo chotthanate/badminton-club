@@ -4,6 +4,8 @@ import { sortBySignupOrder } from "../_shared/signupOrder.js";
 import { courtHasStarted } from "../_shared/liveQueueTime.js";
 import { reconcileSlipAmount } from "../_shared/slipAmount.js";
 
+const defaultPaymentRecipientNames = ["ณฐกฤต อินนะใจ", "NATHAKRIT INN", "NATHAKRIT INNAJAI"];
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-line-signature",
@@ -461,12 +463,10 @@ function buildSignupMessage(event: any, liffId: string) {
     .map((court) => `${court.court_name} : ${time(court.starts_at)}-${displayEndTime(court.ends_at)}`);
   const courtLines = courts.length ? courts : ["ยังไม่ได้ระบุคอร์ท"];
   const cardDate = thaiLongDate(event.event_date).replace("ที่ ", " ที่ ");
-  const englishCardDate = englishLongDate(event.event_date);
-  const title = `🏸 ลงชื่อเล่นแบดมินตัน : ${cardDate}`;
 
   return {
     type: "flex",
-    altText: `${title}\nBadminton registration · ${englishCardDate}\nสถานที่ / Venue : ${event.venue}\n${courtLines.join("\n")}`,
+    altText: `🏸 ลงชื่อเล่นแบดมินตัน / Badminton Registration : ${cardDate}\nสถานที่ : ${event.venue}\n${courtLines.join("\n")}`,
     contents: {
       type: "bubble",
       body: {
@@ -476,13 +476,11 @@ function buildSignupMessage(event: any, liffId: string) {
         contents: [
           languageCardHeading(
             "🏸 ลงชื่อเล่นแบดมินตัน",
-            "Badminton Registration",
             `https://liff.line.me/${liffId}?event_id=${event.id}&lang=en`,
           ),
           { type: "text", text: cardDate, color: "#15966a", weight: "bold" },
-          { type: "text", text: englishCardDate, color: "#637064", size: "xs" },
           { type: "separator" },
-          { type: "text", text: `สถานที่ / Venue : ${event.venue}`, size: "sm", wrap: true },
+          { type: "text", text: `สถานที่ : ${event.venue}`, size: "sm", wrap: true },
           ...courtLines.map((court) => ({
             type: "text",
             text: court,
@@ -505,7 +503,7 @@ function buildSignupMessage(event: any, liffId: string) {
             color: "#15966a",
             action: {
               type: "uri",
-              label: "ลงเวลา / Register",
+              label: "ลงเวลา",
               uri: `https://liff.line.me/${liffId}?event_id=${event.id}`,
             },
           },
@@ -518,7 +516,7 @@ function buildSignupMessage(event: any, liffId: string) {
 function buildPaymentMessage(liffId: string) {
   return {
     type: "flex",
-    altText: "ชำระค่าตีแบด / Badminton Payment",
+    altText: "💸 ชำระค่าตีแบด / Badminton Payment",
     contents: {
       type: "bubble",
       body: {
@@ -528,11 +526,9 @@ function buildPaymentMessage(liffId: string) {
         contents: [
           languageCardHeading(
             "💸 ชำระค่าตีแบด",
-            "Badminton Payment",
             `https://liff.line.me/${liffId}?mode=payment&lang=en`,
           ),
           { type: "text", text: "กดปุ่มด้านล่างเพื่อเลือกยอดที่ต้องชำระและแนบรูปสลิป", size: "sm", color: "#637064", wrap: true },
-          { type: "text", text: "Select your balance and upload the transfer slip.", size: "xs", color: "#637064", wrap: true },
         ],
       },
       footer: {
@@ -544,7 +540,7 @@ function buildPaymentMessage(liffId: string) {
           color: "#15966a",
           action: {
             type: "uri",
-            label: "ชำระเงิน / Pay",
+            label: "ชำระเงิน",
             uri: `https://liff.line.me/${liffId}?mode=payment`,
           },
         }],
@@ -566,12 +562,10 @@ function buildLiveQueueMessage(event: any, liffId: string) {
         contents: [
           languageCardHeading(
             "🏸 สนามและคิว",
-            "Courts & Queues",
             `https://liff.line.me/${liffId}?liff=live&event_id=${event.id}&lang=en`,
           ),
           { type: "text", text: event.venue || "Headshot Badminton", size: "sm", color: "#637064", wrap: true },
           { type: "text", text: "ดูผู้เล่นในแต่ละสนาม เวลาเล่น คิวถัดไป และผู้เล่นที่กำลังรอ", size: "sm", color: "#637064", wrap: true },
-          { type: "text", text: "View active courts, upcoming queues, and waiting players.", size: "xs", color: "#637064", wrap: true },
         ],
       },
       footer: {
@@ -583,7 +577,7 @@ function buildLiveQueueMessage(event: any, liffId: string) {
           color: "#15966a",
           action: {
             type: "uri",
-            label: "ดูสนามและคิว / View",
+            label: "ดูสนามและผู้เล่นคิวถัดไป",
             uri: `https://liff.line.me/${liffId}?liff=live&event_id=${event.id}`,
           },
         }],
@@ -592,7 +586,7 @@ function buildLiveQueueMessage(event: any, liffId: string) {
   };
 }
 
-function languageCardHeading(title: string, englishTitle: string, englishUrl: string) {
+function languageCardHeading(title: string, englishUrl: string) {
   return {
     type: "box",
     layout: "horizontal",
@@ -600,26 +594,24 @@ function languageCardHeading(title: string, englishTitle: string, englishUrl: st
     spacing: "sm",
     contents: [
       {
-        type: "box",
-        layout: "vertical",
-        spacing: "none",
+        type: "text",
+        text: title,
+        weight: "bold",
+        size: "xl",
+        wrap: true,
         flex: 1,
-        contents: [
-          { type: "text", text: title, weight: "bold", size: "xl", wrap: true },
-          { type: "text", text: englishTitle, weight: "bold", size: "xs", color: "#15966a", wrap: true },
-        ],
       },
       {
         type: "box",
         layout: "vertical",
-        width: "58px",
+        width: "34px",
         height: "30px",
         backgroundColor: "#eef4f0",
         cornerRadius: "15px",
         justifyContent: "center",
-        action: { type: "uri", label: "EN", uri: englishUrl },
+        action: { type: "uri", label: "Switch language", uri: englishUrl },
         contents: [
-          { type: "text", text: "English", size: "xxs", weight: "bold", color: "#15966a", align: "center" },
+          { type: "text", text: "🌐", size: "sm", align: "center" },
         ],
       },
     ],
@@ -736,6 +728,15 @@ async function handlePaymentLiffRequest(payload: any) {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
     const clubId = await resolveLiffClubId(admin, payload, configuredClubId);
+    const { data: paymentClub, error: paymentClubError } = await admin.from("clubs")
+      .select("payment_recipient_names")
+      .eq("id", clubId)
+      .single();
+    if (paymentClubError) throw paymentClubError;
+    const recipientNames = Array.isArray(paymentClub?.payment_recipient_names)
+      && paymentClub.payment_recipient_names.length
+      ? paymentClub.payment_recipient_names
+      : defaultPaymentRecipientNames;
     const { data: submitter, error: submitterError } = await admin.from("club_members")
       .select("id, nickname, display_name, line_user_id")
       .eq("club_id", clubId)
@@ -805,6 +806,7 @@ async function handlePaymentLiffRequest(payload: any) {
           nickname: submitter?.nickname || "",
         },
         beneficiaries,
+        recipientNames,
       });
     }
 
@@ -875,7 +877,7 @@ async function handlePaymentLiffRequest(payload: any) {
     const transferredAmount = reconciledAmount.amount;
     const transferredOn = isoDateValue(slip.transferredOn);
     const confidence = finiteNumber(slip.confidence);
-    const recipientStatus = classifySlipRecipient(slip.text);
+    const recipientStatus = classifySlipRecipient(slip.text, recipientNames);
     if (recipientStatus === "mismatch") {
       return json({
         error: "บัญชีผู้รับไม่ถูกต้อง กรุณาโอนไปยัง นาย ณฐกฤต อินนะใจ เท่านั้น",
@@ -1713,10 +1715,14 @@ function normalizeSlipReference(value: unknown) {
   return normalized.length >= 6 && normalized.length <= 50 ? normalized : null;
 }
 
-function classifySlipRecipient(value: unknown) {
+function classifySlipRecipient(value: unknown, recipientNames: unknown = defaultPaymentRecipientNames) {
   const source = String(value || "").normalize("NFKC");
   const normalized = normalizeRecipientText(source);
-  if (normalized.includes("ณฐกฤตอินนะใจ")) return "match";
+  const normalizedRecipientNames = (Array.isArray(recipientNames) ? recipientNames : defaultPaymentRecipientNames)
+    .map(normalizeRecipientText)
+    .filter((name) => name.length >= 5);
+  if (normalizedRecipientNames.some((name) => normalized.includes(name)
+    || containsApproximateText(normalized, name, 2))) return "match";
 
   const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const recipientMarker = /(บัญชีผู้รับ|ผู้รับ|ไปยัง|recipient|receiver|transfer(?:red)?\s+to)/i;
@@ -1724,8 +1730,10 @@ function classifySlipRecipient(value: unknown) {
     if (!recipientMarker.test(lines[index])) continue;
     const context = lines.slice(index, index + 3).join(" ").replace(recipientMarker, " ");
     const normalizedContext = normalizeRecipientText(context);
-    if (normalizedContext.includes("ณฐกฤตอินนะใจ")) return "match";
-    if (normalizedContext.includes("ณฐกฤต") || normalizedContext.includes("อินนะใจ")) return "unclear";
+    if (normalizedRecipientNames.some((name) => normalizedContext.includes(name)
+      || containsApproximateText(normalizedContext, name, 2))) return "match";
+    if (normalizedContext.includes("ณฐกฤต") || normalizedContext.includes("อินนะใจ")
+      || normalizedContext.includes("nathakrit")) return "unclear";
     if (/(นาย|นางสาว|นาง|น\.?\s*ส\.?|คุณ|บริษัท|ห้างหุ้นส่วน)/i.test(context)
       && (context.match(/[ก-๙]/g) || []).length >= 7) {
       return "mismatch";
@@ -1739,6 +1747,35 @@ function normalizeRecipientText(value: unknown) {
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[^ก-๙a-z0-9]/g, "");
+}
+
+function containsApproximateText(source: string, expected: string, maxDistance: number) {
+  if (!source || !expected) return false;
+  const minimumLength = Math.max(1, expected.length - maxDistance);
+  const maximumLength = expected.length + maxDistance;
+  for (let length = minimumLength; length <= maximumLength; length += 1) {
+    for (let index = 0; index + length <= source.length; index += 1) {
+      if (levenshteinWithin(source.slice(index, index + length), expected, maxDistance)) return true;
+    }
+  }
+  return false;
+}
+
+function levenshteinWithin(left: string, right: string, maxDistance: number) {
+  if (Math.abs(left.length - right.length) > maxDistance) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMinimum = current[0];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitution = previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1);
+      current[rightIndex] = Math.min(previous[rightIndex] + 1, current[rightIndex - 1] + 1, substitution);
+      rowMinimum = Math.min(rowMinimum, current[rightIndex]);
+    }
+    if (rowMinimum > maxDistance) return false;
+    previous = current;
+  }
+  return previous[right.length] <= maxDistance;
 }
 
 function decodeDataUrl(value: string) {
@@ -1760,11 +1797,6 @@ function safeJson(value: string) {
 
 function thaiLongDate(isoDate: string) {
   return new Intl.DateTimeFormat("th-TH", { weekday: "long", day: "numeric", month: "long" })
-    .format(new Date(`${isoDate}T12:00:00+07:00`));
-}
-
-function englishLongDate(isoDate: string) {
-  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" })
     .format(new Date(`${isoDate}T12:00:00+07:00`));
 }
 

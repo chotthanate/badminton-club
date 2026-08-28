@@ -63,7 +63,7 @@ export default function LiffPaymentApp() {
     () => selectedPaymentTotal(selectedBeneficiaries, selectedPaymentIds),
     [selectedBeneficiaries, selectedPaymentIds],
   );
-  const recipientStatus = slip ? classifySlipRecipient(slip.text) : "match";
+  const recipientStatus = slip ? classifySlipRecipient(slip.text, data?.recipientNames) : "match";
   const amountDifference = slip?.amount === null || slip?.amount === undefined
     ? null
     : Number(slip.amount) - total;

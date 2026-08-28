@@ -25,6 +25,12 @@ const ENGLISH_MONTHS = new Map([
 const SLIP_MONTHS = new Map([...THAI_MONTHS, ...ENGLISH_MONTHS]);
 
 export const PAYMENT_RECIPIENT_NAME = "นาย ณฐกฤต อินนะใจ";
+export const PAYMENT_RECIPIENT_NAMES = [
+  PAYMENT_RECIPIENT_NAME,
+  "ณฐกฤต อินนะใจ",
+  "NATHAKRIT INN",
+  "NATHAKRIT INNAJAI",
+];
 
 export function buildSlipRoundBreakdown(paymentIds = [], paymentsById = new Map()) {
   const uniquePaymentIds = [...new Set(Array.isArray(paymentIds) ? paymentIds : [])];
@@ -58,15 +64,17 @@ export function buildSlipRoundBreakdown(paymentIds = [], paymentsById = new Map(
   };
 }
 
-export function slipRecipientMatches(text) {
-  return classifySlipRecipient(text) === "match";
+export function slipRecipientMatches(text, recipientNames = PAYMENT_RECIPIENT_NAMES) {
+  return classifySlipRecipient(text, recipientNames) === "match";
 }
 
-export function classifySlipRecipient(text) {
+export function classifySlipRecipient(text, recipientNames = PAYMENT_RECIPIENT_NAMES) {
   const source = String(text || "").normalize("NFKC");
   const normalized = normalizeRecipientText(source);
-  const recipientNames = ["ณฐกฤตอินนะใจ", "nathakritinnajai"];
-  if (recipientNames.some((name) => normalized.includes(name)
+  const normalizedRecipientNames = (Array.isArray(recipientNames) ? recipientNames : PAYMENT_RECIPIENT_NAMES)
+    .map(normalizeRecipientText)
+    .filter((name) => name.length >= 5);
+  if (normalizedRecipientNames.some((name) => normalized.includes(name)
     || containsApproximateText(normalized, name, 2))) return "match";
 
   const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -75,8 +83,10 @@ export function classifySlipRecipient(text) {
     if (!recipientMarker.test(lines[index])) continue;
     const context = lines.slice(index, index + 3).join(" ").replace(recipientMarker, " ");
     const normalizedContext = normalizeRecipientText(context);
-    if (normalizedContext.includes("ณฐกฤตอินนะใจ")) return "match";
-    if (normalizedContext.includes("ณฐกฤต") || normalizedContext.includes("อินนะใจ")) return "unclear";
+    if (normalizedRecipientNames.some((name) => normalizedContext.includes(name)
+      || containsApproximateText(normalizedContext, name, 2))) return "match";
+    if (normalizedContext.includes("ณฐกฤต") || normalizedContext.includes("อินนะใจ")
+      || normalizedContext.includes("nathakrit")) return "unclear";
     if (/(นาย|นางสาว|นาง|น\.?\s*ส\.?|คุณ|บริษัท|ห้างหุ้นส่วน)/i.test(context)
       && (context.match(/[ก-๙]/g) || []).length >= 7) {
       return "mismatch";

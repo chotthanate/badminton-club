@@ -797,6 +797,8 @@ test("slip recipient accepts only the configured full recipient name", () => {
   assert.equal(slipRecipientMatches("ผู้รับ\nนาย ณฐกฤต อินนะใจ"), true);
   assert.equal(slipRecipientMatches("ไปยัง ณฐกฤต\nอินนะใจ"), true);
   assert.equal(slipRecipientMatches("Transfer to MR. NATHAKRIT INNAJAI"), true);
+  assert.equal(slipRecipientMatches("To\nNATHAKRIT INN\nSCB"), true);
+  assert.equal(classifySlipRecipient("To\nHEADSHOT CLUB", ["HEADSHOT CLUB"]), "match");
   assert.equal(slipRecipientMatches("ผู้รับ นาย ณฐกฤต อินนะไจ"), true);
   assert.equal(slipRecipientMatches("ผู้รับ นาย สมชาย ใจดี"), false);
   assert.equal(slipRecipientMatches("ผู้รับ ณฐกฤต อ."), false);
