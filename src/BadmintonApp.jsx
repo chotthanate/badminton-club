@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   ArrowUpDown,
   BadgeCheck,
   CalendarDays,
@@ -19,6 +20,7 @@ import {
   ReceiptText,
   RefreshCw,
   Save,
+  Search,
   Settings,
   ShieldCheck,
   Trash2,
@@ -36,6 +38,7 @@ import {
   addMemberExtraCharge,
   addRandomTestPlayers,
   approveQueueDraft,
+  archiveClubMember,
   cancelQueueMatch,
   changeAdminPassword,
   configureStaffAccess,
@@ -45,6 +48,7 @@ import {
   createTestClub,
   correctEventShuttlecockCount,
   deleteCompletedEvent,
+  dismissDuplicateMemberSuggestion,
   finalizeMemberBill,
   getAdminContexts,
   finishEvent,
@@ -109,7 +113,7 @@ import {
   totalCourtHours,
   weekdayFromIsoDate,
 } from "./badmintonLogic.js";
-import { findExactDuplicateMemberGroups, normalizeMemberSearch, rankMemberSuggestions } from "./memberSearch.js";
+import { duplicateGroupSignature, findExactDuplicateMemberGroups, normalizeMemberSearch, rankMemberSuggestions } from "./memberSearch.js";
 import { buildLiveQueueUrl, buildTestPaymentLiffUrl, buildTestSignupLiffUrl } from "./liffSignup.js";
 import { proposeQueueMatch, SKILL_LEVELS } from "./queueLogic.js";
 import { randomTestPlayerCount } from "./randomTestPlayers.js";
@@ -1119,6 +1123,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [pendingCheckIn, setPendingCheckIn] = useState(null);
   const [pendingDeparture, setPendingDeparture] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [memberDirectoryOpen, setMemberDirectoryOpen] = useState(false);
+  const [memberDirectoryQuery, setMemberDirectoryQuery] = useState("");
   const [sortMode, setSortMode] = useState(loadPlayerSortMode);
   const [exemptMemberId, setExemptMemberId] = useState("");
   const [mergeSourceId, setMergeSourceId] = useState("");
@@ -1138,8 +1144,15 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const timeOptions = useMemo(() => buildTimeOptions(event.startTime, event.endTime), [event.startTime, event.endTime]);
   const settlementByMember = new Map(settlement.rows.map((row) => [row.memberId, row]));
   const participantIds = new Set(participants.map((participant) => participant.member.id));
-  const savedMembers = dashboard.members.filter((member) => member.role === "member");
-  const duplicateMemberGroups = findExactDuplicateMemberGroups(savedMembers);
+  const savedMembers = dashboard.members.filter((member) => member.role === "member" && member.active !== false);
+  const dismissedDuplicateSignatures = new Set((dashboard.duplicateDismissals || []).map((entry) => entry.signature));
+  const duplicateMemberGroups = findExactDuplicateMemberGroups(savedMembers)
+    .filter((group) => !dismissedDuplicateSignatures.has(duplicateGroupSignature(group)));
+  const normalizedDirectoryQuery = normalizeMemberSearch(memberDirectoryQuery);
+  const directoryMembers = [...savedMembers]
+    .filter((member) => !normalizedDirectoryQuery || [member.nickname, member.display_name, ...(member.aliases || [])]
+      .some((value) => normalizeMemberSearch(value).includes(normalizedDirectoryQuery)))
+    .sort((left, right) => memberName(left).localeCompare(memberName(right), "th"));
   const memberSuggestions = rankMemberSuggestions(
     savedMembers,
     name,
@@ -1154,12 +1167,12 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     eventObject.preventDefault();
     const trimmedName = name.trim();
     const normalizedName = normalizeMemberSearch(trimmedName);
-    const exactMember = dashboard.members.find((member) =>
+    const exactMember = savedMembers.find((member) =>
       member.role === "member"
       && normalizedName
       && [member.nickname, member.display_name, ...(member.aliases || [])]
         .some((value) => normalizeMemberSearch(value) === normalizedName));
-    const existingMember = dashboard.members.find((member) => member.id === selectedMemberId) || exactMember;
+    const existingMember = savedMembers.find((member) => member.id === selectedMemberId) || exactMember;
     const saved = await mutate(async () => {
       if (!trimmedName) throw new Error("กรุณาพิมพ์ชื่อเล่นหรือชื่อ LINE");
       const selectedSkill = existingMember?.skill_level || newMemberSkill.level;
@@ -1292,6 +1305,49 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       });
     }, `บันทึกชื่อ ${nickname} แล้ว`);
     if (saved) setEditingMember(null);
+  }
+
+  async function deleteMemberProfile() {
+    if (!editingMember) return;
+    const nickname = memberName(editingMember);
+    const confirmed = window.confirm(
+      `ลบ “${nickname}” ออกจากรายชื่อผู้เล่นเดิมใช่ไหม?\n\nประวัติรอบเก่า ยอดค้าง และข้อมูลการชำระเงินจะยังอยู่ ไม่ถูกลบตามไปด้วย`,
+    );
+    if (!confirmed) return;
+    const saved = await mutate(async () => {
+      await archiveClubMember(editingMember.id);
+      await recordAudit({
+        clubId: context.club_id,
+        eventId: event.id,
+        userId: session.user.id,
+        action: `ลบ ${nickname} ออกจากรายชื่อผู้เล่นเดิม`,
+        details: { member_id: editingMember.id, archived: true },
+      });
+    }, `ลบ ${nickname} ออกจากรายชื่อผู้เล่นเดิมแล้ว`);
+    if (saved) setEditingMember(null);
+  }
+
+  async function dismissDuplicateGroup(group) {
+    const names = group.map((member) => memberName(member)).join(" ↔ ");
+    const confirmed = window.confirm(
+      `ยืนยันว่า “${names}” ไม่ใช่คนเดียวกันใช่ไหม?\n\nระบบจะไม่แนะนำคู่นี้อีก`,
+    );
+    if (!confirmed) return;
+    const saved = await mutate(async () => {
+      const signature = duplicateGroupSignature(group);
+      await dismissDuplicateMemberSuggestion({ clubId: context.club_id, signature });
+      await recordAudit({
+        clubId: context.club_id,
+        eventId: event.id,
+        userId: session.user.id,
+        action: `ไม่รวมรายชื่อซ้ำ ${names}`,
+        details: { signature, member_ids: group.map((member) => member.id) },
+      });
+    }, "ซ่อนคำแนะนำรายชื่อซ้ำนี้แล้ว");
+    if (saved) {
+      setMergeSourceId("");
+      setMergeTargetId("");
+    }
   }
 
   function chooseDuplicateGroup(group) {
@@ -1493,7 +1549,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
   return (
     <section className="badminton-card badminton-participants-card">
-      <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><div className="badminton-player-title-actions"><label className="badminton-player-sort-icon" title={sortMode === "signup" ? "เรียงตามลำดับการลงชื่อ" : "เรียงตามตัวอักษร"}><ArrowUpDown size={18} /><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => changeSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label><button aria-label="ตั้งค่ารายชื่อและสินค้า" className="badminton-player-settings-button" onClick={() => setSettingsOpen(true)} title="ตั้งค่ารายชื่อและสินค้า" type="button"><Settings size={18} /></button></div></div>
+      <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><div className="badminton-player-title-actions"><label className="badminton-player-sort-icon" title={sortMode === "signup" ? "เรียงตามลำดับการลงชื่อ" : "เรียงตามตัวอักษร"}><ArrowUpDown size={18} /><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => changeSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label><button aria-label="เปิดรายชื่อผู้เล่นเดิม" className="badminton-player-settings-button" onClick={() => setMemberDirectoryOpen(true)} title="รายชื่อผู้เล่นเดิม" type="button"><Users size={18} /></button><button aria-label="ตั้งค่ารายชื่อและสินค้า" className="badminton-player-settings-button" onClick={() => setSettingsOpen(true)} title="ตั้งค่ารายชื่อและสินค้า" type="button"><Settings size={18} /></button></div></div>
       <form className="badminton-inline-form" onSubmit={addMember}>
         <div className="badminton-member-search">
           <input
@@ -1715,8 +1771,66 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         }) : <div className="badminton-empty">ยังไม่มีผู้เล่น</div>}
       </div>
       {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><WalletCards size={17} /><strong>รายชื่อไม่ต้องเก็บเงิน</strong><em>{savedMembers.filter((member) => member.payment_exempt).length} คน</em></div><form className="badminton-exempt-member-form" onSubmit={addPaymentExemptMember}><select aria-label="เลือกสมาชิกที่ไม่ต้องเก็บเงิน" onChange={(changeEvent) => setExemptMemberId(changeEvent.target.value)} required value={exemptMemberId}><option value="">เลือกสมาชิกจากรายชื่อเดิม</option>{savedMembers.filter((member) => !member.payment_exempt).sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option key={member.id} value={member.id}>{paymentExemptIdentity(member)}</option>)}</select><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form><div className="badminton-exempt-member-list">{savedMembers.filter((member) => member.payment_exempt).map((member) => <span key={member.id}><span><strong>{memberName(member)}</strong><small>{member.line_user_id ? `LINE: ${member.display_name || "เชื่อมแล้ว"}` : "ยังไม่เชื่อม LINE"}</small></span><button aria-label={`นำ ${memberName(member)} ออกจากรายชื่อไม่ต้องเก็บเงิน`} onClick={() => removePaymentExemptMember(member)} type="button"><X size={14} /></button></span>)}</div><small className="badminton-settings-help">เลือกจากสมาชิกตัวจริงโดยดูชื่อ LINE ประกอบ ระบบจะไม่จับคู่ด้วยชื่อเล่น จึงแยกคนชื่อซ้ำได้ถูกต้อง</small><small className="badminton-settings-help">คนในรายชื่อนี้ยังร่วมถูกหารค่าใช้จ่าย แต่ระบบจะถือว่าชำระแล้วและไม่ใส่ในข้อความส่ง LINE</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รวมรายชื่อซ้ำ</strong><em>พบชื่อซ้ำ {duplicateMemberGroups.length} กลุ่ม</em></div>{duplicateMemberGroups.length ? <div className="badminton-duplicate-suggestions">{duplicateMemberGroups.map((group) => <button key={group.map((member) => member.id).join("-")} onClick={() => chooseDuplicateGroup(group)} type="button">{group.map((member) => memberName(member)).join(" ↔ ")}</button>)}</div> : <small className="badminton-settings-help">ไม่พบชื่อที่สะกดตรงกัน หากคนเดียวกันใช้คนละชื่อสามารถเลือกเองด้านล่าง</small>}<form className="badminton-member-merge-form" onSubmit={mergeDuplicateMember}><label><span>เก็บคนนี้ไว้</span><select aria-label="ชื่อหลักที่ต้องการเก็บ" onChange={(changeEvent) => setMergeTargetId(changeEvent.target.value)} required value={mergeTargetId}><option value="">เลือกชื่อหลัก</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeSourceId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><label><span>รวมชื่อซ้ำนี้</span><select aria-label="ชื่อซ้ำที่ต้องการรวม" onChange={(changeEvent) => setMergeSourceId(changeEvent.target.value)} required value={mergeSourceId}><option value="">เลือกชื่อซ้ำ</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeTargetId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><button className="badminton-secondary" type="submit">รวมประวัติและลบชื่อซ้ำ</button></form><small className="badminton-settings-help">ควรเก็บรายการที่มีคำว่า “เชื่อม LINE” เป็นชื่อหลัก ระบบจะย้ายประวัติ ยอดค้าง และจำชื่อเดิมไว้ค้นหาครั้งต่อไป</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
-      {editingMember ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}><div className="badminton-modal-title"><div><p className="badminton-kicker">ข้อมูลสมาชิกเดิม</p><h2>แก้ไขโปรไฟล์ผู้เล่น</h2></div><button aria-label="ปิดหน้าต่างแก้ไขชื่อ" onClick={() => setEditingMember(null)} type="button"><X size={19} /></button></div><label>ชื่อเล่น<input autoFocus maxLength="40" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, nickname: changeEvent.target.value })} required value={memberEdit.nickname} /></label><label>ชื่อ LINE<input maxLength="80" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, displayName: changeEvent.target.value })} required value={memberEdit.displayName} /></label><label>ระดับมือ<select onChange={(changeEvent) => setMemberEdit({ ...memberEdit, skillLevel: changeEvent.target.value, playableSkillLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={memberEdit.skillLevel}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label><SkillCompatibilityPicker onChange={(playableSkillLevels) => setMemberEdit({ ...memberEdit, playableSkillLevels })} skillLevel={memberEdit.skillLevel} value={memberEdit.playableSkillLevels} /><p className="badminton-member-sync-note">การแก้ระดับตรงนี้มีผลตั้งแต่รอบถัดไป หากคนนี้ลงชื่อรอบปัจจุบันแล้ว ระบบจะเก็บระดับเดิมของรอบนี้ไว้เพื่อไม่ให้คิวเปลี่ยนย้อนหลัง</p>{editingMember.line_user_id ? <p className="badminton-member-sync-note">คนนี้เชื่อมกับ LINE แล้ว ชื่อ LINE จะอัปเดตอัตโนมัติเมื่อเข้าหน้าลงชื่อครั้งถัดไป</p> : null}<button className="badminton-primary" type="submit"><Save size={17} /> บันทึกโปรไฟล์</button></form></div> : null}
+      {editingMember ? (
+        <div className="badminton-modal-backdrop badminton-member-edit-backdrop" role="presentation">
+          <form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}>
+            <div className="badminton-modal-title"><div><p className="badminton-kicker">ข้อมูลสมาชิกเดิม</p><h2>แก้ไขโปรไฟล์ผู้เล่น</h2></div><button aria-label="ปิดหน้าต่างแก้ไขชื่อ" onClick={() => setEditingMember(null)} type="button"><X size={19} /></button></div>
+            <label>ชื่อเล่น<input autoFocus maxLength="40" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, nickname: changeEvent.target.value })} required value={memberEdit.nickname} /></label>
+            <label>ชื่อ LINE<input maxLength="80" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, displayName: changeEvent.target.value })} required value={memberEdit.displayName} /></label>
+            <label>ระดับมือ<select onChange={(changeEvent) => setMemberEdit({ ...memberEdit, skillLevel: changeEvent.target.value, playableSkillLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={memberEdit.skillLevel}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
+            <SkillCompatibilityPicker onChange={(playableSkillLevels) => setMemberEdit({ ...memberEdit, playableSkillLevels })} skillLevel={memberEdit.skillLevel} value={memberEdit.playableSkillLevels} />
+            <p className="badminton-member-sync-note">การแก้ระดับตรงนี้มีผลตั้งแต่รอบถัดไป หากคนนี้ลงชื่อรอบปัจจุบันแล้ว ระบบจะเก็บระดับเดิมของรอบนี้ไว้เพื่อไม่ให้คิวเปลี่ยนย้อนหลัง</p>
+            {editingMember.line_user_id ? <p className="badminton-member-sync-note">คนนี้เชื่อมกับ LINE แล้ว ชื่อ LINE จะอัปเดตอัตโนมัติเมื่อเข้าหน้าลงชื่อครั้งถัดไป</p> : null}
+            <div className="badminton-member-edit-actions">
+              <button className="badminton-primary" type="submit"><Save size={17} /> บันทึกโปรไฟล์</button>
+              <button className="badminton-danger-button" onClick={deleteMemberProfile} type="button"><Trash2 size={17} /> ลบออกจากรายชื่อ</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
       {customChargeFor ? <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal" onSubmit={addCustomCharge}><div className="badminton-modal-title"><div><p className="badminton-kicker">ค่าใช้จ่ายเฉพาะคน</p><h2>เพิ่มรายการให้ {customChargeFor.name}</h2></div><button aria-label="ปิดหน้าต่าง" onClick={() => setCustomChargeFor(null)} type="button"><X size={19} /></button></div><label>ชื่อรายการ<input autoFocus maxLength="80" onChange={(changeEvent) => setCustomCharge({ ...customCharge, name: changeEvent.target.value })} placeholder="เช่น ค่าเอ็นไม้" required value={customCharge.name} /></label><label>ราคา (บาท)<input min="0" onChange={(changeEvent) => setCustomCharge({ ...customCharge, price: changeEvent.target.value })} placeholder="0" required type="number" value={customCharge.price} /></label><button className="badminton-primary" type="submit"><Plus size={17} /> เพิ่มค่าใช้จ่าย</button></form></div> : null}
+      {memberDirectoryOpen ? (
+        <div className="badminton-modal-backdrop badminton-member-directory-backdrop" role="presentation">
+          <div aria-label="รายชื่อผู้เล่นเดิม" aria-modal="true" className="badminton-member-directory-modal" role="dialog">
+            <header className="badminton-member-directory-header">
+              <button aria-label="กลับ" onClick={() => setMemberDirectoryOpen(false)} type="button"><ArrowLeft size={20} /></button>
+              <div><p className="badminton-kicker">ข้อมูลสมาชิก</p><h2>รายชื่อผู้เล่นเดิม</h2></div>
+              <em>{savedMembers.length} คน</em>
+            </header>
+            <label className="badminton-member-directory-search">
+              <Search size={18} />
+              <input autoFocus onChange={(changeEvent) => setMemberDirectoryQuery(changeEvent.target.value)} placeholder="ค้นหาชื่อเล่นหรือชื่อ LINE" value={memberDirectoryQuery} />
+              {memberDirectoryQuery ? <button aria-label="ล้างคำค้นหา" onClick={() => setMemberDirectoryQuery("")} type="button"><X size={16} /></button> : null}
+            </label>
+            {duplicateMemberGroups.length ? (
+              <section className="badminton-member-directory-duplicates">
+                <div><strong>คำแนะนำรายชื่อซ้ำ</strong><em>{duplicateMemberGroups.length} กลุ่ม</em></div>
+                {duplicateMemberGroups.map((group) => (
+                  <article key={duplicateGroupSignature(group)}>
+                    <span>{group.map((member) => memberName(member)).join(" ↔ ")}</span>
+                    <div>
+                      <button className="badminton-secondary" onClick={() => { chooseDuplicateGroup(group); setMemberDirectoryOpen(false); setSettingsOpen(true); }} type="button">รวมรายชื่อ</button>
+                      <button className="badminton-duplicate-dismiss" onClick={() => dismissDuplicateGroup(group)} type="button"><X size={15} /> ไม่ใช่คนเดียวกัน</button>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            ) : null}
+            <div className="badminton-member-directory-full-list">
+              {directoryMembers.length ? directoryMembers.map((member) => {
+                const nickname = memberName(member);
+                const lineName = member.display_name && member.display_name !== nickname ? member.display_name : "";
+                return (
+                  <button key={member.id} onClick={() => openMemberEditor(member)} type="button">
+                    <span><strong>{nickname}</strong><small>{lineName ? `LINE: ${lineName}` : "ยังไม่เชื่อม LINE"}</small></span>
+                    <Pencil size={17} />
+                  </button>
+                );
+              }) : <div className="badminton-empty">ไม่พบรายชื่อที่ค้นหา</div>}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {pendingCheckIn ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ยืนยันเวลาเช็กชื่อ" aria-modal="true" className="badminton-custom-charge-modal badminton-check-in-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เช็กชื่อผู้เล่น</p><h2>{pendingCheckIn.participantName} มาถึงแล้ว</h2></div><button aria-label="ปิด" onClick={() => setPendingCheckIn(null)} type="button"><X size={19} /></button></div><p>ลงชื่อไว้เวลา <strong>{pendingCheckIn.plannedArrival} น.</strong> ตอนนี้ประมาณ <strong>{pendingCheckIn.suggestedArrival} น.</strong></p><div className="badminton-check-in-actions"><button className="badminton-secondary" onClick={() => completeCheckIn(pendingCheckIn, false)} type="button">ใช้เวลาเดิม {pendingCheckIn.plannedArrival}</button><button className="badminton-primary" onClick={() => completeCheckIn(pendingCheckIn, true)} type="button">ปรับเป็น {pendingCheckIn.suggestedArrival}</button></div></div></div> : null}
       {pendingDeparture ? <div className="badminton-modal-backdrop" role="presentation"><form aria-label="บันทึกเวลากลับและจำนวนลูกแบด" className="badminton-custom-charge-modal" onSubmit={async (submitEvent) => {
         submitEvent.preventDefault();

@@ -211,28 +211,33 @@ export async function loadDashboard(clubId, eventId = null) {
     .maybeSingle();
   throwIfError(eventError);
 
-  const membersPromise = client()
+  let membersPromise = client()
     .from("club_members")
     .select("id, display_name, nickname, aliases, role, active, line_user_id, payment_exempt, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level, created_at")
     .eq("club_id", clubId)
-    .eq("active", true)
     .order("created_at");
+  if (!event) membersPromise = membersPromise.eq("active", true);
 
   const venuesPromise = client().from("club_venues").select("id, name").eq("club_id", clubId).order("created_at", { ascending: false });
   const extraItemsPromise = client().from("extra_item_catalog").select("*").eq("club_id", clubId).eq("active", true).order("created_at");
+  const duplicateDismissalsPromise = client()
+    .from("member_duplicate_dismissals")
+    .select("signature")
+    .eq("club_id", clubId);
 
   if (!event) {
-    const [membersResult, venuesResult, extraItemsResult] = await Promise.all([membersPromise, venuesPromise, extraItemsPromise]);
-    [membersResult, venuesResult, extraItemsResult].forEach((result) => throwIfError(result.error));
+    const [membersResult, venuesResult, extraItemsResult, duplicateDismissalsResult] = await Promise.all([membersPromise, venuesPromise, extraItemsPromise, duplicateDismissalsPromise]);
+    [membersResult, venuesResult, extraItemsResult, duplicateDismissalsResult].forEach((result) => throwIfError(result.error));
     return {
       event: null,
       members: membersResult.data || [],
       venues: venuesResult.data || [],
       extraItems: extraItemsResult.data || [],
+      duplicateDismissals: duplicateDismissalsResult.data || [],
     };
   }
 
-  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, perRoundSnapshotsResult, perRoundSnapshotMatchesResult, perRoundSnapshotAllocationsResult] = await Promise.all([
+  const [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, perRoundSnapshotsResult, perRoundSnapshotMatchesResult, perRoundSnapshotAllocationsResult, duplicateDismissalsResult] = await Promise.all([
     membersPromise,
     client().from("event_courts").select("*").eq("event_id", event.id).order("position").order("created_at"),
     client().from("signups").select("*").eq("event_id", event.id).order("created_at"),
@@ -251,9 +256,10 @@ export async function loadDashboard(clubId, eventId = null) {
     client().from("per_round_billing_snapshots").select("*").eq("event_id", event.id).order("checkpoint_at"),
     client().from("per_round_snapshot_matches").select("*").eq("event_id", event.id),
     client().from("per_round_snapshot_allocations").select("*").eq("event_id", event.id),
+    duplicateDismissalsPromise,
   ]);
 
-  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, perRoundSnapshotsResult, perRoundSnapshotMatchesResult, perRoundSnapshotAllocationsResult]
+  [membersResult, courtsResult, signupsResult, attendanceResult, expensesResult, paymentsResult, paymentSlipsResult, auditResult, venuesResult, extraItemsResult, memberExtrasResult, shuttlecockCheckpointsResult, queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, perRoundSnapshotsResult, perRoundSnapshotMatchesResult, perRoundSnapshotAllocationsResult, duplicateDismissalsResult]
     .forEach((result) => throwIfError(result.error));
 
   const pendingPaymentIds = [...new Set((paymentSlipsResult.data || [])
@@ -292,6 +298,7 @@ export async function loadDashboard(clubId, eventId = null) {
     perRoundSnapshots: perRoundSnapshotsResult.data || [],
     perRoundSnapshotMatches: perRoundSnapshotMatchesResult.data || [],
     perRoundSnapshotAllocations: perRoundSnapshotAllocationsResult.data || [],
+    duplicateDismissals: duplicateDismissalsResult.data || [],
   };
 }
 
@@ -652,6 +659,28 @@ export async function mergeClubMembers({ sourceMemberId, targetMemberId }) {
   });
   throwIfError(error);
   return data;
+}
+
+export async function archiveClubMember(memberId) {
+  const { error } = await client()
+    .from("club_members")
+    .update({ active: false })
+    .eq("id", memberId)
+    .eq("role", "member");
+  throwIfError(error);
+}
+
+export async function dismissDuplicateMemberSuggestion({ clubId, signature }) {
+  const { data: authData, error: authError } = await client().auth.getUser();
+  throwIfError(authError);
+  const { error } = await client()
+    .from("member_duplicate_dismissals")
+    .upsert({
+      club_id: clubId,
+      signature,
+      created_by: authData.user?.id || null,
+    }, { onConflict: "club_id,signature" });
+  throwIfError(error);
 }
 
 export async function removeParticipant({ eventId, memberId }) {
@@ -1035,6 +1064,7 @@ export async function listOutstandingPayments(clubId) {
     .select("id, event_id, member_id, amount, billed_at, payment_status")
     .eq("club_id", clubId)
     .not("billed_at", "is", null)
+    .in("payment_status", ["awaiting", "review"])
     .is("paid_at", null)
     .order("billed_at", { ascending: true });
   throwIfError(paymentError);

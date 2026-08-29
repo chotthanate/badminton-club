@@ -293,7 +293,7 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
       if (error) throw error;
       memberId = newMember.id;
     } else {
-      await admin.from("club_members").update({ display_name: displayName }).eq("id", memberId);
+      await admin.from("club_members").update({ display_name: displayName, active: true }).eq("id", memberId);
     }
 
     await admin.from("signups").upsert({
@@ -650,7 +650,7 @@ async function latestPaymentSummary(admin: any, clubId: string) {
   const [eventResult, courtsResult, paymentsResult, signupsResult, extrasResult] = await Promise.all([
     admin.from("events").select("id, event_date, venue").eq("id", eventId).eq("club_id", clubId).maybeSingle(),
     admin.from("event_courts").select("court_name, starts_at, ends_at, position").eq("event_id", eventId),
-    admin.from("payments").select("member_id, amount, billed_at").eq("event_id", eventId).not("billed_at", "is", null),
+    admin.from("payments").select("member_id, amount, billed_at").eq("event_id", eventId).not("billed_at", "is", null).in("payment_status", ["awaiting", "review", "paid"]),
     admin.from("signups").select("member_id, created_at").eq("event_id", eventId).order("created_at"),
     admin.from("member_extra_charges").select("member_id, item_name, unit_price, quantity, created_at").eq("event_id", eventId).order("created_at"),
   ]);
@@ -759,6 +759,7 @@ async function handlePaymentLiffRequest(payload: any) {
           .eq("club_id", clubId)
           .in("member_id", beneficiaryIds)
           .not("billed_at", "is", null)
+          .in("payment_status", ["awaiting", "review"])
           .is("paid_at", null)
           .order("created_at")
         : { data: [], error: null };
@@ -818,12 +819,12 @@ async function handlePaymentLiffRequest(payload: any) {
       return json({ error: "กรุณาเลือกผู้เล่นและรอบที่ต้องการชำระ" }, 400);
     }
     const { data: payments, error: paymentError } = await admin.from("payments")
-      .select("id, event_id, member_id, amount, paid_at, billed_at, events!inner(event_date)")
+      .select("id, event_id, member_id, amount, paid_at, billed_at, payment_status, events!inner(event_date)")
       .eq("club_id", clubId)
       .in("id", paymentIds);
     if (paymentError) throw paymentError;
     if ((payments || []).length !== paymentIds.length
-      || (payments || []).some((payment) => payment.paid_at || !payment.billed_at)) {
+      || (payments || []).some((payment) => payment.paid_at || !payment.billed_at || !["awaiting", "review"].includes(payment.payment_status))) {
       return json({ error: "ยอดที่เลือกมีการเปลี่ยนแปลง กรุณาเปิดหน้าแจ้งโอนใหม่" }, 409);
     }
     const beneficiaryMemberIds = [...new Set((payments || []).map((payment) => String(payment.member_id)))];
@@ -1155,7 +1156,7 @@ async function handleLiffRequest(payload: any) {
     }
 
     const { data: existingMember } = await admin.from("club_members")
-      .select("id, display_name, nickname, aliases, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level")
+      .select("id, display_name, nickname, aliases, active, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level")
       .eq("club_id", clubId)
       .eq("line_user_id", identity.sub)
       .maybeSingle();
@@ -1440,7 +1441,7 @@ async function upsertLiffMember(
         matched.display_name,
       ].map((value) => String(value || "").trim()).filter(Boolean))];
       const { error } = await admin.from("club_members")
-        .update({ display_name: displayName, nickname, line_user_id: lineUserId, aliases, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, playable_skill_levels: skill.playableSkillLevels, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
+        .update({ display_name: displayName, nickname, line_user_id: lineUserId, aliases, active: true, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, playable_skill_levels: skill.playableSkillLevels, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
         .eq("id", matched.id);
       if (error) throw error;
       return matched.id;
@@ -1452,20 +1453,21 @@ async function upsertLiffMember(
       nickname,
       line_user_id: lineUserId,
       role: "member",
+      active: true,
       ...(skill?.skillLevel ? { skill_level: skill.skillLevel, playable_skill_levels: skill.playableSkillLevels, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}),
     }).select("id").single();
     if (error) throw error;
     return newMember.id;
   }
 
-  if (existingMember.display_name !== displayName || existingMember.nickname !== nickname || skill?.skillLevel) {
+  if (existingMember.display_name !== displayName || existingMember.nickname !== nickname || existingMember.active === false || skill?.skillLevel) {
     const aliases = [...new Set([
       ...(existingMember.aliases || []),
       existingMember.nickname,
       existingMember.display_name,
     ].map((value) => String(value || "").trim()).filter(Boolean))];
     const { error } = await admin.from("club_members")
-      .update({ display_name: displayName, nickname, aliases, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, playable_skill_levels: skill.playableSkillLevels, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
+      .update({ display_name: displayName, nickname, aliases, active: true, ...(skill?.skillLevel ? { skill_level: skill.skillLevel, playable_skill_levels: skill.playableSkillLevels, allow_lower_level: skill.allowLowerLevel, allow_higher_level: skill.allowHigherLevel } : {}) })
       .eq("id", existingMember.id);
     if (error) throw error;
   }

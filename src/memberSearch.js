@@ -44,6 +44,14 @@ export function findExactDuplicateMemberGroups(members) {
     });
 }
 
+export function duplicateGroupSignature(members) {
+  return members
+    .map((member) => member?.id)
+    .filter(Boolean)
+    .sort()
+    .join("|");
+}
+
 function preferredCanonicalMember(left, right) {
   if (Boolean(left.line_user_id) !== Boolean(right.line_user_id)) return left.line_user_id ? -1 : 1;
   return String(left.created_at || "").localeCompare(String(right.created_at || ""));

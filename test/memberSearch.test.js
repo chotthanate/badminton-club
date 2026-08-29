@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { findExactDuplicateMemberGroups, normalizeMemberSearch, rankMemberSuggestions } from "../src/memberSearch.js";
+import { duplicateGroupSignature, findExactDuplicateMemberGroups, normalizeMemberSearch, rankMemberSuggestions } from "../src/memberSearch.js";
 
 const members = [
   { id: "jack", nickname: "Jack", display_name: "Jackalin☀️🐟" },
@@ -39,4 +39,11 @@ test("exact duplicate groups prefer the LINE-linked member as the canonical row"
 
   assert.equal(groups.length, 1);
   assert.deepEqual(groups[0].map((member) => member.id), ["line", "guest"]);
+});
+
+test("duplicate suggestion signature stays stable when member order changes", () => {
+  assert.equal(
+    duplicateGroupSignature([{ id: "second" }, { id: "first" }]),
+    duplicateGroupSignature([{ id: "first" }, { id: "second" }]),
+  );
 });
