@@ -105,6 +105,7 @@ import {
   createInitialEvent,
   formatPlayedDuration,
   formatThaiLongDate,
+  finalizedCollectionSummary,
   minutesBetween,
   playedMinutesWithinEvent,
   roundDefaultsForDate,
@@ -2066,13 +2067,18 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
   const pendingSlipCount = event.paymentSlips?.length || 0;
   const lineSummary = useMemo(() => buildLineSummary(event), [event]);
   const perRoundAwaitingClose = event.billingModel === "per_round" && event.status !== "closed";
-  const paymentComplete = settlement.rows.length > 0 && settlement.rows.every((row) => row.paid);
   const collectionRows = [...settlement.rows]
     .filter((row) => !row.paymentExempt)
     .sort((left, right) => Number(left.signupOrder || Number.MAX_SAFE_INTEGER) - Number(right.signupOrder || Number.MAX_SAFE_INTEGER));
   const previousRows = (previousOutstanding.rows || []).filter((row) => row.event_id !== event.id);
   const previousTotal = previousRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const combinedTotal = settlement.totalCost + previousTotal;
+  const collectionSummary = finalizedCollectionSummary(collectionRows, previousTotal);
+  const paymentComplete = collectionSummary.paymentComplete;
+  const roundPaymentStatus = collectionSummary.finalizedCount < collectionSummary.collectableCount
+    ? `รอสรุปยอด ${collectionSummary.collectableCount - collectionSummary.finalizedCount} คน`
+    : paymentComplete
+      ? "ชำระครบแล้ว"
+      : "สรุปครบแล้ว · รอชำระ";
   const outstandingGroups = useMemo(() => {
     const grouped = new Map();
     (previousOutstanding.rows || []).forEach((row) => {
@@ -2281,22 +2287,21 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
         <div className="badminton-card-title badminton-payment-heading"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div><button aria-label="ตั้งค่าข้อความชำระเงินใน LINE" className="badminton-payment-settings-button" onClick={() => setPaymentSettingsOpen(true)} title="ตั้งค่าข้อความชำระเงินใน LINE" type="button"><Settings size={18} /></button></div>
         {perRoundAwaitingClose ? <div className="badminton-per-round-pending"><Timer size={18} /><div><strong>กำลังคำนวณตามจำนวนรอบ</strong><span>ผู้เล่นที่กลับก่อนสามารถล็อกยอดด้วย Snapshot จากหน้าผู้เล่น ส่วนคนที่ยังเล่นอยู่จะสรุปยอดเมื่อจบรอบ</span></div></div> : null}
         <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
-          <div className="badminton-current-round-total"><span>{perRoundAwaitingClose ? "ยอดประมาณรอบนี้" : "ยอดรอบนี้"}</span><strong>{baht(settlement.totalCost)} บาท</strong></div>
+          <div className="badminton-current-round-total"><span>ยอดที่สรุปแล้วรอบนี้</span><strong>{baht(collectionSummary.currentTotal)} บาท</strong><small>{collectionSummary.finalizedCount}/{collectionSummary.collectableCount} คน</small></div>
           <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousTotal)} บาท</strong></div>
-          <div className="badminton-summary-grand-total"><span>รวมทั้งหมด</span><strong>{baht(combinedTotal)} บาท</strong></div>
+          <div className="badminton-summary-grand-total"><span>รวมทั้งหมด</span><strong>{baht(collectionSummary.combinedTotal)} บาท</strong></div>
           <div className="badminton-round-payment-status">
             <Check size={16} />
-            <span>{paymentComplete ? "ชำระครบแล้ว" : "รอชำระครบ"}</span>
+            <span>{roundPaymentStatus}</span>
           </div>
         </div>
         <div className="badminton-card-title badminton-payment-list-title"><WalletCards size={19} /><div><h2>ค่าใช้จ่ายรายคน</h2></div></div>
         <div className="badminton-pay-list">
           {collectionRows.map((row) => {
             const extraLabel = formatExtraItems(row.extraCharges);
-            const amount = row.billingFinalized ? row.billedAmount : row.roundedDue;
             return <article className={`badminton-pay-row ${row.billingFinalized ? "is-billed" : ""} ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
-              <div className="badminton-pay-person"><strong>{row.signupOrder ? `${row.signupOrder}. ` : ""}{row.name}</strong><span>{event.billingModel === "per_round" ? `${row.roundsPlayed || 0} รอบ` : formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>{perRoundAwaitingClose ? "ยอดประมาณ · รอจบรอบ" : "ยอดคำนวณสำหรับแอดมิน"}</small>}</div>
-              <strong className="badminton-pay-amount">{baht(amount)} บาท{row.billingFinalized && !row.paid ? <button aria-label={`แก้ยอดเรียกเก็บของ ${row.name}`} className="badminton-edit-bill" onClick={() => setBillDraft({ row, amount: String(row.billedAmount) })} title="แก้ยอดเรียกเก็บ" type="button"><Pencil size={13} /></button> : null}</strong>
+              <div className="badminton-pay-person"><strong>{row.signupOrder ? `${row.signupOrder}. ` : ""}{row.name}</strong><span>{event.billingModel === "per_round" ? `${row.roundsPlayed || 0} รอบ` : formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>{perRoundAwaitingClose ? "รอจบรอบก่อนสรุปยอด" : "ยังไม่ได้สรุปยอด"}</small>}</div>
+              <strong className={`badminton-pay-amount ${row.billingFinalized ? "" : "is-unfinalized"}`}>{row.billingFinalized ? `${baht(row.billedAmount)} บาท` : "ยังไม่สรุป"}{row.billingFinalized && !row.paid ? <button aria-label={`แก้ยอดเรียกเก็บของ ${row.name}`} className="badminton-edit-bill" onClick={() => setBillDraft({ row, amount: String(row.billedAmount) })} title="แก้ยอดเรียกเก็บ" type="button"><Pencil size={13} /></button> : null}</strong>
               <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} disabled={perRoundAwaitingClose && !row.billingFinalized} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : perRoundAwaitingClose ? <Timer size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : perRoundAwaitingClose ? "รอจบรอบ" : "สรุปยอด"}</button>
             </article>;
           })}

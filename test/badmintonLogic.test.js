@@ -8,6 +8,7 @@ import {
   compareCourtNames,
   completedRoundsByMember,
   formatPlayedDuration,
+  finalizedCollectionSummary,
   minutesBetween,
   nextFridayIso,
   playedMinutesWithinEvent,
@@ -702,6 +703,22 @@ test("member summary hides rows that an admin has not finalized", () => {
 
   assert.doesNotMatch(summary, /ยังไม่สรุป/);
   assert.match(summary, /1\.สรุปแล้ว = 120 บาท/);
+});
+
+test("backoffice payment totals include only finalized member bills", () => {
+  const summary = finalizedCollectionSummary([
+    { memberId: "draft", billingFinalized: false, roundedDue: 140, billedAmount: null, paid: false },
+    { memberId: "ready", billingFinalized: true, roundedDue: 140, billedAmount: 150, paid: false },
+    { memberId: "free", paymentExempt: true, billingFinalized: true, billedAmount: 120, paid: true },
+  ], 300);
+
+  assert.deepEqual(summary, {
+    collectableCount: 2,
+    finalizedCount: 1,
+    currentTotal: 150,
+    combinedTotal: 450,
+    paymentComplete: false,
+  });
 });
 
 test("settlement locks a finalized bill without marking it paid", () => {

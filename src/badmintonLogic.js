@@ -584,6 +584,24 @@ export function buildLineSummary(event) {
   });
 }
 
+export function finalizedCollectionSummary(rows = [], previousTotal = 0) {
+  const collectableRows = rows.filter((row) => !row.paymentExempt);
+  const finalizedRows = collectableRows.filter((row) => row.billingFinalized);
+  const currentTotal = finalizedRows.reduce(
+    (sum, row) => sum + Math.max(0, Number(row.billedAmount) || 0),
+    0,
+  );
+  return {
+    collectableCount: collectableRows.length,
+    finalizedCount: finalizedRows.length,
+    currentTotal,
+    combinedTotal: currentTotal + Math.max(0, Number(previousTotal) || 0),
+    paymentComplete: collectableRows.length > 0
+      && finalizedRows.length === collectableRows.length
+      && finalizedRows.every((row) => row.paid),
+  };
+}
+
 export { compareCourtNames };
 
 function summarizeExtraCharges(charges) {
