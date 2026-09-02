@@ -54,6 +54,25 @@ export function totalCourtHours(courts = []) {
   );
 }
 
+export function earliestSessionStart(times = []) {
+  const values = [...new Set(times.map(parseTime).filter((value) => value !== null))]
+    .sort((left, right) => left - right);
+  if (!values.length) return null;
+  if (values.length === 1) return formatTime(values[0]);
+
+  let largestGap = -1;
+  let earliest = values[0];
+  values.forEach((value, index) => {
+    const next = index === values.length - 1 ? values[0] + 24 * 60 : values[index + 1];
+    const gap = next - value;
+    if (gap > largestGap) {
+      largestGap = gap;
+      earliest = next % (24 * 60);
+    }
+  });
+  return formatTime(earliest);
+}
+
 export function weightFromTimes(startTime, endTime, leftAt) {
   const total = minutesBetween(startTime, endTime);
   const played = minutesBetween(startTime, leftAt);
@@ -803,6 +822,11 @@ function parseTime(value) {
   const minutes = Number(match[2]);
   if (hours > 23 || minutes > 59) return null;
   return hours * 60 + minutes;
+}
+
+function formatTime(totalMinutes) {
+  const normalized = totalMinutes % (24 * 60);
+  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
 }
 
 function roundToStep(value, step) {

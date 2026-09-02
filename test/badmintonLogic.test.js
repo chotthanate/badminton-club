@@ -7,6 +7,7 @@ import {
   calculateSettlement,
   compareCourtNames,
   completedRoundsByMember,
+  earliestSessionStart,
   formatPlayedDuration,
   finalizedCollectionSummary,
   minutesBetween,
@@ -49,6 +50,12 @@ test("totalCourtHours sums courts with different booking times", () => {
     { startsAt: "21:00", endsAt: "00:00" },
     { startsAt: "22:00", endsAt: "00:00" },
   ]), 5);
+});
+
+test("earliestSessionStart keeps after-midnight courts in the same evening session", () => {
+  assert.equal(earliestSessionStart(["00:00", "22:00", "22:00", "22:00"]), "22:00");
+  assert.equal(earliestSessionStart(["21:00", "22:00", "23:30"]), "21:00");
+  assert.equal(earliestSessionStart(["00:00", "00:30"]), "00:00");
 });
 
 test("weightFromTimes calculates partial play across midnight", () => {
