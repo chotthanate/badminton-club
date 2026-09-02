@@ -6,6 +6,7 @@ import {
 } from "./skillLevels.js";
 import { buildRandomTestPlayerProfiles } from "./randomTestPlayers.js";
 import { compareCourtNames } from "../supabase/functions/_shared/paymentSummary.js";
+import { timePositionWithinEvent } from "./badmintonLogic.js";
 
 function client() {
   if (!supabase) throw new Error("ยังไม่ได้ตั้งค่า Supabase");
@@ -524,6 +525,34 @@ async function syncEventTimes(eventId) {
   const latest = Math.max(...endMinutes) % (24 * 60);
   const endsAt = `${String(Math.floor(latest / 60)).padStart(2, "0")}:${String(latest % 60).padStart(2, "0")}`;
   await updateEvent(eventId, { starts_at: startsAt, ends_at: endsAt });
+  await normalizeArrivalTimesForEvent(eventId, startsAt, endsAt);
+}
+
+async function normalizeArrivalTimesForEvent(eventId, startsAt, endsAt) {
+  const { data, error } = await client().from("signups")
+    .select("member_id, arrival_time")
+    .eq("event_id", eventId)
+    .eq("status", "coming");
+  throwIfError(error);
+  const eventStart = timePositionWithinEvent(startsAt, startsAt, endsAt);
+  const memberIds = (data || [])
+    .filter((signup) => timePositionWithinEvent(String(signup.arrival_time || "").slice(0, 5), startsAt, endsAt) < eventStart)
+    .map((signup) => signup.member_id);
+  if (!memberIds.length) return;
+
+  const [signupResult, attendanceResult] = await Promise.all([
+    client().from("signups")
+      .update({ arrival_time: startsAt })
+      .eq("event_id", eventId)
+      .in("member_id", memberIds),
+    client().from("attendance")
+      .update({ arrived_at: startsAt })
+      .eq("event_id", eventId)
+      .eq("arrived", true)
+      .in("member_id", memberIds),
+  ]);
+  throwIfError(signupResult.error);
+  throwIfError(attendanceResult.error);
 }
 
 function timeOnEventTimeline(time, eventStart) {

@@ -64,17 +64,27 @@ export function weightFromTimes(startTime, endTime, leftAt) {
 export function playedMinutesWithinEvent(startTime, endTime, arrivalTime, leftAt = "") {
   const eventStart = parseTime(startTime);
   const duration = minutesBetween(startTime, endTime);
-  const arrival = parseTime(arrivalTime || startTime);
-  const departure = parseTime(leftAt || endTime);
-  if (eventStart === null || arrival === null || departure === null || !duration) return 0;
+  const arrivalPoint = timePositionWithinEvent(arrivalTime || startTime, startTime, endTime);
+  const departurePoint = timePositionWithinEvent(leftAt || endTime, startTime, endTime);
+  if (eventStart === null || arrivalPoint === null || departurePoint === null || !duration) return 0;
 
   const eventEnd = eventStart + duration;
-  let arrivalPoint = arrival < eventStart ? arrival + 24 * 60 : arrival;
-  let departurePoint = departure < eventStart ? departure + 24 * 60 : departure;
-  if (departurePoint <= arrivalPoint && leftAt) departurePoint += 24 * 60;
-  arrivalPoint = clamp(arrivalPoint, eventStart, eventEnd);
-  departurePoint = clamp(departurePoint, arrivalPoint, eventEnd);
-  return departurePoint - arrivalPoint;
+  const clampedArrival = clamp(arrivalPoint, eventStart, eventEnd);
+  const clampedDeparture = clamp(departurePoint, clampedArrival, eventEnd);
+  return clampedDeparture - clampedArrival;
+}
+
+export function timePositionWithinEvent(time, startTime, endTime) {
+  const value = parseTime(time || startTime);
+  const start = parseTime(startTime);
+  const end = parseTime(endTime);
+  if (value === null || start === null || end === null) return null;
+
+  // Only times inside the after-midnight segment belong to the next day.
+  // A stale 21:00 arrival for a 22:00–00:30 event is before the event,
+  // while 00:15 is correctly treated as the following day.
+  if (end <= start && value < start && value <= end) return value + 24 * 60;
+  return value;
 }
 
 export function formatPlayedDuration(minutes) {

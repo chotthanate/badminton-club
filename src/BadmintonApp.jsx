@@ -111,6 +111,7 @@ import {
   roundDefaultsForDate,
   suggestArrivalTimeOnCheck,
   suggestShuttlecockCheckpointTime,
+  timePositionWithinEvent,
   totalCourtHours,
   weekdayFromIsoDate,
 } from "./badmintonLogic.js";
@@ -1618,7 +1619,10 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       <div className="badminton-attendance-list">
         {sortedParticipants.length ? sortedParticipants.map(({ member, attendance: row, arrivalTime, submittedByLineName, skillLevel: roundSkillLevel }, playerIndex) => {
           const participantName = memberName(member);
-          const plannedArrival = arrivalTime || event.startTime;
+          const rawPlannedArrival = arrivalTime || event.startTime;
+          const plannedArrival = timeOptions.slice(0, -1).includes(rawPlannedArrival)
+            ? rawPlannedArrival
+            : event.startTime;
           const leftAt = row?.leftAt || "";
           const playedMinutes = playedMinutesWithinEvent(event.startTime, event.endTime, plannedArrival, leftAt);
           const billingPercentage = Number(row?.billingPercentage ?? 100);
@@ -1641,7 +1645,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             const exactCheckpoint = (event.shuttlecockCheckpoints || []).find((item) => item.time === nextDeparture);
             if (nextDeparture && (event.billingModel === "per_round" || (event.billingModel === "time_segmented" && !exactCheckpoint))) {
               const previousCheckpoints = (event.shuttlecockCheckpoints || [])
-                .filter((item) => timePosition(item.time, event.startTime) <= timePosition(nextDeparture, event.startTime))
+                .filter((item) => timePositionWithinEvent(item.time, event.startTime, event.endTime) <= timePositionWithinEvent(nextDeparture, event.startTime, event.endTime))
                 .map((item) => Number(item.cumulativeCount) || 0);
               const latestCount = exactCheckpoint?.cumulativeCount
                 ?? (previousCheckpoints.length ? Math.max(...previousCheckpoints) : event.shuttlecockCount || 0);
@@ -1762,7 +1766,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
               <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span>กลับ {leftAt}</span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}>{event.billingModel === "per_round" ? <span className="badminton-round-count">{settlementRow?.roundsPlayed || 0} รอบ</span> : <select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>}<small>{event.billingModel === "per_round" ? "คิดตามเกมที่จบ" : formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `ล็อกยอด ${baht(due)}` : event.billingModel === "per_round" ? `≈ ${baht(due)}` : leftAt ? `ยอด ${baht(due)}` : `≈ ${baht(due)}`} บาท</strong></div></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
-                <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePosition(time, event.startTime) > timePosition(plannedArrival, event.startTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
+                <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePositionWithinEvent(time, event.startTime, event.endTime) > timePositionWithinEvent(plannedArrival, event.startTime, event.endTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label className="badminton-extra-select-wrap"><span>น้ำ/ขนม</span><select aria-label={`เพิ่มน้ำหรือขนมให้ ${participantName}`} disabled={isPaid} onChange={(changeEvent) => chooseExtra(changeEvent.target.value, member.id, participantName)} title={isPaid ? "ยกเลิกรับเงินก่อนแก้สินค้า" : "เลือกน้ำหรือขนม"} value=""><option value="">+ น้ำ/ขนม{extraTotal ? ` ${baht(extraTotal)}` : ""}</option>{(dashboard.extraItems || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {baht(item.price)} บาท</option>)}<option value="custom">กรอกค่าใช้จ่ายเอง…</option></select></label>
                 <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={removePlayer} type="button"><Trash2 size={17} /></button>
               </div>
@@ -2569,15 +2573,6 @@ function buildTimeOptions(startTime, endTime) {
     cursor += 15;
   }
   return options;
-}
-
-function timePosition(time, eventStart) {
-  const [hour, minute] = String(time || eventStart).split(":").map(Number);
-  const [startHour, startMinute] = eventStart.split(":").map(Number);
-  let value = hour * 60 + minute;
-  const start = startHour * 60 + startMinute;
-  if (value < start) value += 24 * 60;
-  return value;
 }
 
 function formatRoundOption(isoDate) {

@@ -15,6 +15,7 @@ import {
   roundDefaultsForDate,
   suggestArrivalTimeOnCheck,
   suggestShuttlecockCheckpointTime,
+  timePositionWithinEvent,
   totalCourtHours,
   weightFromTimes,
 } from "../src/badmintonLogic.js";
@@ -65,6 +66,17 @@ test("playedMinutesWithinEvent uses each player's arrival and departure", () => 
   assert.equal(playedMinutesWithinEvent("21:00", "00:00", "22:00", ""), 120);
   assert.equal(playedMinutesWithinEvent("21:00", "00:00", "22:00", "23:30"), 90);
   assert.equal(formatPlayedDuration(90), "1 ชม. 30 นาที");
+});
+
+test("playedMinutesWithinEvent clamps a stale arrival before a rescheduled overnight event", () => {
+  assert.equal(playedMinutesWithinEvent("22:00", "00:30", "21:00", ""), 150);
+  assert.equal(playedMinutesWithinEvent("22:00", "00:30", "21:30", "23:30"), 90);
+});
+
+test("timePositionWithinEvent distinguishes before-start times from after-midnight times", () => {
+  assert.equal(timePositionWithinEvent("21:00", "22:00", "00:30"), 21 * 60);
+  assert.equal(timePositionWithinEvent("00:15", "22:00", "00:30"), 24 * 60 + 15);
+  assert.equal(playedMinutesWithinEvent("22:00", "00:30", "00:15", ""), 15);
 });
 
 test("billableHours applies an admin-selected percentage to actual playing time", () => {
