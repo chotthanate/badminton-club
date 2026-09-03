@@ -109,6 +109,7 @@ import {
   minutesBetween,
   playedMinutesWithinEvent,
   roundDefaultsForDate,
+  sessionBoundsFromCourts,
   suggestArrivalTimeOnCheck,
   suggestShuttlecockCheckpointTime,
   timePositionWithinEvent,
@@ -2304,7 +2305,7 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
           {collectionRows.map((row) => {
             const extraLabel = formatExtraItems(row.extraCharges);
             return <article className={`badminton-pay-row ${row.billingFinalized ? "is-billed" : ""} ${row.paid ? "is-paid" : ""}`} key={row.memberId}>
-              <div className="badminton-pay-person"><strong>{row.signupOrder ? `${row.signupOrder}. ` : ""}{row.name}</strong><span>{event.billingModel === "per_round" ? `${row.roundsPlayed || 0} รอบ` : formatPlayedDuration(Number(row.hours) * 60)}</span>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>{perRoundAwaitingClose ? "รอจบรอบก่อนสรุปยอด" : "ยังไม่ได้สรุปยอด"}</small>}</div>
+              <div className="badminton-pay-person"><strong>{row.signupOrder ? `${row.signupOrder}. ` : ""}{row.name}</strong>{extraLabel ? <details className="badminton-pay-extras"><summary>{extraLabel}</summary><div>{row.extraCharges.map((charge) => <span key={charge.id || `${charge.name}-${charge.unitPrice}`}>{charge.name} × {charge.quantity || 1} = {baht(Number(charge.unitPrice) * Number(charge.quantity || 1))} บาท</span>)}</div></details> : null}{row.billingFinalized ? <small>{row.paid ? "ชำระแล้ว" : "สรุปยอดแล้ว · รอชำระ"}{row.overpaymentAmount > 0 ? ` · โอนเกิน ${baht(row.overpaymentAmount)} บาท` : ""}</small> : <small>{perRoundAwaitingClose ? "รอจบรอบก่อนสรุปยอด" : "ยังไม่ได้สรุปยอด"}</small>}</div>
               <strong className={`badminton-pay-amount ${row.billingFinalized ? "" : "is-unfinalized"}`}>{row.billingFinalized ? `${baht(row.billedAmount)} บาท` : "ยังไม่สรุป"}{row.billingFinalized && !row.paid ? <button aria-label={`แก้ยอดเรียกเก็บของ ${row.name}`} className="badminton-edit-bill" onClick={() => setBillDraft({ row, amount: String(row.billedAmount) })} title="แก้ยอดเรียกเก็บ" type="button"><Pencil size={13} /></button> : null}</strong>
               <button className={row.paid ? "is-paid" : row.billingFinalized ? "is-awaiting" : ""} disabled={perRoundAwaitingClose && !row.billingFinalized} onClick={() => togglePayment(row)} type="button">{row.paid || row.billingFinalized ? <Check size={16} /> : perRoundAwaitingClose ? <Timer size={16} /> : <WalletCards size={16} />} {row.paid ? "จ่ายแล้ว" : row.billingFinalized ? "รับเงินแล้ว" : perRoundAwaitingClose ? "รอจบรอบ" : "สรุปยอด"}</button>
             </article>;
@@ -2401,8 +2402,8 @@ function mapDashboardToEvent(dashboard) {
   const slipPaymentsById = new Map((dashboard.paymentSlipPayments || []).map((payment) => [payment.id, payment]));
   const membersById = new Map(dashboard.members.map((member) => [member.id, member]));
   const attendanceByMember = new Map(dashboard.attendance.map((row) => [row.member_id, row]));
-  const startTime = dashboard.event.starts_at.slice(0, 5);
-  const endTime = dashboard.event.ends_at.slice(0, 5);
+  const storedStartTime = dashboard.event.starts_at.slice(0, 5);
+  const storedEndTime = dashboard.event.ends_at.slice(0, 5);
   const courtHourlyRate = Number(dashboard.event.court_hourly_rate ?? 200);
   const shuttlecockCount = Number(dashboard.event.shuttlecock_count ?? 0);
   const shuttlecockUnitPrice = Number(dashboard.event.shuttlecock_unit_price ?? 95);
@@ -2413,6 +2414,7 @@ function mapDashboardToEvent(dashboard) {
     startsAt: court.starts_at.slice(0, 5),
     endsAt: court.ends_at.slice(0, 5),
   }));
+  const { startTime, endTime } = sessionBoundsFromCourts(courts, storedStartTime, storedEndTime);
   const courtHours = totalCourtHours(courts);
   const snapshottedMatchIds = new Set((dashboard.perRoundSnapshotMatches || []).map((row) => row.match_id));
   const snapshotByMember = new Map();

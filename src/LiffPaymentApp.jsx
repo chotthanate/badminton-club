@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Check, Copy, ImagePlus, LoaderCircle, ReceiptText, ShieldCheck, UserPlus, UserRound, Users, X } from "lucide-react";
 import { baht, formatThaiDate } from "./badmintonLogic.js";
 import { getLiffTestContext } from "./liffSignup.js";
-import { selectedPaymentTotal } from "./paymentSelection.js";
+import { selectedPaymentExtras, selectedPaymentTotal } from "./paymentSelection.js";
 import { classifySlipRecipient, PAYMENT_RECIPIENT_NAME, recognizeSlip } from "./paymentSlip.js";
 import LanguageToggle from "./LanguageToggle.jsx";
 import { formatMemberDate, localizeError, pickLanguage, useLanguage } from "./language.js";
@@ -61,6 +61,10 @@ export default function LiffPaymentApp() {
   const availablePayments = selectedBeneficiaries.flatMap((entry) => entry.payments);
   const total = useMemo(
     () => selectedPaymentTotal(selectedBeneficiaries, selectedPaymentIds),
+    [selectedBeneficiaries, selectedPaymentIds],
+  );
+  const selectedExtras = useMemo(
+    () => selectedPaymentExtras(selectedBeneficiaries, selectedPaymentIds),
     [selectedBeneficiaries, selectedPaymentIds],
   );
   const recipientStatus = slip ? classifySlipRecipient(slip.text, data?.recipientNames) : "match";
@@ -207,7 +211,7 @@ export default function LiffPaymentApp() {
         <div className="liff-payment-section-title"><div><strong>{tr("เลือกรอบที่ต้องการจ่าย", "Select sessions to pay")}</strong><span>{selectedBeneficiaries.length} {tr("คน", "players")} · {availablePayments.length} {tr("รอบค้าง", "outstanding sessions")}</span></div></div>
         {availablePayments.length ? <div className="liff-beneficiary-groups">{selectedBeneficiaries.map((entry) => <section className="liff-beneficiary-group" key={entry.id}>
           <header><div><UserPlus size={16} /><strong>{beneficiaryLabel(entry)}</strong></div><button aria-label={`${tr("นำ", "Remove")} ${entry.name}`} onClick={() => removeBeneficiary(entry.id)} type="button"><X size={16} /></button></header>
-          <div className="liff-due-list">{entry.payments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{language === "en" ? formatMemberDate(payment.eventDate, language) : formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small></span><b>{baht(payment.amount)} {tr("บาท", "THB")}</b></label>)}</div>
+          <div className="liff-due-list">{entry.payments.map((payment) => <label className={selectedPaymentIds.includes(payment.id) ? "is-selected" : ""} key={payment.id}><input checked={selectedPaymentIds.includes(payment.id)} onChange={() => toggleRound(payment.id)} type="checkbox" /><span><strong>{language === "en" ? formatMemberDate(payment.eventDate, language) : formatThaiDate(payment.eventDate)}</strong><small>{payment.venue}</small>{Number(payment.extrasAmount || 0) > 0 ? <small className="liff-payment-extra-summary">{tr("รวมค่าน้ำ/ขนม", "Includes refreshments")} {baht(payment.extrasAmount)} {tr("บาท", "THB")}{payment.extras?.length ? ` · ${formatPaymentExtraItems(payment.extras, language)}` : ""}</small> : null}</span><b>{baht(payment.amount)} {tr("บาท", "THB")}</b></label>)}</div>
         </section>)}</div> : selectableBeneficiaries.length ? <div className="liff-payment-empty"><UserPlus size={31} /><strong>{tr("กรุณาเลือกผู้เล่น", "Select a player")}</strong><span>{tr("เลือกชื่อด้านบนก่อน แล้วจึงเลือกรอบที่ต้องการชำระ", "Choose a player above, then select the sessions to pay.")}</span></div> : <div className="liff-payment-empty"><ShieldCheck size={31} /><strong>{testMode ? tr("ยังไม่มียอดค้างทดลอง", "No test balance yet") : tr("ไม่มียอดค้างชำระ", "No outstanding balance")}</strong><span>{testMode ? tr("ลงชื่อผ่านลิงก์ทดลอง แล้วให้แอดมินสรุปยอดของคุณก่อนทดสอบหน้านี้", "Register through the test link and ask the admin to finalize your test balance first.") : tr("ยอดที่ชำระแล้วหรือยังไม่ได้สรุปจะไม่แสดงในหน้านี้", "Paid or unfinished balances are not shown here.")}</span></div>}
         {availablePayments.length ? <>
           <div className="liff-payment-bank">
@@ -215,6 +219,7 @@ export default function LiffPaymentApp() {
             <button onClick={copyBankAccount} type="button"><Copy size={16} /> {accountCopied ? tr("คัดลอกแล้ว", "Copied") : tr("คัดลอก", "Copy")}</button>
           </div>
           <div className="liff-payment-total"><span>{tr("ยอดที่ต้องชำระ", "Amount due")}</span><strong>{baht(total)} {tr("บาท", "THB")}</strong></div>
+          {selectedExtras.total > 0 ? <p className="liff-payment-total-extras"><strong>{tr("ในยอดนี้มีค่าน้ำ/ขนม", "Refreshments included")} {baht(selectedExtras.total)} {tr("บาท", "THB")}</strong>{selectedExtras.items.length ? <span>{formatPaymentExtraItems(selectedExtras.items, language)}</span> : null}</p> : null}
           <p className="liff-payment-amount-note">{tr("จำนวนเงินในสลิปต้องตรงกับยอดที่ต้องชำระเท่านั้น", "The amount on the slip must exactly match the amount due.")}</p>
         </> : null}
       </section>
@@ -261,6 +266,13 @@ function beneficiaryLabel(entry) {
   const lineName = String(entry?.lineName || "").trim();
   const name = String(entry?.name || "สมาชิก").trim();
   return lineName && lineName !== name ? `${name} · LINE: ${lineName}` : name;
+}
+
+function formatPaymentExtraItems(items = [], language = "th") {
+  return items.map((item) => {
+    const quantity = Number(item.quantity || 1);
+    return `${item.name}${quantity > 1 ? ` × ${quantity}` : ""} ${baht(item.amount)} ${language === "en" ? "THB" : "บาท"}`;
+  }).join(" · ");
 }
 
 function todayIsoLocal(now = new Date()) {

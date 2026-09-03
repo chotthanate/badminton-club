@@ -5028,6 +5028,32 @@
   white-space: nowrap;
 }
 
+.liff-due-list .liff-payment-extra-summary {
+  overflow: visible;
+  color: #8a6200;
+  font-weight: 800;
+  line-height: 1.4;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.liff-payment-total-extras {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 4px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #f3f8f2;
+  color: #315f46;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.liff-payment-total-extras strong,
+.liff-payment-total-extras span {
+  display: block;
+}
+
 .liff-due-list b {
   color: #0f7a52;
   white-space: nowrap;

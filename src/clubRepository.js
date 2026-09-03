@@ -6,7 +6,7 @@ import {
 } from "./skillLevels.js";
 import { buildRandomTestPlayerProfiles } from "./randomTestPlayers.js";
 import { compareCourtNames } from "../supabase/functions/_shared/paymentSummary.js";
-import { earliestSessionStart, timePositionWithinEvent } from "./badmintonLogic.js";
+import { sessionBoundsFromCourts, timePositionWithinEvent } from "./badmintonLogic.js";
 
 function client() {
   if (!supabase) throw new Error("ยังไม่ได้ตั้งค่า Supabase");
@@ -520,10 +520,7 @@ async function syncEventTimes(eventId) {
     .eq("event_id", eventId);
   throwIfError(error);
   if (!data?.length) return;
-  const startsAt = earliestSessionStart(data.map((row) => row.starts_at.slice(0, 5)));
-  const endMinutes = data.map((row) => timeOnEventTimeline(row.ends_at.slice(0, 5), startsAt));
-  const latest = Math.max(...endMinutes) % (24 * 60);
-  const endsAt = `${String(Math.floor(latest / 60)).padStart(2, "0")}:${String(latest % 60).padStart(2, "0")}`;
+  const { startTime: startsAt, endTime: endsAt } = sessionBoundsFromCourts(data);
   await updateEvent(eventId, { starts_at: startsAt, ends_at: endsAt });
   await normalizeArrivalTimesForEvent(eventId, startsAt, endsAt);
 }

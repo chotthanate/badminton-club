@@ -755,7 +755,7 @@ async function handlePaymentLiffRequest(payload: any) {
       const beneficiaryIds = (clubMembers || []).map((member) => member.id);
       const { data: duePayments, error: paymentError } = beneficiaryIds.length
         ? await admin.from("payments")
-          .select("id, member_id, event_id, amount, events!inner(event_date, venue)")
+          .select("id, member_id, event_id, amount, extras_amount, events!inner(event_date, venue)")
           .eq("club_id", clubId)
           .in("member_id", beneficiaryIds)
           .not("billed_at", "is", null)
@@ -764,16 +764,35 @@ async function handlePaymentLiffRequest(payload: any) {
           .order("created_at")
         : { data: [], error: null };
       if (paymentError) throw paymentError;
+      const dueEventIds = [...new Set((duePayments || []).map((payment: any) => payment.event_id))];
+      const { data: dueExtras, error: extrasError } = dueEventIds.length
+        ? await admin.from("member_extra_charges")
+          .select("event_id, member_id, item_name, unit_price, quantity, created_at")
+          .in("event_id", dueEventIds)
+          .in("member_id", beneficiaryIds)
+          .order("created_at")
+        : { data: [], error: null };
+      if (extrasError) throw extrasError;
+      const extrasByPayment = new Map<string, any[]>();
+      for (const extra of dueExtras || []) {
+        const key = `${extra.event_id}:${extra.member_id}`;
+        const rows = extrasByPayment.get(key) || [];
+        rows.push(extra);
+        extrasByPayment.set(key, rows);
+      }
       const paymentsByMember = new Map<string, any[]>();
       for (const payment of duePayments || []) {
         const badmintonEvent = Array.isArray(payment.events) ? payment.events[0] : payment.events;
         const rows = paymentsByMember.get(payment.member_id) || [];
+        const extras = summarizePaymentExtraRows(extrasByPayment.get(`${payment.event_id}:${payment.member_id}`) || []);
         rows.push({
           id: payment.id,
           eventId: payment.event_id,
           eventDate: badmintonEvent?.event_date,
           venue: badmintonEvent?.venue || "",
           amount: Number(payment.amount || 0),
+          extrasAmount: Number(payment.extras_amount || 0),
+          extras,
         });
         paymentsByMember.set(payment.member_id, rows);
       }
@@ -1052,6 +1071,18 @@ async function handlePaymentLiffRequest(payload: any) {
     const message = error instanceof Error ? error.message : "ตรวจสลิปไม่สำเร็จ";
     return json({ error: message }, message.includes("LINE login") ? 401 : 500);
   }
+}
+
+function summarizePaymentExtraRows(charges: any[]) {
+  const grouped = new Map<string, { quantity: number; amount: number }>();
+  for (const charge of charges) {
+    const name = String(charge.item_name || "รายการอื่น");
+    const current = grouped.get(name) || { quantity: 0, amount: 0 };
+    current.quantity += Number(charge.quantity || 1);
+    current.amount += Number(charge.unit_price || 0) * Number(charge.quantity || 1);
+    grouped.set(name, current);
+  }
+  return [...grouped.entries()].map(([name, value]) => ({ name, ...value }));
 }
 
 async function handleLiveQueueRequest(payload: any) {

@@ -14,6 +14,7 @@ import {
   nextFridayIso,
   playedMinutesWithinEvent,
   roundDefaultsForDate,
+  sessionBoundsFromCourts,
   suggestArrivalTimeOnCheck,
   suggestShuttlecockCheckpointTime,
   timePositionWithinEvent,
@@ -56,6 +57,15 @@ test("earliestSessionStart keeps after-midnight courts in the same evening sessi
   assert.equal(earliestSessionStart(["00:00", "22:00", "22:00", "22:00"]), "22:00");
   assert.equal(earliestSessionStart(["21:00", "22:00", "23:30"]), "21:00");
   assert.equal(earliestSessionStart(["00:00", "00:30"]), "00:00");
+});
+
+test("sessionBoundsFromCourts derives the real envelope across midnight", () => {
+  assert.deepEqual(sessionBoundsFromCourts([
+    { startsAt: "00:00", endsAt: "01:00" },
+    { startsAt: "22:00", endsAt: "01:00" },
+    { startsAt: "22:00", endsAt: "00:30" },
+    { startsAt: "23:00", endsAt: "00:00" },
+  ]), { startTime: "22:00", endTime: "01:00" });
 });
 
 test("weightFromTimes calculates partial play across midnight", () => {

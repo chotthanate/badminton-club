@@ -73,6 +73,19 @@ export function earliestSessionStart(times = []) {
   return formatTime(earliest);
 }
 
+export function sessionBoundsFromCourts(courts = [], fallbackStart = "", fallbackEnd = "") {
+  const startTime = earliestSessionStart(courts.map((court) => court.startsAt || court.starts_at)) || fallbackStart;
+  const start = parseTime(startTime);
+  if (start === null || !courts.length) return { startTime: fallbackStart, endTime: fallbackEnd };
+
+  const endPositions = courts
+    .map((court) => parseTime(court.endsAt || court.ends_at))
+    .filter((value) => value !== null)
+    .map((value) => value <= start ? value + 24 * 60 : value);
+  if (!endPositions.length) return { startTime, endTime: fallbackEnd };
+  return { startTime, endTime: formatTime(Math.max(...endPositions)) };
+}
+
 export function weightFromTimes(startTime, endTime, leftAt) {
   const total = minutesBetween(startTime, endTime);
   const played = minutesBetween(startTime, leftAt);
