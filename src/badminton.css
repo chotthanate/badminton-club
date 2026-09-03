@@ -3010,6 +3010,12 @@
   font-weight: 800;
 }
 
+.badminton-pay-person > .badminton-pay-duration {
+  color: #286e59;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .badminton-pay-extras {
   position: relative;
   min-width: 0;
@@ -3157,9 +3163,13 @@
   }
 
   .badminton-pay-person > strong {
-    max-width: 74px;
+    max-width: 68px;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .badminton-pay-person > .badminton-pay-duration {
+    font-size: 10px;
   }
 
   .badminton-pay-person > small {

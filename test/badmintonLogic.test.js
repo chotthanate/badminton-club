@@ -442,6 +442,28 @@ test("time-segmented billing charges a court extension only to players still pre
   assert.deepEqual(result.rows.map((row) => row.roundedDue), [300, 500]);
 });
 
+test("time-segmented billing includes every court slice after midnight", () => {
+  const result = calculateSettlement(makeEvent({
+    startTime: "22:00",
+    endTime: "01:00",
+    billingModel: "time_segmented",
+    courtHourlyRate: 200,
+    shuttlecockCount: 0,
+    shuttlecockUnitPrice: 95,
+    courts: [{ startsAt: "22:00", endsAt: "01:00" }],
+    attendance: [
+      { memberId: "early", name: "Early", arrived: true, arrivedAt: "22:00", leftAt: "00:15", playedMinutes: 135, billingPercentage: 100 },
+      { memberId: "late", name: "Late", arrived: true, arrivedAt: "22:15", leftAt: "", playedMinutes: 165, billingPercentage: 100 },
+    ],
+  }));
+
+  assert.equal(result.sharedTotalCost, 600);
+  assert.deepEqual(result.rows.map((row) => [row.name, row.hours, row.roundedDue]), [
+    ["Early", 2.25, 250],
+    ["Late", 2.75, 350],
+  ]);
+});
+
 test("time-segmented billing is independent of which equal player was finalized first", () => {
   const base = {
     ...makeEvent(),
