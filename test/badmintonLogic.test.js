@@ -10,6 +10,7 @@ import {
   earliestSessionStart,
   formatPlayedDuration,
   finalizedCollectionSummary,
+  isPaymentAdminConfirmed,
   minutesBetween,
   nextFridayIso,
   playedMinutesWithinEvent,
@@ -38,6 +39,12 @@ function makeEvent({ attendance = [], costs = [], ...overrides } = {}) {
 test("minutesBetween handles an event that crosses midnight", () => {
   assert.equal(minutesBetween("21:00", "00:00"), 180);
   assert.equal(minutesBetween("23:30", "00:30"), 60);
+});
+
+test("player payment stays hidden until an admin explicitly confirms it", () => {
+  assert.equal(isPaymentAdminConfirmed({ billed_at: "2026-09-03T00:00:00Z" }), false);
+  assert.equal(isPaymentAdminConfirmed({ admin_confirmed_at: "2026-09-03T00:01:00Z" }), true);
+  assert.equal(isPaymentAdminConfirmed({ paid_at: "2026-09-03T00:02:00Z" }), true);
 });
 
 test("minutesBetween rejects malformed or out-of-range times", () => {

@@ -637,10 +637,10 @@ function buildRosterText(event: any, players: Array<{ name: string; arrivalTime:
 
 async function latestPaymentSummary(admin: any, clubId: string) {
   const { data: latestPayment, error: latestPaymentError } = await admin.from("payments")
-    .select("event_id, billed_at")
+    .select("event_id, billed_at, admin_confirmed_at")
     .eq("club_id", clubId)
-    .not("billed_at", "is", null)
-    .order("billed_at", { ascending: false })
+    .not("admin_confirmed_at", "is", null)
+    .order("admin_confirmed_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (latestPaymentError) throw latestPaymentError;
@@ -650,7 +650,7 @@ async function latestPaymentSummary(admin: any, clubId: string) {
   const [eventResult, courtsResult, paymentsResult, signupsResult, extrasResult] = await Promise.all([
     admin.from("events").select("id, event_date, venue").eq("id", eventId).eq("club_id", clubId).maybeSingle(),
     admin.from("event_courts").select("court_name, starts_at, ends_at, position").eq("event_id", eventId),
-    admin.from("payments").select("member_id, amount, billed_at").eq("event_id", eventId).not("billed_at", "is", null).in("payment_status", ["awaiting", "review", "paid"]),
+    admin.from("payments").select("member_id, amount, billed_at, admin_confirmed_at").eq("event_id", eventId).not("admin_confirmed_at", "is", null).in("payment_status", ["awaiting", "review", "paid"]),
     admin.from("signups").select("member_id, created_at").eq("event_id", eventId).order("created_at"),
     admin.from("member_extra_charges").select("member_id, item_name, unit_price, quantity, created_at").eq("event_id", eventId).order("created_at"),
   ]);
@@ -758,7 +758,7 @@ async function handlePaymentLiffRequest(payload: any) {
           .select("id, member_id, event_id, amount, extras_amount, events!inner(event_date, venue)")
           .eq("club_id", clubId)
           .in("member_id", beneficiaryIds)
-          .not("billed_at", "is", null)
+          .not("admin_confirmed_at", "is", null)
           .in("payment_status", ["awaiting", "review"])
           .is("paid_at", null)
           .order("created_at")
@@ -839,12 +839,12 @@ async function handlePaymentLiffRequest(payload: any) {
       return json({ error: "กรุณาเลือกผู้เล่นและรอบที่ต้องการชำระ" }, 400);
     }
     const { data: payments, error: paymentError } = await admin.from("payments")
-      .select("id, event_id, member_id, amount, paid_at, billed_at, payment_status, events!inner(event_date)")
+      .select("id, event_id, member_id, amount, paid_at, billed_at, admin_confirmed_at, payment_status, events!inner(event_date)")
       .eq("club_id", clubId)
       .in("id", paymentIds);
     if (paymentError) throw paymentError;
     if ((payments || []).length !== paymentIds.length
-      || (payments || []).some((payment) => payment.paid_at || !payment.billed_at || !["awaiting", "review"].includes(payment.payment_status))) {
+      || (payments || []).some((payment) => payment.paid_at || !payment.admin_confirmed_at || !["awaiting", "review"].includes(payment.payment_status))) {
       return json({ error: "ยอดที่เลือกมีการเปลี่ยนแปลง กรุณาเปิดหน้าแจ้งโอนใหม่" }, 409);
     }
     const beneficiaryMemberIds = [...new Set((payments || []).map((payment) => String(payment.member_id)))];

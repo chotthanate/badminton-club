@@ -1087,12 +1087,12 @@ export async function removeShuttlecockCheckpoint(checkpointId, eventId) {
 
 export async function listOutstandingPayments(clubId) {
   const { data: payments, error: paymentError } = await client().from("payments")
-    .select("id, event_id, member_id, amount, billed_at, payment_status")
+    .select("id, event_id, member_id, amount, billed_at, admin_confirmed_at, payment_status")
     .eq("club_id", clubId)
-    .not("billed_at", "is", null)
+    .not("admin_confirmed_at", "is", null)
     .in("payment_status", ["awaiting", "review"])
     .is("paid_at", null)
-    .order("billed_at", { ascending: true });
+    .order("admin_confirmed_at", { ascending: true });
   throwIfError(paymentError);
   if (!payments?.length) return [];
   const eventIds = [...new Set(payments.map((row) => row.event_id))];
@@ -1217,21 +1217,23 @@ async function seedTestMembers(clubId) {
 
 export async function setPayment({ clubId, eventId, memberId, amount, sharedAmount, extrasAmount, shuttlecockCount, paid, userId }) {
   const { data: existing, error: existingError } = await client().from("payments")
-    .select("amount, billed_at, calculated_amount")
+    .select("amount, billed_at, admin_confirmed_at, paid_at, calculated_amount")
     .eq("event_id", eventId)
     .eq("member_id", memberId)
     .maybeSingle();
   throwIfError(existingError);
-  const finalAmount = existing?.billed_at ? Number(existing.amount) : Math.max(0, Number(amount) || 0);
+  if (!existing?.admin_confirmed_at && !existing?.paid_at) {
+    throw new Error("ต้องสรุปและยืนยันยอดของผู้เล่นก่อนบันทึกรับเงิน");
+  }
+  const finalAmount = Number(existing.amount);
   const { error } = await client().from("payments").upsert({
     club_id: clubId,
     event_id: eventId,
     member_id: memberId,
     amount: finalAmount,
-    calculated_amount: existing?.billed_at
-      ? Math.max(0, Number(existing.calculated_amount) || 0)
-      : Math.max(0, Number(amount) || 0),
-    billed_at: existing?.billed_at || new Date().toISOString(),
+    calculated_amount: Math.max(0, Number(existing.calculated_amount) || 0),
+    billed_at: existing.billed_at || existing.admin_confirmed_at,
+    admin_confirmed_at: existing.admin_confirmed_at || existing.paid_at,
     paid_at: paid ? new Date().toISOString() : null,
     payment_status: paid ? "paid" : "awaiting",
     paid_source: paid ? "admin" : null,
@@ -1263,6 +1265,7 @@ export async function finalizeMemberBill({
     amount: finalBilled,
     calculated_amount: finalCalculated,
     billed_at: new Date().toISOString(),
+    admin_confirmed_at: new Date().toISOString(),
     paid_at: null,
     payment_status: "awaiting",
     paid_source: null,
@@ -1299,11 +1302,11 @@ export async function getPaymentSlipImageUrl(storagePath) {
 export async function finishEvent({ clubId, eventId, rows, shuttlecockCount, userId }) {
   const { data: existingPayments, error: existingError } = await client()
     .from("payments")
-    .select("member_id, paid_at, billed_at")
+    .select("member_id, paid_at, admin_confirmed_at")
     .eq("event_id", eventId);
   throwIfError(existingError);
   const lockedMemberIds = new Set((existingPayments || [])
-    .filter((payment) => payment.paid_at || payment.billed_at)
+    .filter((payment) => payment.paid_at || payment.admin_confirmed_at)
     .map((payment) => payment.member_id));
   const rowsToSave = rows
     .filter((row) => !lockedMemberIds.has(row.memberId))
@@ -1314,6 +1317,7 @@ export async function finishEvent({ clubId, eventId, rows, shuttlecockCount, use
       amount: Math.max(0, Number(row.roundedDue) || 0),
       calculated_amount: Math.max(0, Number(row.roundedDue) || 0),
       billed_at: row.paymentExempt ? new Date().toISOString() : null,
+      admin_confirmed_at: row.paymentExempt ? new Date().toISOString() : null,
       paid_at: row.paymentExempt ? new Date().toISOString() : null,
       payment_status: row.paymentExempt ? "paid" : "draft",
       paid_source: row.paymentExempt ? "exempt" : null,

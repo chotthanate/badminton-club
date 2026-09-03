@@ -128,6 +128,10 @@ export function formatPlayedDuration(minutes) {
   return `${hours} ชม. ${remainder} นาที`;
 }
 
+export function isPaymentAdminConfirmed(payment) {
+  return Boolean(payment?.admin_confirmed_at || payment?.paid_at);
+}
+
 export function billableHours(playedMinutes, billingPercentage = 100) {
   const minutes = Math.max(0, Number(playedMinutes) || 0);
   const percentage = clamp(Number(billingPercentage) || 100, 0, 100);

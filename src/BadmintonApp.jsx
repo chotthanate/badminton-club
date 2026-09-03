@@ -106,6 +106,7 @@ import {
   formatPlayedDuration,
   formatThaiLongDate,
   finalizedCollectionSummary,
+  isPaymentAdminConfirmed,
   minutesBetween,
   playedMinutesWithinEvent,
   roundDefaultsForDate,
@@ -1447,7 +1448,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     if (saved) setPendingCheckIn(null);
   }
 
-  async function saveDepartureAndLock({ memberId, participantName, plannedArrival, leftAt, cumulativeCount = null }) {
+  async function saveDeparture({ memberId, participantName, plannedArrival, leftAt, cumulativeCount = null }) {
     const currentRow = settlementByMember.get(memberId);
     if (currentRow?.paid && !currentRow.paymentExempt) {
       throw new Error("คนนี้รับเงินแล้ว หากต้องแก้เวลากลับ กรุณายกเลิกสถานะรับเงินก่อน");
@@ -1479,73 +1480,18 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       patch: { arrived: true, arrived_at: plannedArrival, left_at: leftAt || null },
     });
 
-    const freshDashboard = await loadDashboard(event.clubId, event.id);
-    const freshEvent = mapDashboardToEvent(freshDashboard);
-    const freshRow = freshEvent.attendance.find((row) => row.memberId === memberId);
-    if (!freshRow) throw new Error("ไม่พบข้อมูลผู้เล่นหลังบันทึกเวลากลับ");
-    if (freshEvent.billingModel === "per_round") {
-      await recordAudit({
-        clubId: event.clubId,
-        eventId: event.id,
-        userId: session.user.id,
-        action: leftAt
-          ? `${participantName} กลับ ${leftAt} · รอสรุปยอดตามจำนวนรอบหลังจบรอบ`
-          : `ยกเลิกเวลากลับของ ${participantName}`,
-        details: {
-          member_id: memberId,
-          left_at: leftAt || null,
-          billing_model: "per_round",
-          rounds_played: freshRow.roundsPlayed || 0,
-        },
-      });
-      return;
-    }
-    const hasManualAdjustment = freshRow.billingFinalized
-      && freshRow.calculatedAmount !== null
-      && Number(freshRow.billedAmount) !== Number(freshRow.calculatedAmount);
-    let lockedAmount = freshRow.billedAmount;
-    if (leftAt && !freshRow.paymentExempt && !hasManualAdjustment) {
-      const projectedEvent = {
-        ...freshEvent,
-        attendance: freshEvent.attendance.map((row) => row.memberId === memberId ? {
-          ...row,
-          paid: false,
-          paidAmount: null,
-          billingFinalized: false,
-          billedAmount: null,
-          calculatedAmount: null,
-          lockedSharedAmount: null,
-          lockedExtraAmount: null,
-        } : row),
-      };
-      const projectedRow = calculateSettlement(projectedEvent).rows.find((row) => row.memberId === memberId);
-      if (!projectedRow) throw new Error("คำนวณยอดของผู้เล่นไม่สำเร็จ");
-      lockedAmount = projectedRow.roundedDue;
-      await finalizeMemberBill({
-        clubId: event.clubId,
-        eventId: event.id,
-        memberId,
-        calculatedAmount: projectedRow.roundedDue,
-        billedAmount: projectedRow.roundedDue,
-        sharedAmount: projectedRow.sharedDue,
-        extrasAmount: projectedRow.extraAmount,
-        shuttlecockCount: freshEvent.shuttlecockCount,
-        userId: session.user.id,
-      });
-    }
     await recordAudit({
       clubId: event.clubId,
       eventId: event.id,
       userId: session.user.id,
       action: leftAt
-        ? `${participantName} กลับ ${leftAt} และล็อกยอด ${baht(lockedAmount)} บาท`
+        ? `บันทึกเวลากลับของ ${participantName} เป็น ${leftAt} · ยังไม่สรุปยอด`
         : `ยกเลิกเวลากลับของ ${participantName}`,
       details: {
         member_id: memberId,
         left_at: leftAt || null,
         cumulative_shuttlecocks: cumulativeCount,
-        billed_amount: lockedAmount,
-        kept_manual_adjustment: hasManualAdjustment,
+        requires_manual_bill_confirmation: true,
       },
     });
   }
@@ -1660,11 +1606,11 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
               return null;
             }
             return mutate(
-              () => saveDepartureAndLock({ memberId: member.id, participantName, plannedArrival, leftAt: nextDeparture }),
+              () => saveDeparture({ memberId: member.id, participantName, plannedArrival, leftAt: nextDeparture }),
               nextDeparture
                 ? event.billingModel === "per_round"
-                  ? `สร้าง Snapshot และล็อกยอดของ ${participantName} แล้ว`
-                  : `บันทึกเวลากลับและล็อกยอดของ ${participantName} แล้ว`
+                  ? `บันทึก Snapshot ของ ${participantName} แล้ว · ยังไม่สรุปยอด`
+                  : `บันทึกเวลากลับของ ${participantName} แล้ว · ยังไม่สรุปยอด`
                 : `ยกเลิกเวลากลับของ ${participantName} แล้ว`,
             );
           }
@@ -1764,7 +1710,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                 <button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button>
                 {submittedByLineName ? <small className="badminton-signup-attribution" title={`ลงชื่อให้โดย LINE: ${submittedByLineName}`}>ลงชื่อให้โดย LINE: {submittedByLineName}</small> : null}
               </div>
-              <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span>กลับ {leftAt}</span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}>{event.billingModel === "per_round" ? <span className="badminton-round-count">{settlementRow?.roundsPlayed || 0} รอบ</span> : <select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>}<small>{event.billingModel === "per_round" ? "คิดตามเกมที่จบ" : formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `ล็อกยอด ${baht(due)}` : event.billingModel === "per_round" ? `≈ ${baht(due)}` : leftAt ? `ยอด ${baht(due)}` : `≈ ${baht(due)}`} บาท</strong></div></div>
+              <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span>กลับ {leftAt}</span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}>{event.billingModel === "per_round" ? <span className="badminton-round-count">{settlementRow?.roundsPlayed || 0} รอบ</span> : <select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>}<small>{event.billingModel === "per_round" ? "คิดตามเกมที่จบ" : formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `สรุปแล้ว ${baht(due)}` : `ยังไม่สรุป · ≈ ${baht(due)}`} บาท</strong></div></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePositionWithinEvent(time, event.startTime, event.endTime) > timePositionWithinEvent(plannedArrival, event.startTime, event.endTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
@@ -1841,9 +1787,9 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       {pendingDeparture ? <div className="badminton-modal-backdrop" role="presentation"><form aria-label="บันทึกเวลากลับและจำนวนลูกแบด" className="badminton-custom-charge-modal" onSubmit={async (submitEvent) => {
         submitEvent.preventDefault();
         const affectedLocked = settlement.rows.filter((entry) => entry.billingFinalized && entry.leftAt === pendingDeparture.leftAt);
-        if (affectedLocked.length && !window.confirm(`เวลา ${pendingDeparture.leftAt} มี ${affectedLocked.length} คนที่สรุปยอดแล้ว ยอดเหล่านั้นจะไม่ถูกเปลี่ยนอัตโนมัติ แต่คนที่ยังไม่สรุปจะคำนวณใหม่ ดำเนินการต่อไหม?`)) return;
+        if (affectedLocked.length && !window.confirm(`เวลา ${pendingDeparture.leftAt} มี ${affectedLocked.length} คนที่สรุปยอดแล้ว หากแก้จำนวนลูกแบด ระบบจะถอนยอดที่ยังไม่รับเงินและให้สรุปใหม่เพื่อป้องกันยอดผิด ดำเนินการต่อไหม?`)) return;
         const saved = await mutate(async () => {
-          await saveDepartureAndLock({
+          await saveDeparture({
             memberId: pendingDeparture.memberId,
             participantName: pendingDeparture.participantName,
             plannedArrival: pendingDeparture.plannedArrival,
@@ -2462,16 +2408,16 @@ function mapDashboardToEvent(dashboard) {
       extraCharges,
       paid: Boolean(payment?.paid_at),
       paidAmount: payment?.paid_at ? Number(payment.amount || 0) : null,
-      billingFinalized: Boolean(payment?.billed_at || payment?.paid_at),
-      billedAmount: payment?.billed_at || payment?.paid_at ? Number(payment.amount || 0) : null,
+      billingFinalized: isPaymentAdminConfirmed(payment),
+      billedAmount: isPaymentAdminConfirmed(payment) ? Number(payment.amount || 0) : null,
       calculatedAmount: payment?.calculated_amount === null || payment?.calculated_amount === undefined ? null : Number(payment.calculated_amount),
       paymentStatus: payment?.payment_status || (payment?.paid_at ? "paid" : "draft"),
       paidSource: payment?.paid_source || null,
       transferredAmount: payment?.transferred_amount === null || payment?.transferred_amount === undefined ? null : Number(payment.transferred_amount),
       overpaymentAmount: Number(payment?.overpayment_amount || 0),
-      lockedSharedAmount: (payment?.billed_at || payment?.paid_at) && payment.shared_amount !== null && payment.shared_amount !== undefined ? Number(payment.shared_amount) : null,
-      lockedExtraAmount: (payment?.billed_at || payment?.paid_at) && payment.extras_amount !== null && payment.extras_amount !== undefined ? Number(payment.extras_amount) : null,
-      shuttlecockCountSnapshot: payment?.billed_at || payment?.paid_at ? payment.shuttlecock_count_snapshot : null,
+      lockedSharedAmount: isPaymentAdminConfirmed(payment) && payment.shared_amount !== null && payment.shared_amount !== undefined ? Number(payment.shared_amount) : null,
+      lockedExtraAmount: isPaymentAdminConfirmed(payment) && payment.extras_amount !== null && payment.extras_amount !== undefined ? Number(payment.extras_amount) : null,
+      shuttlecockCountSnapshot: isPaymentAdminConfirmed(payment) ? payment.shuttlecock_count_snapshot : null,
     };
   });
   return {
