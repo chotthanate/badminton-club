@@ -1797,10 +1797,10 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             cumulativeCount: pendingDeparture.cumulativeCount,
           });
         }, event.billingModel === "per_round"
-          ? `สร้าง Snapshot และล็อกยอดของ ${pendingDeparture.participantName} แล้ว`
-          : `บันทึกเวลากลับและล็อกยอดของ ${pendingDeparture.participantName} แล้ว`);
+          ? `บันทึก Snapshot ของ ${pendingDeparture.participantName} แล้ว · ยังไม่สรุปยอด`
+          : `บันทึกเวลากลับของ ${pendingDeparture.participantName} แล้ว · ยังไม่สรุปยอด`);
         if (saved) setPendingDeparture(null);
-      }}><div className="badminton-modal-title"><div><p className="badminton-kicker">ผู้เล่นกลับก่อน</p><h2>{pendingDeparture.participantName} · {pendingDeparture.leftAt} น.</h2></div><button aria-label="ปิด" onClick={() => setPendingDeparture(null)} type="button"><X size={19} /></button></div><p>ตอนเวลานี้ใช้ลูกแบดสะสมไปทั้งหมดกี่ลูก?</p><label>จำนวนลูกแบดสะสม<input autoFocus min="0" onChange={(changeEvent) => setPendingDeparture({ ...pendingDeparture, cumulativeCount: changeEvent.target.value })} placeholder="กรอกจำนวนที่ใช้จริง" required type="number" value={pendingDeparture.cumulativeCount} /></label>{event.billingModel === "per_round" ? <small className="badminton-settings-help">ระบบจะเก็บยอดสะสมของทุกคนเป็น Snapshot และล็อกยอดของคนนี้ เกมที่กำลังเล่นครบ 11 นาทีจะนับในช่วงนี้ ส่วนเกมที่ยังไม่ถึง 11 นาทีจะไปคิดช่วงถัดไป</small> : <small className="badminton-settings-help">บันทึกครั้งเดียว ระบบจะล็อกยอดของคนนี้ให้ทันที และใช้จำนวนลูกนี้ร่วมกับคนที่กลับเวลาเดียวกัน</small>}<button className="badminton-primary" type="submit"><Check size={17} /> {event.billingModel === "per_round" ? "บันทึก Snapshot และล็อกยอด" : "บันทึกและล็อกยอด"}</button></form></div> : null}
+      }}><div className="badminton-modal-title"><div><p className="badminton-kicker">ผู้เล่นกลับก่อน</p><h2>{pendingDeparture.participantName} · {pendingDeparture.leftAt} น.</h2></div><button aria-label="ปิด" onClick={() => setPendingDeparture(null)} type="button"><X size={19} /></button></div><p>ตอนเวลานี้ใช้ลูกแบดสะสมไปทั้งหมดกี่ลูก?</p><label>จำนวนลูกแบดสะสม<input autoFocus min="0" onChange={(changeEvent) => setPendingDeparture({ ...pendingDeparture, cumulativeCount: changeEvent.target.value })} placeholder="กรอกจำนวนที่ใช้จริง" required type="number" value={pendingDeparture.cumulativeCount} /></label>{event.billingModel === "per_round" ? <small className="badminton-settings-help">ระบบจะเก็บต้นทุนและจำนวนเกมของช่วงนี้ไว้เป็น Snapshot แต่จะยังไม่ส่งยอดให้ผู้เล่นจนกว่าแอดมินจะสรุปยอด</small> : <small className="badminton-settings-help">ระบบจะบันทึกเวลากลับและจำนวนลูกแบดไว้คำนวณ ยอดยังไม่ถูกส่งให้ผู้เล่นจนกว่าแอดมินจะสรุปยอด</small>}<button className="badminton-primary" type="submit"><Check size={17} /> {event.billingModel === "per_round" ? "บันทึก Snapshot" : "บันทึกเวลากลับ"}</button></form></div> : null}
     </section>
   );
 }
@@ -1911,7 +1911,7 @@ function PricingPanel({ event, mutate, session, settlement }) {
     }
     const nextLabel = nextModel === "per_round" ? "ตามจำนวนรอบที่เล่น" : "ตามเวลาที่อยู่จริง";
     const warning = nextModel === "per_round"
-      ? "ค่าสนาม ลูกแบด และค่าใช้จ่ายส่วนกลางจะหารตามจำนวนเกมที่เล่น ผู้เล่นที่กลับก่อนสามารถล็อกยอดด้วย Snapshot ส่วนคนที่ยังอยู่จะสรุปยอดเมื่อจบรอบ"
+      ? "ค่าสนาม ลูกแบด และค่าใช้จ่ายส่วนกลางจะหารตามจำนวนเกมที่เล่น ผู้เล่นที่กลับก่อนจะบันทึก Snapshot ไว้คำนวณ และแอดมินสรุปยอดภายหลัง"
       : "ค่าสนามและลูกแบดจะกลับมาหารตามช่วงเวลาที่ผู้เล่นอยู่จริง";
     if (!window.confirm(`เปลี่ยนวิธีคิดเงินเป็น “${nextLabel}” ใช่ไหม?\n\n${warning}`)) return;
     mutate(async () => {
@@ -2082,7 +2082,7 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
           paid: nextPaid,
         },
       });
-    }, nextPaid ? `รับเงิน ${row.name} และล็อกยอดแล้ว` : "ยกเลิกสถานะรับเงินแล้ว");
+    }, nextPaid ? `บันทึกรับเงิน ${row.name} แล้ว` : "ยกเลิกสถานะรับเงินแล้ว");
   }
 
   function confirmBill(submitEvent) {
@@ -2236,7 +2236,7 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
       <PaymentSubtabs />
       <div className="badminton-payment-workspace">
         <div className="badminton-card-title badminton-payment-heading"><ReceiptText size={20} /><div><h2>สรุปยอด</h2></div><button aria-label="ตั้งค่าข้อความชำระเงินใน LINE" className="badminton-payment-settings-button" onClick={() => setPaymentSettingsOpen(true)} title="ตั้งค่าข้อความชำระเงินใน LINE" type="button"><Settings size={18} /></button></div>
-        {perRoundAwaitingClose ? <div className="badminton-per-round-pending"><Timer size={18} /><div><strong>กำลังคำนวณตามจำนวนรอบ</strong><span>ผู้เล่นที่กลับก่อนสามารถล็อกยอดด้วย Snapshot จากหน้าผู้เล่น ส่วนคนที่ยังเล่นอยู่จะสรุปยอดเมื่อจบรอบ</span></div></div> : null}
+        {perRoundAwaitingClose ? <div className="badminton-per-round-pending"><Timer size={18} /><div><strong>กำลังคำนวณตามจำนวนรอบ</strong><span>ผู้เล่นที่กลับก่อนบันทึก Snapshot ได้ แต่ยอดจะยังไม่แสดงให้ผู้เล่นจนกว่าแอดมินจะสรุปหลังจบรอบ</span></div></div> : null}
         <div className={`badminton-settlement-overview ${paymentComplete ? "is-settled" : ""}`}>
           <div className="badminton-current-round-total"><span>ยอดที่สรุปแล้วรอบนี้</span><strong>{baht(collectionSummary.currentTotal)} บาท</strong><small>{collectionSummary.finalizedCount}/{collectionSummary.collectableCount} คน</small></div>
           <div className="badminton-summary-line"><span>ยอดค้างจากรอบก่อน</span><strong>{baht(previousTotal)} บาท</strong></div>
