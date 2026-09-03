@@ -785,13 +785,14 @@ async function handlePaymentLiffRequest(payload: any) {
         const badmintonEvent = Array.isArray(payment.events) ? payment.events[0] : payment.events;
         const rows = paymentsByMember.get(payment.member_id) || [];
         const extras = summarizePaymentExtraRows(extrasByPayment.get(`${payment.event_id}:${payment.member_id}`) || []);
+        const detailedExtrasAmount = extras.reduce((sum, extra) => sum + Number(extra.amount || 0), 0);
         rows.push({
           id: payment.id,
           eventId: payment.event_id,
           eventDate: badmintonEvent?.event_date,
           venue: badmintonEvent?.venue || "",
           amount: Number(payment.amount || 0),
-          extrasAmount: Number(payment.extras_amount || 0),
+          extrasAmount: detailedExtrasAmount || Number(payment.extras_amount || 0),
           extras,
         });
         paymentsByMember.set(payment.member_id, rows);
