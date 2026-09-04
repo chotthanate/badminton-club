@@ -5815,6 +5815,28 @@
   font-weight: 800;
 }
 
+.badminton-queue-wait-time {
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.badminton-queue-wait-time > span:last-child {
+  color: #0f7a52;
+}
+
+@media (max-width: 430px) {
+  .badminton-queue-waiting li {
+    align-items: flex-start;
+  }
+
+  .badminton-queue-waiting li > span {
+    flex-wrap: wrap;
+  }
+}
+
 .badminton-queue-manual-replace {
   display: grid;
   grid-template-columns: 1fr auto;

@@ -13,6 +13,7 @@ import {
   upsertOperatorCourt,
 } from "./clubRepository.js";
 import { lineupCompatibility, proposeQueueMatch } from "./queueLogic.js";
+import { buildWaitingTimeEstimates, courtStartDelaySeconds, elapsedWaitSeconds, estimateGameDurationSeconds, formatMinuteSecondDuration } from "./queueWaitTime.js";
 import { normalizePlayableSkillLevels } from "./skillLevels.js";
 
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`);
@@ -91,12 +92,20 @@ export default function QueuePanel({ dashboard, event, isStaff = false, mutate }
   const queueHeadIsApproved = upcoming[0]?.status === "approved";
   const draft = upcoming.find((match) => match.status === "draft");
   const waiting = queue.players.filter((player) => player.status === "waiting").sort((a, b) => a.gamesPlayed - b.gamesPlayed || a.minutesPlayed - b.minutesPlayed || new Date(a.queuedAt) - new Date(b.queuedAt));
+  const estimatedGameSeconds = estimateGameDurationSeconds(queue.matches);
+  const courtAvailableInSeconds = event.courts.map((court) => {
+    const match = playingByCourt.get(court.id);
+    if (!match?.startedAt) return courtStartDelaySeconds({ eventDate: event.date, eventStartTime: event.startTime, courtStartTime: court.startsAt, now: clock });
+    const elapsedSeconds = Math.max(0, Math.floor((clock - new Date(match.startedAt).getTime()) / 1000));
+    return Math.max(0, estimatedGameSeconds - elapsedSeconds);
+  });
+  const waitingTimeEstimates = buildWaitingTimeEstimates({ waiting, upcomingCount: upcoming.length, courtAvailableInSeconds, gameDurationSeconds: estimatedGameSeconds });
 
   useEffect(() => {
-    if (!playingMatches.length) return undefined;
+    if (!playingMatches.length && !waiting.length) return undefined;
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [playingMatches.map((match) => match.id).join("|")]);
+  }, [playingMatches.map((match) => match.id).join("|"), waiting.length]);
 
   async function createAutomaticDraft() {
     const proposal = proposeQueueMatch(queue.players, queue.matches, nextSequence);
@@ -121,7 +130,7 @@ export default function QueuePanel({ dashboard, event, isStaff = false, mutate }
       const editing = match.status === "draft" || editingMatchId === match.id;
       return <section className={`badminton-upcoming-card is-${match.status}`} key={match.id}><header><div><strong>คิว {index + 1}</strong><span>{match.status === "approved" ? "อนุมัติแล้ว" : "รอตรวจสอบ"}</span></div>{match.status === "approved" ? <div className="badminton-queue-order-actions"><button aria-label="เลื่อนขึ้น" disabled={index === 0 || upcoming[index - 1]?.status !== "approved"} onClick={() => mutate(() => moveUpcomingQueue(match.id, -1), "เลื่อนคิวขึ้นแล้ว")} type="button">↑</button><button aria-label="เลื่อนลง" disabled={index === upcoming.length - 1 || upcoming[index + 1]?.status !== "approved"} onClick={() => mutate(() => moveUpcomingQueue(match.id, 1), "เลื่อนคิวลงแล้ว")} type="button">↓</button><button onClick={() => setEditingMatchId(match.id)} type="button"><Pencil size={15} /> แก้</button></div> : null}</header>{editing ? <QueueLineupEditor match={match} onClose={() => setEditingMatchId(null)} mutate={mutate} waiting={waiting} /> : <QueueTeamPreview match={match} />}<button className="badminton-delete-button badminton-full-button" onClick={() => mutate(() => cancelQueueMatch(match.id), `ยกเลิกคิว ${index + 1} แล้ว`)} type="button"><X size={16} /> ยกเลิกคิว</button></section>;
     })}{!upcoming.length ? <div className="badminton-empty">ยังไม่มีคิวล่วงหน้า</div> : null}</article>
-    <article className="badminton-card badminton-queue-waiting"><div className="badminton-card-title"><Users size={20} /><div><h2>คิวรอเล่น</h2><p>เรียงตามความยุติธรรมของระบบ</p></div></div>{waiting.length ? <ol>{waiting.map((player) => <li key={player.memberId}><span><QueuePlayerName player={player} /><em>{player.skillLevel}</em></span><small>รอเข้าคิว</small></li>)}</ol> : <div className="badminton-empty">ยังไม่มีผู้เล่นเช็กชื่อรอเข้าคิว</div>}</article>
+    <article className="badminton-card badminton-queue-waiting"><div className="badminton-card-title"><Users size={20} /><div><h2>คิวรอเล่น</h2><p>เรียงตามความยุติธรรมของระบบ · เวลาคิวเป็นค่าประมาณ</p></div></div>{waiting.length ? <ol>{waiting.map((player) => <li key={player.memberId}><span><QueuePlayerName player={player} /><em>{player.skillLevel}</em></span><small className="badminton-queue-wait-time"><span>รอแล้ว {formatMinuteSecondDuration(elapsedWaitSeconds(player.queuedAt, clock))}</span><span>{waitingTimeEstimates.get(player.memberId) > 0 ? `คาดว่าอีก ≈ ${formatMinuteSecondDuration(waitingTimeEstimates.get(player.memberId))}` : "ใกล้ถึงคิว"}</span></small></li>)}</ol> : <div className="badminton-empty">ยังไม่มีผู้เล่นเช็กชื่อรอเข้าคิว</div>}</article>
   </section>;
 }
 
