@@ -1228,7 +1228,7 @@ function TournamentTeams({ data, isTest, members, mutate }) {
 }
 
 function TournamentMatches({ data, mutate }) {
-  const [level, setLevel] = useState(data.divisions[0]?.skill_level || "all");
+  const [level, setLevel] = useState("all");
   const [shift, setShift] = useState({
     courtId: data.courts[0]?.id || "",
     minutes: 15,
