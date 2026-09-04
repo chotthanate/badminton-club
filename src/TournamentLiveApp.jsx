@@ -19,6 +19,7 @@ const TEXT = {
     delayed: "ล่าช้า",
     noData: "ยังไม่มีข้อมูลการแข่งขัน",
     public: "ผลการแข่งขันสำหรับผู้เล่นและกองเชียร์",
+    eventTime: "เวลาแข่งขัน",
   },
   en: {
     live: "Live & Up next",
@@ -35,6 +36,7 @@ const TEXT = {
     delayed: "Delayed",
     noData: "No tournament data yet",
     public: "Live results for players and spectators",
+    eventTime: "Event time",
   },
 };
 
@@ -111,6 +113,18 @@ export default function TournamentLiveApp() {
               <CalendarDays size={15} />
               {tournament.event_date} <MapPin size={15} />
               {tournament.venue}
+            </span>
+            <span>
+              <Clock3 size={15} /> {t.eventTime}{" "}
+              {new Date(tournament.starts_at).toLocaleTimeString(
+                language === "th" ? "th-TH" : "en-GB",
+                { hour: "2-digit", minute: "2-digit" },
+              )}
+              –
+              {new Date(tournament.ends_at).toLocaleTimeString(
+                language === "th" ? "th-TH" : "en-GB",
+                { hour: "2-digit", minute: "2-digit" },
+              )}
             </span>
           </div>
           <button onClick={switchLanguage} type="button">

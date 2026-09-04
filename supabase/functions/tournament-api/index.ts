@@ -51,10 +51,12 @@ Deno.serve(async (request) => {
       if (!owner) return json({ error: "เฉพาะเจ้าของที่สร้างการแข่งขันได้" }, 403);
       const details = payload.details || {};
       const startsAt = new Date(details.startsAt);
-      if (!details.name || !details.eventDate || !details.venue || Number.isNaN(startsAt.getTime())) return json({ error: "กรุณากรอกข้อมูลงานให้ครบ" }, 400);
+      const endsAt = new Date(details.endsAt);
+      if (!details.name || !details.eventDate || !details.venue || Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) return json({ error: "กรุณากรอกข้อมูลงานให้ครบ" }, 400);
+      if (endsAt <= startsAt) return json({ error: "เวลาจบต้องอยู่หลังเวลาเริ่ม" }, 400);
       const { data: tournament, error } = await admin.from("tournaments").insert({
         club_id: clubId,
-        name: String(details.name).trim(), event_date: details.eventDate, venue: String(details.venue).trim(), starts_at: startsAt.toISOString(),
+        name: String(details.name).trim(), event_date: details.eventDate, venue: String(details.venue).trim(), starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(),
         qualifier_minutes: Number(details.qualifierMinutes || 30), knockout_minutes: Number(details.knockoutMinutes || 45), minimum_rest_minutes: Number(details.minimumRestMinutes || 15),
         created_by: actorId,
       }).select("*").single();
@@ -69,11 +71,17 @@ Deno.serve(async (request) => {
     if (payload.action === "update_tournament") {
       if (!owner) return json({ error: "เฉพาะเจ้าของที่แก้การตั้งค่าหลักได้" }, 403);
       const details = payload.details || {};
+      const { data: currentTournament } = await admin.from("tournaments").select("starts_at,ends_at").eq("id", payload.tournamentId).eq("club_id", clubId).maybeSingle();
+      if (!currentTournament) return json({ error: "ไม่พบการแข่งขัน" }, 404);
       const changes: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (details.name != null) changes.name = String(details.name).trim();
       if (details.eventDate != null) changes.event_date = details.eventDate;
       if (details.venue != null) changes.venue = String(details.venue).trim();
       if (details.startsAt != null) changes.starts_at = new Date(details.startsAt).toISOString();
+      if (details.endsAt != null) changes.ends_at = new Date(details.endsAt).toISOString();
+      const nextStart = new Date(String(changes.starts_at || currentTournament.starts_at));
+      const nextEnd = new Date(String(changes.ends_at || currentTournament.ends_at));
+      if (nextEnd <= nextStart) return json({ error: "เวลาจบต้องอยู่หลังเวลาเริ่ม" }, 400);
       if (details.status != null) {
         const allowedStatuses = ["draft", "published", "qualifying", "knockout", "completed", "archived", "cancelled"];
         if (!allowedStatuses.includes(details.status)) return json({ error: "สถานะการแข่งขันไม่ถูกต้อง" }, 400);
@@ -134,6 +142,15 @@ Deno.serve(async (request) => {
       if (!owner) return json({ error: "เฉพาะเจ้าของที่จับสลากหรือรีเซ็ตผลได้" }, 403);
       return generateQualification(admin, clubId, actorId, payload);
     }
+    if (payload.action === "generate_test_teams") {
+      if (!owner) return json({ error: "เฉพาะเจ้าของที่เพิ่มผู้เล่นทดลองได้" }, 403);
+      const { data, error } = await userClient.rpc("generate_tournament_test_teams", {
+        target_tournament_id: payload.tournamentId,
+        skill_counts: payload.skillCounts || {},
+      });
+      if (error) return json({ error: error.message }, 400);
+      return json({ players: data });
+    }
     if (payload.action === "update_match") return updateMatch(admin, clubId, actorId, payload);
     if (payload.action === "shift_court_matches") return shiftCourtMatches(userClient, clubId, payload);
     if (payload.action === "save_result") return saveResult(userClient, admin, clubId, actorId, payload);
@@ -169,7 +186,7 @@ async function adminTournament(admin: any, clubId: string, tournamentId: string,
 }
 
 async function publicTournament(admin: any, publicId: string) {
-  const { data: tournament } = await admin.from("tournaments").select("id,public_id,name,event_date,venue,starts_at,status,updated_at").eq("public_id", publicId).in("status", ["published", "qualifying", "knockout", "completed", "archived"]).maybeSingle();
+  const { data: tournament } = await admin.from("tournaments").select("id,public_id,name,event_date,venue,starts_at,ends_at,status,updated_at").eq("public_id", publicId).in("status", ["published", "qualifying", "knockout", "completed", "archived"]).maybeSingle();
   if (!tournament) return json({ error: "ไม่พบการแข่งขันที่เผยแพร่" }, 404);
   const [divisions, courts, teams, players, matches, games] = await Promise.all([
     admin.from("tournament_divisions").select("id,skill_level,status").eq("tournament_id", tournament.id),

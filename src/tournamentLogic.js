@@ -1,5 +1,35 @@
 export const TOURNAMENT_SKILL_LEVELS = ["Rookie", "BG", "N", "S", "P"];
 
+export function recommendTournamentCourts({
+  teamCounts = [],
+  startsAt,
+  endsAt,
+  qualifierMinutes = 30,
+  knockoutMinutes = 45,
+}) {
+  const start = new Date(startsAt).getTime();
+  const end = new Date(endsAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+    return 0;
+
+  const totalMinutes = teamCounts.reduce((sum, rawCount) => {
+    const teams = Math.max(0, Math.floor(Number(rawCount) || 0));
+    if (teams < 4 || teams % 2 !== 0) return sum;
+    const qualifiers = (teams * 3) / 2;
+    const bracketTeams = teams / 2;
+    const matchesPerBracket =
+      Math.max(0, bracketTeams - 1) + (bracketTeams >= 4 ? 1 : 0);
+    return (
+      sum +
+      qualifiers * Number(qualifierMinutes) +
+      matchesPerBracket * 2 * Number(knockoutMinutes)
+    );
+  }, 0);
+
+  if (!totalMinutes) return 0;
+  return Math.max(1, Math.ceil(totalMinutes / ((end - start) / 60000)));
+}
+
 function hashSeed(seed) {
   let value = 2166136261;
   for (const char of String(seed || "headshot")) {

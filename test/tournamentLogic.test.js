@@ -4,10 +4,32 @@ import {
   createKnockoutBracket,
   createQualificationDraw,
   rankQualificationTeams,
+  recommendTournamentCourts,
   scheduleTournamentMatches,
   validateKnockoutScore,
   validateQualificationScore,
 } from "../src/tournamentLogic.js";
+
+test("court recommendation includes qualifiers and both knockout brackets", () => {
+  assert.equal(
+    recommendTournamentCourts({
+      teamCounts: [8],
+      startsAt: "2026-09-04T09:00:00+07:00",
+      endsAt: "2026-09-04T18:00:00+07:00",
+      qualifierMinutes: 30,
+      knockoutMinutes: 45,
+    }),
+    2,
+  );
+  assert.equal(
+    recommendTournamentCourts({
+      teamCounts: [3, 5],
+      startsAt: "2026-09-04T09:00:00+07:00",
+      endsAt: "2026-09-04T18:00:00+07:00",
+    }),
+    0,
+  );
+});
 
 for (const count of [4, 6, 8, 10]) {
   test(`qualification draw gives ${count} teams three unique opponents`, () => {

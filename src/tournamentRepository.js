@@ -48,6 +48,8 @@ export const deleteTournamentTeam = (clubId, payload) =>
   request("delete_team", { clubId, ...payload });
 export const generateTournamentQualification = (clubId, payload) =>
   request("generate_qualification", { clubId, ...payload });
+export const generateTournamentTestTeams = (clubId, payload) =>
+  request("generate_test_teams", { clubId, ...payload });
 export const updateTournamentMatch = (clubId, payload) =>
   request("update_match", { clubId, ...payload });
 export const shiftTournamentCourtMatches = (clubId, payload) =>

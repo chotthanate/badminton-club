@@ -22,6 +22,7 @@ import {
 import { supabase } from "./supabase.js";
 import { getAdminContexts } from "./clubRepository.js";
 import {
+  recommendTournamentCourts,
   rankQualificationTeams,
   TOURNAMENT_SKILL_LEVELS,
 } from "./tournamentLogic.js";
@@ -36,6 +37,7 @@ import {
   deleteTournamentCourt,
   deleteTournamentTeam,
   generateTournamentQualification,
+  generateTournamentTestTeams,
   listTournaments,
   loadTournament,
   loadTournamentMemberOptions,
@@ -291,7 +293,12 @@ export default function TournamentAdminApp({ session }) {
               <TournamentOverview data={data} mutate={mutate} />
             ) : null}
             {tab === "teams" ? (
-              <TournamentTeams data={data} members={members} mutate={mutate} />
+              <TournamentTeams
+                data={data}
+                isTest={Boolean(context?.clubs?.is_test)}
+                members={members}
+                mutate={mutate}
+              />
             ) : null}
             {tab === "matches" ? (
               <TournamentMatches data={data} mutate={mutate} />
@@ -331,6 +338,7 @@ export default function TournamentAdminApp({ session }) {
 
 function TournamentHero({ data, mutate }) {
   const { tournament } = data;
+  const timeOptions = { hour: "2-digit", minute: "2-digit" };
   return (
     <section className="badminton-card tournament-hero">
       <div>
@@ -339,6 +347,10 @@ function TournamentHero({ data, mutate }) {
         <p>
           <CalendarDays size={16} /> {tournament.event_date}{" "}
           <MapPin size={16} /> {tournament.venue}
+        </p>
+        <p>
+          <Clock3 size={16} /> {new Date(tournament.starts_at).toLocaleTimeString("th-TH", timeOptions)}–
+          {new Date(tournament.ends_at).toLocaleTimeString("th-TH", timeOptions)} น.
         </p>
       </div>
       <div className="tournament-hero-actions">
@@ -380,6 +392,7 @@ function CreateTournamentModal({ clubId, onClose, onCreated, saving }) {
     eventDate: today,
     venue: "คอร์ทแบดเขาน้อย",
     startsAt: `${today}T09:00`,
+    endsAt: `${today}T18:00`,
     qualifierMinutes: 30,
     knockoutMinutes: 45,
     minimumRestMinutes: 15,
@@ -395,6 +408,7 @@ function CreateTournamentModal({ clubId, onClose, onCreated, saving }) {
           onCreated({
             ...form,
             startsAt: new Date(form.startsAt).toISOString(),
+            endsAt: new Date(form.endsAt).toISOString(),
           });
         }}
       >
@@ -427,6 +441,7 @@ function CreateTournamentModal({ clubId, onClose, onCreated, saving }) {
                   ...form,
                   eventDate: event.target.value,
                   startsAt: `${event.target.value}T09:00`,
+                  endsAt: `${event.target.value}T18:00`,
                 })
               }
             />
@@ -439,6 +454,17 @@ function CreateTournamentModal({ clubId, onClose, onCreated, saving }) {
               value={form.startsAt}
               onChange={(event) =>
                 setForm({ ...form, startsAt: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            เวลาจบงาน
+            <input
+              required
+              type="datetime-local"
+              value={form.endsAt}
+              onChange={(event) =>
+                setForm({ ...form, endsAt: event.target.value })
               }
             />
           </label>
@@ -543,6 +569,17 @@ function TournamentOverview({ data, mutate }) {
     (level) =>
       !data.divisions.some((division) => division.skill_level === level),
   );
+  const teamCounts = data.divisions.map(
+    (division) =>
+      data.teams.filter((team) => team.division_id === division.id).length,
+  );
+  const recommendedCourts = recommendTournamentCourts({
+    teamCounts,
+    startsAt: data.tournament.starts_at,
+    endsAt: data.tournament.ends_at,
+    qualifierMinutes: data.tournament.qualifier_minutes,
+    knockoutMinutes: data.tournament.knockout_minutes,
+  });
   return (
     <section className="tournament-admin-grid">
       {data.owner ? <TournamentSettings data={data} mutate={mutate} /> : null}
@@ -586,7 +623,14 @@ function TournamentOverview({ data, mutate }) {
         ) : null}
       </article>
       <article className="badminton-card">
-        <h2>สนาม</h2>
+        <div className="tournament-section-heading">
+          <h2>สนาม</h2>
+          {recommendedCourts ? (
+            <span className="tournament-court-recommendation">
+              แนะนำอย่างน้อย {recommendedCourts} คอร์ท
+            </span>
+          ) : null}
+        </div>
         <div className="tournament-court-list">
           {data.courts.map((court) => (
             <span key={court.id}>
@@ -716,6 +760,7 @@ function TournamentSettings({ data, mutate }) {
     eventDate: tournament.event_date,
     venue: tournament.venue,
     startsAt: nowLocalInput(new Date(tournament.starts_at)),
+    endsAt: nowLocalInput(new Date(tournament.ends_at)),
     qualifierMinutes: tournament.qualifier_minutes,
     knockoutMinutes: tournament.knockout_minutes,
     minimumRestMinutes: tournament.minimum_rest_minutes,
@@ -731,6 +776,7 @@ function TournamentSettings({ data, mutate }) {
               updateTournament(tournament.club_id, tournament.id, {
                 ...form,
                 startsAt: new Date(form.startsAt).toISOString(),
+                endsAt: new Date(form.endsAt).toISOString(),
               }),
             "บันทึกตั้งค่างานแล้ว",
           );
@@ -764,6 +810,17 @@ function TournamentSettings({ data, mutate }) {
               value={form.startsAt}
               onChange={(event) =>
                 setForm({ ...form, startsAt: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            เวลาจบงาน
+            <input
+              required
+              type="datetime-local"
+              value={form.endsAt}
+              onChange={(event) =>
+                setForm({ ...form, endsAt: event.target.value })
               }
             />
           </label>
@@ -821,15 +878,153 @@ function TournamentSettings({ data, mutate }) {
   );
 }
 
-function TournamentTeams({ data, members, mutate }) {
+function TournamentDrawActions({ data, mutate }) {
+  if (!data.owner) return null;
+  const rows = data.divisions.map((division) => {
+    const teams = data.teams.filter(
+      (team) => team.division_id === division.id && !team.withdrawn,
+    );
+    const existing = data.matches.some(
+      (match) =>
+        match.division_id === division.id && match.phase === "qualifier",
+    );
+    const eligible = teams.length >= 4 && teams.length % 2 === 0;
+    return { division, teams, existing, eligible };
+  });
+  return (
+    <article className="badminton-card tournament-draw-panel">
+      <div>
+        <p className="badminton-kicker">เริ่มรอบคัดเลือก</p>
+        <h2>สุ่มคู่และสร้างตาราง</h2>
+        <p>เลือกกดแยกตามระดับ ระบบจะกระจายเวลาให้ทุกคอร์ทอัตโนมัติ</p>
+      </div>
+      <div className="tournament-draw-buttons">
+        {rows.map(({ division, teams, existing, eligible }) => (
+          <button
+            className={eligible ? "badminton-primary" : "badminton-secondary"}
+            disabled={!eligible}
+            key={division.id}
+            onClick={() => {
+              const message = existing
+                ? `สร้างตารางระดับ ${division.skill_level} ใหม่ใช่ไหม? ตารางเดิมที่ยังไม่เริ่มจะถูกแทนที่`
+                : `สุ่มคู่ระดับ ${division.skill_level} และสร้างตารางใช่ไหม?`;
+              if (window.confirm(message))
+                mutate(
+                  () =>
+                    generateTournamentQualification(data.tournament.club_id, {
+                      tournamentId: data.tournament.id,
+                      divisionId: division.id,
+                      seed: crypto.randomUUID(),
+                    }),
+                  `สร้างตารางระดับ ${division.skill_level} แล้ว`,
+                );
+            }}
+            title={
+              eligible
+                ? `สร้างตารางระดับ ${division.skill_level}`
+                : teams.length < 4
+                  ? "ต้องมีอย่างน้อย 4 ทีม"
+                  : "จำนวนทีมต้องเป็นเลขคู่"
+            }
+            type="button"
+          >
+            <Swords size={17} /> {division.skill_level} · {teams.length} ทีม
+          </button>
+        ))}
+      </div>
+      {!rows.length ? <p>เพิ่มระดับการแข่งขันก่อนสร้างตาราง</p> : null}
+    </article>
+  );
+}
+
+function TournamentCourtOverview({ data, matches }) {
+  const scheduled = matches
+    .filter((match) => match.scheduled_at && match.status !== "cancelled")
+    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+  if (!scheduled.length || !data.courts.length) return null;
+  const slots = [...new Set(scheduled.map((match) => match.scheduled_at))];
+  const teamName = (id) =>
+    data.teams.find((team) => team.id === id)?.name || "รอผู้ชนะ";
+  const divisionLevel = (id) =>
+    data.divisions.find((division) => division.id === id)?.skill_level || "";
+  return (
+    <section className="badminton-card tournament-court-overview">
+      <div className="tournament-section-heading">
+        <div>
+          <p className="badminton-kicker">ภาพรวมทุกคอร์ท</p>
+          <h2>ตารางเวลาแข่งขัน</h2>
+        </div>
+        <span>{scheduled.length} คู่</span>
+      </div>
+      <div className="tournament-court-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>เวลา</th>
+              {data.courts.map((court) => (
+                <th key={court.id}>{court.name}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {slots.map((slot) => (
+              <tr key={slot}>
+                <th>
+                  {new Date(slot).toLocaleTimeString("th-TH", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </th>
+                {data.courts.map((court) => {
+                  const match = scheduled.find(
+                    (item) =>
+                      item.court_id === court.id && item.scheduled_at === slot,
+                  );
+                  return (
+                    <td key={court.id}>
+                      {match ? (
+                        <div className={`is-${match.status}`}>
+                          <small>{divisionLevel(match.division_id)}</small>
+                          <strong>{teamName(match.team1_id)}</strong>
+                          <span>พบ</span>
+                          <strong>{teamName(match.team2_id)}</strong>
+                        </div>
+                      ) : (
+                        <span className="is-empty">—</span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function TournamentTeams({ data, isTest, members, mutate }) {
   const [divisionId, setDivisionId] = useState(data.divisions[0]?.id || "");
   const [teamName, setTeamName] = useState("");
   const [players, setPlayers] = useState([
     { memberId: "", name: "" },
     { memberId: "", name: "" },
   ]);
+  const [testCounts, setTestCounts] = useState(
+    Object.fromEntries(TOURNAMENT_SKILL_LEVELS.map((level) => [level, 0])),
+  );
   const division = data.divisions.find((item) => item.id === divisionId);
   const teams = data.teams.filter((team) => team.division_id === divisionId);
+  const testRecommendedCourts = recommendTournamentCourts({
+    teamCounts: TOURNAMENT_SKILL_LEVELS.map(
+      (level) => Number(testCounts[level] || 0) / 2,
+    ),
+    startsAt: data.tournament.starts_at,
+    endsAt: data.tournament.ends_at,
+    qualifierMinutes: data.tournament.qualifier_minutes,
+    knockoutMinutes: data.tournament.knockout_minutes,
+  });
   const playerByTeam = (teamId) =>
     data.players
       .filter((player) => player.team_id === teamId)
@@ -841,6 +1036,69 @@ function TournamentTeams({ data, members, mutate }) {
   }
   return (
     <section className="tournament-admin-grid">
+      <TournamentDrawActions data={data} mutate={mutate} />
+      {isTest && data.owner ? (
+        <article className="badminton-card tournament-test-generator">
+          <div className="tournament-section-heading">
+            <div>
+              <p className="badminton-kicker">โหมดทดลอง</p>
+              <h2>เพิ่มผู้เล่นอัตโนมัติ</h2>
+            </div>
+            <strong>
+              {Object.values(testCounts).reduce(
+                (sum, count) => sum + Number(count || 0),
+                0,
+              )}{" "}
+              คน · แนะนำ {testRecommendedCourts} คอร์ท
+            </strong>
+          </div>
+          <div className="tournament-test-counts">
+            {TOURNAMENT_SKILL_LEVELS.map((level) => (
+              <label key={level}>
+                <span>{level}</span>
+                <input
+                  inputMode="numeric"
+                  max="40"
+                  min="0"
+                  step="2"
+                  type="number"
+                  value={testCounts[level]}
+                  onChange={(event) =>
+                    setTestCounts({
+                      ...testCounts,
+                      [level]: Math.max(0, Number(event.target.value || 0)),
+                    })
+                  }
+                />
+                <small>คน</small>
+              </label>
+            ))}
+          </div>
+          <p>ใส่จำนวนเป็นเลขคู่ ระบบจะจับผู้เล่น 2 คนเป็นหนึ่งทีมให้ทันที</p>
+          <button
+            className="badminton-primary"
+            disabled={
+              !Object.values(testCounts).some(Number) ||
+              Object.values(testCounts).some(
+                (count) => Number(count) % 2 || Number(count) > 40,
+              )
+            }
+            onClick={() =>
+              mutate(
+                () =>
+                  generateTournamentTestTeams(data.tournament.club_id, {
+                    tournamentId: data.tournament.id,
+                    skillCounts: testCounts,
+                  }),
+                "เพิ่มผู้เล่นทดลองแล้ว",
+              )
+            }
+            type="button"
+          >
+            <Plus size={18} /> เพิ่มผู้เล่นตามจำนวน
+          </button>
+        </article>
+      ) : null}
       <article className="badminton-card tournament-team-form">
         <h2>เพิ่มทีมที่สมัครมา</h2>
         <label>
@@ -964,26 +1222,6 @@ function TournamentTeams({ data, members, mutate }) {
             </button>
           </div>
         ))}
-        {data.owner && teams.length >= 4 ? (
-          <button
-            className="badminton-primary"
-            onClick={() => {
-              if (window.confirm("สุ่มคู่แข่งและสร้างตารางรอบคัดเลือก?"))
-                mutate(
-                  () =>
-                    generateTournamentQualification(data.tournament.club_id, {
-                      tournamentId: data.tournament.id,
-                      divisionId,
-                      seed: crypto.randomUUID(),
-                    }),
-                  "จับสลากและสร้างตารางแล้ว",
-                );
-            }}
-            type="button"
-          >
-            <Swords size={17} /> สุ่มคู่และสร้างตาราง
-          </button>
-        ) : null}
       </article>
     </section>
   );
@@ -1005,6 +1243,8 @@ function TournamentMatches({ data, mutate }) {
   );
   return (
     <section className="tournament-matches">
+      <TournamentDrawActions data={data} mutate={mutate} />
+      <TournamentCourtOverview data={data} matches={matches} />
       <div className="tournament-filter">
         <label>
           ระดับ
