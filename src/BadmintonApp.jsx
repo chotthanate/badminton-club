@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import TournamentAdminApp from "./TournamentAdminApp.jsx";
 import {
   ArrowLeft,
   ArrowUpDown,
@@ -25,6 +26,7 @@ import {
   ShieldCheck,
   Trash2,
   Timer,
+  Trophy,
   UserPlus,
   Users,
   WalletCards,
@@ -200,7 +202,9 @@ export default function BadmintonApp() {
   if (authLoading) return <LoadingScreen label="กำลังตรวจสอบสิทธิ์แอดมิน" />;
   if (!isSupabaseConfigured) return <ConfigError />;
   if (!session) return <AdminLogin />;
-  return <AdminDashboard session={session} />;
+  return new URLSearchParams(window.location.search).get("app") === "tournament"
+    ? <TournamentAdminApp session={session} />
+    : <AdminDashboard session={session} />;
 }
 
 function AdminLogin() {
@@ -467,6 +471,7 @@ function AdminDashboard({ session }) {
             <p>{context.clubs.name}</p>
           </div>
           <div className="badminton-header-actions">
+            <a aria-label="จัดการแข่งขัน" className="badminton-icon-button" href={`${import.meta.env.BASE_URL}?app=tournament`} title="จัดการแข่งขัน"><Trophy size={18} /></a>
             <button
               aria-label="โหลดหน้าเว็บและข้อมูลล่าสุด"
               className="badminton-icon-button"

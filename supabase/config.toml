@@ -1,2 +1,5 @@
 [functions.line-bot]
 verify_jwt = false
+
+[functions.tournament-api]
+verify_jwt = false

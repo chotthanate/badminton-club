@@ -5,6 +5,121 @@
   font-family: "FC Iconic", "Noto Sans Thai", Tahoma, Arial, sans-serif;
 }
 
+.tournament-settings-card {
+  grid-column: 1 / -1;
+}
+
+.tournament-settings-card form {
+  display: grid;
+  gap: 10px;
+}
+
+.tournament-settings-card label,
+.tournament-schedule-editor label {
+  display: grid;
+  gap: 5px;
+}
+
+.tournament-duration-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.tournament-status-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.tournament-status-actions button {
+  min-height: 42px;
+  border: 1px solid #bdd0c1;
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px 13px;
+  font-weight: 700;
+}
+
+.tournament-schedule-editor {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(190px, 1.2fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 13px;
+  background: #f3f7f4;
+}
+
+.tournament-schedule-editor button {
+  min-height: 46px;
+  white-space: nowrap;
+}
+
+.tournament-shift-tools {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.7fr) 100px auto;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .tournament-admin-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .tournament-admin-header h1 {
+    font-size: 30px;
+    line-height: 1.05;
+  }
+
+  .tournament-admin-header .badminton-header-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 46px auto;
+    width: 100%;
+  }
+
+  .tournament-admin-header .badminton-header-actions > * {
+    min-width: 0;
+  }
+
+  .tournament-duration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tournament-schedule-editor {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .tournament-schedule-editor button {
+    grid-column: 1 / -1;
+  }
+
+  .tournament-shift-tools {
+    grid-template-columns: 1fr 92px;
+  }
+
+  .tournament-shift-tools strong,
+  .tournament-shift-tools button {
+    grid-column: 1 / -1;
+  }
+
+  .tournament-match header {
+    align-items: flex-start;
+  }
+
+  .tournament-match header time {
+    white-space: normal;
+    text-align: right;
+  }
+}
+
+/* Tournament management and public scoreboard */
+.tournament-admin-page .badminton-shell,.tournament-live-page .badminton-shell{max-width:1180px}.tournament-admin-header,.tournament-live-header,.tournament-hero,.tournament-listbar,.tournament-section-heading,.tournament-match header,.tournament-live-toolbar,.tournament-public-match header,.tournament-public-match footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.tournament-admin-header h1,.tournament-live-header h1{margin:2px 0}.tournament-admin-header p,.tournament-live-header p{margin:0;color:var(--badminton-muted,#68756c)}.tournament-club-switch,.tournament-listbar select,.tournament-filter select{min-height:46px}.tournament-listbar{margin:16px 0;padding:14px;border:1px solid #d6e1d8;border-radius:18px;background:#fff}.tournament-listbar label{display:grid;gap:5px;flex:1}.tournament-hero{margin-bottom:14px}.tournament-hero p{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.tournament-hero-actions,.tournament-admin-header .badminton-header-actions{display:flex;gap:8px;flex-wrap:wrap}.tournament-tabs{position:sticky;top:0;z-index:5;margin-bottom:16px}.tournament-tabs button{min-width:92px}.tournament-admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px}.tournament-admin-grid>.badminton-card{margin:0}.tournament-chip-list,.tournament-court-list{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.tournament-chip-list>span,.tournament-court-list>span{display:inline-flex;align-items:center;gap:7px;padding:8px 11px;background:#edf7f0;border-radius:999px;color:#167c58;font-weight:700}.tournament-chip-list small{font-weight:400;color:#68756c}.tournament-court-list button{border:0;background:none;color:#bd2b23;padding:0}.tournament-inline-form{display:flex;gap:8px}.tournament-inline-form input,.tournament-inline-form select{flex:1}.tournament-create-modal{max-height:92vh;overflow:auto}.tournament-form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.tournament-check-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tournament-check-grid label{display:flex;align-items:center;gap:5px}.tournament-player-source{display:grid;gap:6px;padding:10px 0;border-bottom:1px solid #e4ebe5}.tournament-team-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #e4ebe5}.tournament-team-row div{min-width:0;display:grid}.tournament-team-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#68756c}.tournament-team-row button{border:0;background:#fff1ef;color:#bf2922;border-radius:10px;padding:9px}.tournament-matches{display:grid;gap:12px}.tournament-filter{display:flex;justify-content:flex-end}.tournament-match{margin:0;border-left:5px solid #b8c8bd}.tournament-match.is-playing{border-left-color:#eea521}.tournament-match.is-completed{border-left-color:#159d70}.tournament-match header span,.tournament-match header strong{display:block}.tournament-match header time{white-space:nowrap}.tournament-versus{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin:18px 0;text-align:center;font-size:1.05rem}.tournament-versus b{color:#159d70}.tournament-match-controls{display:grid;gap:10px}.tournament-score-grid{display:flex;gap:8px;flex-wrap:wrap}.tournament-score-grid label{display:flex;align-items:center;gap:5px}.tournament-score-grid input{width:62px;text-align:center}.tournament-standings>div:not(.tournament-section-heading){display:grid;grid-template-columns:34px minmax(100px,1fr) auto auto auto;gap:10px;padding:9px 0;border-bottom:1px solid #e4ebe5}.tournament-bracket-scroll,.tournament-public-bracket>div{display:flex;gap:16px;overflow-x:auto;padding-bottom:10px}.tournament-bracket-round,.tournament-public-bracket section{min-width:210px;display:grid;align-content:start;gap:12px}.tournament-bracket-round article,.tournament-public-bracket article{border:1px solid #d6e1d8;border-radius:12px;background:#f7faf7;overflow:hidden}.tournament-bracket-round article span,.tournament-public-bracket article span{display:block;padding:9px}.tournament-bracket-round article span+span,.tournament-public-bracket article span+span{border-top:1px solid #d6e1d8}.tournament-bracket .is-winner,.tournament-public-bracket .is-winner{background:#e2f6e9;color:#087b53;font-weight:800}.tournament-history>div{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #e4ebe5}.tournament-loading{min-height:60vh;display:grid;place-items:center;font-weight:700}.tournament-live-page{background:#f1f6f2}.tournament-live-header{padding:18px 4px}.tournament-live-header span{display:flex;align-items:center;gap:5px;flex-wrap:wrap}.tournament-live-header>button{border:1px solid #cbd8ce;border-radius:999px;background:#fff;padding:9px 13px;font-weight:700}.tournament-live-toolbar{padding:10px 12px;background:#fff;border-radius:14px}.tournament-live-toolbar span{display:flex;align-items:center;gap:5px;color:#68756c;font-size:.85rem}.tournament-live-tabs{display:flex;gap:7px;overflow-x:auto;padding:12px 0;position:sticky;top:0;z-index:4;background:#f1f6f2}.tournament-live-tabs button{white-space:nowrap;border:1px solid #cbd8ce;background:#fff;border-radius:999px;padding:9px 12px}.tournament-live-tabs button.is-active{background:#152219;color:#fff}.tournament-public-stack{display:grid;gap:10px}.tournament-public-match{background:#fff;border:1px solid #d6e1d8;border-radius:17px;padding:14px}.tournament-public-match.is-playing{border:2px solid #159d70;box-shadow:0 8px 24px #159d7018}.tournament-public-match>div{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;text-align:center;padding:16px 0;font-size:1.1rem}.tournament-public-match footer{color:#68756c}.tournament-public-match time{display:flex;align-items:center;gap:4px}.tournament-public-standings{margin:10px 0}.tournament-public-standings h2{display:flex;align-items:center;gap:8px}.tournament-public-standings>div{display:grid;grid-template-columns:30px minmax(120px,1fr) auto auto;gap:10px;padding:10px 0;border-bottom:1px solid #e4ebe5}.tournament-public-bracket{margin:10px 0}
+@media(max-width:600px){.tournament-hero{align-items:flex-start;flex-direction:column}.tournament-admin-header .badminton-header-actions>a{flex:1}.tournament-listbar{align-items:stretch;flex-direction:column}.tournament-form-grid{grid-template-columns:1fr}.tournament-tabs button{min-width:78px}.tournament-tabs span{font-size:.75rem}.tournament-section-heading{align-items:flex-start;flex-direction:column}.tournament-standings>div:not(.tournament-section-heading){grid-template-columns:28px minmax(85px,1fr) auto auto}.tournament-standings>div span:nth-last-child(1){display:none}.tournament-live-header{align-items:flex-start}.tournament-live-header h1{font-size:1.7rem}.tournament-live-toolbar{align-items:flex-start;flex-direction:column}.tournament-public-match>div{font-size:.95rem}.tournament-score-grid label{width:100%;justify-content:space-between}.tournament-score-grid input{width:72px}}
+
 .badminton-app *,
 .badminton-app *::before,
 .badminton-app *::after {
@@ -6061,5 +6176,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+}
+
+/* Keep the tournament header readable after the shared mobile header rules. */
+@media (max-width: 600px) {
+  .badminton-app .tournament-admin-header {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .badminton-app .tournament-admin-header > div:first-child {
+    width: 100%;
+  }
+
+  .badminton-app .tournament-admin-header .badminton-header-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 46px auto;
+    width: 100%;
   }
 }
