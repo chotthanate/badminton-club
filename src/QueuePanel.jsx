@@ -14,6 +14,7 @@ import {
 } from "./clubRepository.js";
 import { lineupCompatibility, proposeQueueMatch } from "./queueLogic.js";
 import { buildQueuePlanningState } from "./queuePlanning.js";
+import { courtTimeStatus } from "./queueCourtTime.js";
 import { buildWaitingTimeEstimates, courtStartDelaySeconds, elapsedWaitSeconds, estimateGameDurationSeconds, formatMinuteSecondDuration } from "./queueWaitTime.js";
 import { normalizePlayableSkillLevels } from "./skillLevels.js";
 
@@ -88,11 +89,19 @@ export default function QueuePanel({ dashboard, event, isStaff = false, mutate }
   const nextSequence = Math.max(0, ...queue.matches.map((match) => match.sequence)) + 1;
   const playingMatches = queue.matches.filter((match) => match.status === "playing");
   const playingByCourt = new Map(playingMatches.map((match) => [match.courtId, match]));
+  const playingCourtByMember = new Map(playingMatches.flatMap((match) => {
+    const court = event.courts.find((item) => item.id === match.courtId);
+    const timeStatus = court ? courtTimeStatus({ eventDate: event.date, eventStartTime: event.startTime, courtStartTime: court.startsAt, courtEndTime: court.endsAt, now: new Date(clock) }) : "active";
+    if (timeStatus === "expired") return [];
+    const courtName = court?.name || "สนามที่กำลังเล่น";
+    return match.players.map((player) => [player.memberId, courtName]);
+  }));
   const upcoming = queue.matches.filter((match) => ["draft", "approved"].includes(match.status)).sort((a, b) => a.queuePosition - b.queuePosition);
   const queueHeadIsApproved = upcoming[0]?.status === "approved";
   const planning = buildQueuePlanningState(queue.players, upcoming);
   const { availablePlaying, availableWaiting, draftPositionsByMember, proposalPlayers, visibleWaiting } = planning;
-  const queueHeadHasPlayingPlayer = Boolean(upcoming[0]?.players.some((player) => player.status === "playing"));
+  const queueHeadPlayingCourts = [...new Set((upcoming[0]?.players || []).map((player) => playingCourtByMember.get(player.memberId)).filter(Boolean))];
+  const queueHeadHasPlayingPlayer = queueHeadPlayingCourts.length > 0;
   const estimatedGameSeconds = estimateGameDurationSeconds(queue.matches);
   const courtAvailableInSeconds = event.courts.map((court) => {
     const match = playingByCourt.get(court.id);
@@ -124,8 +133,11 @@ export default function QueuePanel({ dashboard, event, isStaff = false, mutate }
     <article className="badminton-card badminton-queue-summary"><div><ListOrdered size={20} /><span>รอเล่น<strong>{visibleWaiting.length}</strong></span></div><div><Play size={20} /><span>กำลังเล่น<strong>{playingMatches.length * 4}</strong></span></div><div><Timer size={20} /><span>คิวล่วงหน้า<strong>{upcoming.length}/{event.courts.length}</strong></span></div></article>
     <div className="badminton-queue-courts">{event.courts.map((court) => {
       const match = playingByCourt.get(court.id);
+      const timeStatus = courtTimeStatus({ eventDate: event.date, eventStartTime: event.startTime, courtStartTime: court.startsAt, courtEndTime: court.endsAt, now: new Date(clock) });
       const elapsedSeconds = match?.startedAt ? Math.max(0, Math.floor((clock - new Date(match.startedAt).getTime()) / 1000)) : 0;
-      return <article className={`badminton-card badminton-queue-court ${match ? "is-playing" : "is-empty"}`} key={court.id}><header><div><strong>{court.name}</strong><span>{court.startsAt}–{court.endsAt}</span></div>{match ? <b>กำลังเล่น</b> : <b>ว่าง</b>}</header>{!match ? <button className="badminton-primary" disabled={event.status !== "open" || !queueHeadIsApproved || queueHeadHasPlayingPlayer} onClick={() => mutate(() => startNextQueueOnCourt({ eventId: event.id, courtId: court.id }), `นำคิว 1 ลง ${court.name} แล้ว`)} type="button"><Play size={17} /> {queueHeadHasPlayingPlayer ? "รอผู้เล่นในสนามจบเกม" : queueHeadIsApproved ? "นำคิว 1 ลงสนาม" : upcoming.length ? "อนุมัติคิว 1 ก่อน" : "รอคิวที่อนุมัติ"}</button> : <><QueueTeamPreview match={match} /><div className="badminton-queue-playing"><span>เล่นมาแล้ว <strong>{String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:{String(elapsedSeconds % 60).padStart(2, "0")}</strong></span><button className="badminton-primary" disabled={finishingMatchId === match.id} onClick={() => finishMatch(match, court)} type="button"><Check size={17} /> {finishingMatchId === match.id ? "กำลังจบเกม..." : "จบเกม"}</button></div></>}</article>;
+      const courtLabel = match ? "กำลังเล่น" : timeStatus === "expired" ? "หมดเวลาแล้ว" : timeStatus === "upcoming" ? "ยังไม่ถึงเวลา" : "ว่าง";
+      const blockedByPlayingText = queueHeadPlayingCourts.length ? `รอเกม ${queueHeadPlayingCourts.join(", ")} จบก่อน` : "";
+      return <article className={`badminton-card badminton-queue-court ${match ? "is-playing" : "is-empty"} is-${timeStatus}`} key={court.id}><header><div><strong>{court.name}</strong><span>{court.startsAt}–{court.endsAt}</span></div><b>{courtLabel}</b></header>{!match ? timeStatus === "active" ? <button className="badminton-primary" disabled={event.status !== "open" || !queueHeadIsApproved || queueHeadHasPlayingPlayer} onClick={() => mutate(() => startNextQueueOnCourt({ eventId: event.id, courtId: court.id }), `นำคิว 1 ลง ${court.name} แล้ว`)} type="button"><Play size={17} /> {queueHeadHasPlayingPlayer ? blockedByPlayingText : queueHeadIsApproved ? "นำคิว 1 ลงสนาม" : upcoming.length ? "อนุมัติคิว 1 ก่อน" : "รอคิวที่อนุมัติ"}</button> : <p className="badminton-queue-court-unavailable">{timeStatus === "expired" ? "คอร์ทนี้หมดเวลาแล้ว" : `เริ่มใช้คอร์ทได้เวลา ${court.startsAt}`}</p> : <><QueueTeamPreview match={match} /><div className="badminton-queue-playing"><span>เล่นมาแล้ว <strong>{String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:{String(elapsedSeconds % 60).padStart(2, "0")}</strong></span><button className="badminton-primary" disabled={finishingMatchId === match.id} onClick={() => finishMatch(match, court)} type="button"><Check size={17} /> {finishingMatchId === match.id ? "กำลังจบเกม..." : "จบเกม"}</button></div></>}</article>;
     })}</div>
     <article className="badminton-card badminton-upcoming-queues"><div className="badminton-card-title"><ListOrdered size={20} /><div><h2>คิวล่วงหน้า</h2><p>สร้างหลายคิวร่างได้ และอนุมัติก่อนจึงจะแสดงให้ผู้เล่นเห็น</p></div></div><div className="badminton-queue-create-actions"><button className="badminton-primary" disabled={event.status !== "open" || upcoming.length >= event.courts.length || availableWaiting.length < 4} onClick={() => mutate(createAutomaticDraft, "ระบบจัดคิวร่างแล้ว กรุณาตรวจและอนุมัติ")} type="button"><Plus size={17} /> สร้างคิวอัตโนมัติ</button><button className="badminton-secondary" disabled={event.status !== "open" || upcoming.length >= event.courts.length || (availableWaiting.length + availablePlaying.length) < 4} onClick={() => mutate(() => createManualQueueDraft(event.id), "สร้างคิวเปล่าแล้ว เลือกผู้เล่น 4 คนได้เลย")} type="button"><Users size={17} /> สร้างคิวด้วยตัวเอง</button></div>{upcoming.map((match, index) => {
       const editing = match.status === "draft" || editingMatchId === match.id;
