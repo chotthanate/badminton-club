@@ -5732,6 +5732,28 @@
   white-space: nowrap;
 }
 
+.badminton-queue-player-name {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.badminton-queue-player-name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-queue-player-name > small {
+  flex: 0 0 auto;
+  color: #637064;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .badminton-queue-teams button {
   grid-column: 1 / -1;
   min-height: 28px;
