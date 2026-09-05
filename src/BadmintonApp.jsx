@@ -60,6 +60,7 @@ import {
   listClubEvents,
   listOutstandingPayments,
   loadDashboard,
+  loadQueueState,
   loadStaffDashboard,
   markOutstandingPaymentPaid,
   mergeClubMembers,
@@ -275,8 +276,10 @@ function AdminDashboard({ session }) {
   const [adminContexts, setAdminContexts] = useState([]);
   const selectedClubIdRef = useRef(null);
   const selectedEventIdRef = useRef(null);
+  const refreshRequestRef = useRef(0);
 
   async function refresh(silent = false, options = {}) {
+    const requestId = ++refreshRequestRef.current;
     if (!silent) setLoading(true);
     setError("");
     try {
@@ -299,10 +302,11 @@ function AdminDashboard({ session }) {
           || nextContexts[0]
           || null;
       }
-      setAdminContexts(nextContexts);
-      selectedClubIdRef.current = nextContext?.club_id || null;
-      setContext(nextContext);
       if (!nextContext) {
+        if (requestId !== refreshRequestRef.current) return;
+        setAdminContexts(nextContexts);
+        selectedClubIdRef.current = null;
+        setContext(null);
         setDashboard(null);
         setEventSummaries([]);
         setSelectedEventId(null);
@@ -323,6 +327,10 @@ function AdminDashboard({ session }) {
         total: outstandingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
         rows: outstandingRows,
       };
+      if (requestId !== refreshRequestRef.current) return;
+      setAdminContexts(nextContexts);
+      selectedClubIdRef.current = nextContext.club_id;
+      setContext(nextContext);
       setEventSummaries(nextEvents);
       setSelectedEventId(isStaffContext ? nextDashboard.event?.id || null : targetEventId);
       selectedEventIdRef.current = isStaffContext ? nextDashboard.event?.id || null : targetEventId;
@@ -330,9 +338,9 @@ function AdminDashboard({ session }) {
       setPreviousOutstanding(nextOutstanding);
       if (isStaffContext) setActiveTab((current) => ["round", "queue", "players"].includes(current) ? current : "queue");
     } catch (nextError) {
-      setError(nextError.message);
+      if (requestId === refreshRequestRef.current) setError(nextError.message);
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && requestId === refreshRequestRef.current) setLoading(false);
     }
   }
 
@@ -351,7 +359,19 @@ function AdminDashboard({ session }) {
     try {
       await action();
       setNotice(successMessage);
-      await refresh(false, { preferLatest: options.selectLatest });
+      if (options.refreshQueueOnly && selectedEventIdRef.current) {
+        const eventId = selectedEventIdRef.current;
+        const requestId = ++refreshRequestRef.current;
+        const queueState = await loadQueueState(eventId);
+        if (requestId === refreshRequestRef.current) {
+          setDashboard((current) => current?.event?.id === eventId
+            ? { ...current, ...queueState }
+            : current);
+          setLoading(false);
+        }
+      } else {
+        await refresh(false, { preferLatest: options.selectLatest });
+      }
       return true;
     } catch (nextError) {
       if (options.errorMode === "alert") {
@@ -1041,7 +1061,7 @@ function LegacyQueuePanel({ dashboard, event, mutate }) {
     if (finishingMatchId) return;
     setFinishingMatchId(match.id);
     try {
-      await mutate(() => finishQueueMatch(match.id), `จบเกม ${court.name} แล้ว สนามว่าง`);
+      await mutate(() => finishQueueMatch(match.id), `จบเกม ${court.name} แล้ว สนามว่าง`, { refreshQueueOnly: true });
     } finally {
       setFinishingMatchId(null);
     }

@@ -126,7 +126,7 @@ export default function QueuePanel({ dashboard, event, isStaff = false, mutate }
   async function finishMatch(match, court) {
     if (finishingMatchId) return;
     setFinishingMatchId(match.id);
-    try { await mutate(() => finishQueueMatch(match.id), `จบเกม ${court.name} แล้ว สนามว่าง`); } finally { setFinishingMatchId(null); }
+    try { await mutate(() => finishQueueMatch(match.id), `จบเกม ${court.name} แล้ว สนามว่าง`, { refreshQueueOnly: true }); } finally { setFinishingMatchId(null); }
   }
 
   return <section className="badminton-queue-workspace">

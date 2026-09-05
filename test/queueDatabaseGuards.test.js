@@ -23,3 +23,13 @@ test("closing a round atomically finishes games, cancels queues and releases pla
   assert.match(sql, /update public\.event_queue_players[\s\S]*status\s*=\s*'left'/i);
   assert.match(sql, /before update of status on public\.events/i);
 });
+
+test("finishing a game refreshes only queue state before the next full dashboard poll", () => {
+  const app = readFileSync("src/BadmintonApp.jsx", "utf8");
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  const repository = readFileSync("src/clubRepository.js", "utf8");
+
+  assert.match(repository, /export async function loadQueueState\(eventId\)/);
+  assert.match(app, /finishQueueMatch\(match\.id\)[\s\S]{0,160}refreshQueueOnly:\s*true/);
+  assert.match(queuePanel, /finishQueueMatch\(match\.id\)[\s\S]{0,160}refreshQueueOnly:\s*true/);
+});

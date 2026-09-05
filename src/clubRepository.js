@@ -303,6 +303,21 @@ export async function loadDashboard(clubId, eventId = null) {
   };
 }
 
+export async function loadQueueState(eventId) {
+  const [queuePlayersResult, queueMatchesResult, queueMatchPlayersResult] = await Promise.all([
+    client().from("event_queue_players").select("*").eq("event_id", eventId),
+    client().from("queue_matches").select("*").eq("event_id", eventId).order("sequence", { ascending: false }),
+    client().from("queue_match_players").select("*").eq("event_id", eventId),
+  ]);
+  [queuePlayersResult, queueMatchesResult, queueMatchPlayersResult]
+    .forEach((result) => throwIfError(result.error));
+  return {
+    queuePlayers: queuePlayersResult.data || [],
+    queueMatches: queueMatchesResult.data || [],
+    queueMatchPlayers: queueMatchPlayersResult.data || [],
+  };
+}
+
 export async function loadStaffDashboard(clubId) {
   const [dashboardResult, operationsResult] = await Promise.all([
     client().rpc("load_staff_dashboard", { target_club_id: clubId }),
