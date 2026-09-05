@@ -23,6 +23,7 @@ import {
   weightFromTimes,
 } from "../src/badmintonLogic.js";
 import { buildSlipRoundBreakdown, classifySlipRecipient, parseSlipReference, parseSlipText, slipRecipientMatches } from "../src/paymentSlip.js";
+import { parseSlipDateValue } from "../supabase/functions/_shared/slipDate.js";
 import { getLiffMode } from "../src/liffMode.js";
 
 function makeEvent({ attendance = [], costs = [], ...overrides } = {}) {
@@ -817,6 +818,12 @@ test("slip parser reads an English abbreviated bank date", () => {
 
 test("slip parser tolerates a stray Thai vowel in a July abbreviation", () => {
   assert.equal(parseSlipText("วันที่ทํารายการ 26 ก.ุค. 2569 - 12:47").date, "2026-07-26");
+});
+
+test("slip parser recovers K PLUS September dates damaged by Thai OCR", () => {
+  assert.equal(parseSlipText("โอนเงินสำเร็จ\n5 กุย. 69 13:19 น.\nจำนวน 400.00 บาท").date, "2026-09-05");
+  assert.equal(parseSlipText("โอนเงินสำเร็จ\n5 กูย 69 11:46 น.\nจำนวน 190.00 บาท").date, "2026-09-05");
+  assert.equal(parseSlipDateValue("โอนเงินสำเร็จ\n5 กุย. 69 13:48 น."), "2026-09-05");
 });
 
 test("slip parser ignores masked account digits on a TTB slip", () => {

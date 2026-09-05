@@ -203,7 +203,9 @@ export function parseSlipAmount(text, expectedAmount = null) {
 export function parseSlipDate(text) {
   const source = String(text || "")
     // OCR sometimes places a stray Thai vowel between the July abbreviation.
-    .replace(/ก\s*\.\s*[ุู]\s*ค\s*\./g, "ก.ค.");
+    .replace(/ก\s*\.\s*[ุู]\s*ค\s*\./g, "ก.ค.")
+    // K PLUS screenshots repeatedly OCR ก.ย. as กุย. or กูย.
+    .replace(/(\d{1,2}\s*)ก\s*\.?\s*[ุู]\s*ย\s*\.?(\s*\d{2,4})/g, "$1ก.ย.$2");
   const numeric = /(?:^|\D)(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\D|$)/.exec(source);
   if (numeric) return isoDate(numeric[1], numeric[2], numeric[3]);
 
@@ -278,15 +280,18 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
       confidence = Math.max(confidence, Number(amountResult.data.confidence || 0));
       parsed.amount = chooseRecognizedAmount(parsed.amount, parseSlipAmount(amountText, expectedAmount), expectedAmount);
     }
-    if (parsed.date === null && optimized.dateBlob) {
-      onProgress(0);
+    if (parsed.date === null && optimized.dateBlobs?.length) {
       await worker.setParameters({ tessedit_pageseg_mode: "6" });
-      const dateResult = await worker.recognize(optimized.dateBlob);
-      const dateText = dateResult.data.text || "";
-      text = [text, dateText].filter(Boolean).join("\n");
-      confidence = Math.max(confidence, Number(dateResult.data.confidence || 0));
-      parsed.date = parseSlipDate(dateText);
-      parsed.reference ??= parseSlipReference(dateText);
+      for (const dateBlob of optimized.dateBlobs) {
+        if (parsed.date !== null) break;
+        onProgress(0);
+        const dateResult = await worker.recognize(dateBlob);
+        const dateText = dateResult.data.text || "";
+        text = [text, dateText].filter(Boolean).join("\n");
+        confidence = Math.max(confidence, Number(dateResult.data.confidence || 0));
+        parsed.date = parseSlipDate(dateText);
+        parsed.reference ??= parseSlipReference(dateText);
+      }
     }
     return {
       ...parsed,
@@ -367,19 +372,25 @@ async function optimizeSlipImage(file) {
   enhanceMonochromeContrast(amountContext, amountCanvas.width, amountCanvas.height);
   const amountBlob = await new Promise((resolve) => amountCanvas.toBlob(resolve, "image/png"));
 
-  const dateSourceY = Math.round(height * 0.56);
-  const dateSourceHeight = Math.max(1, height - dateSourceY);
-  const dateScale = Math.min(2, 1500 / width);
-  const dateCanvas = document.createElement("canvas");
-  dateCanvas.width = Math.max(1, Math.round(width * dateScale));
-  dateCanvas.height = Math.max(1, Math.round(dateSourceHeight * dateScale));
-  const dateContext = dateCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
-  dateContext.fillStyle = "#fff";
-  dateContext.fillRect(0, 0, dateCanvas.width, dateCanvas.height);
-  dateContext.drawImage(canvas, 0, dateSourceY, width, dateSourceHeight, 0, 0, dateCanvas.width, dateCanvas.height);
-  enhanceMonochromeContrast(dateContext, dateCanvas.width, dateCanvas.height);
-  const dateBlob = await new Promise((resolve) => dateCanvas.toBlob(resolve, "image/png"));
-  return { blob, retryBlob, amountBlob, dateBlob, dataUrl: await blobToDataUrl(blob) };
+  const dateBlobs = [];
+  // K PLUS/SCB place the date near the top, while other templates may place it
+  // lower. OCR both regions only when the full passes did not find a date.
+  for (const [startRatio, heightRatio] of [[0, 0.32], [0.5, 0.5]]) {
+    const dateSourceY = Math.round(height * startRatio);
+    const dateSourceHeight = Math.max(1, Math.round(height * heightRatio));
+    const dateScale = Math.min(2, 1500 / width);
+    const dateCanvas = document.createElement("canvas");
+    dateCanvas.width = Math.max(1, Math.round(width * dateScale));
+    dateCanvas.height = Math.max(1, Math.round(dateSourceHeight * dateScale));
+    const dateContext = dateCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+    dateContext.fillStyle = "#fff";
+    dateContext.fillRect(0, 0, dateCanvas.width, dateCanvas.height);
+    dateContext.drawImage(canvas, 0, dateSourceY, width, dateSourceHeight, 0, 0, dateCanvas.width, dateCanvas.height);
+    enhanceMonochromeContrast(dateContext, dateCanvas.width, dateCanvas.height);
+    const dateBlob = await new Promise((resolve) => dateCanvas.toBlob(resolve, "image/png"));
+    if (dateBlob) dateBlobs.push(dateBlob);
+  }
+  return { blob, retryBlob, amountBlob, dateBlobs, dataUrl: await blobToDataUrl(blob) };
 }
 
 function enhanceMonochromeContrast(context, width, height) {

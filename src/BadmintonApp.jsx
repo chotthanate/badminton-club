@@ -2269,7 +2269,7 @@ function SlipReviewPanel({ slips = [], onOpen, onReview, showEmpty = false }) {
   const readableAmountCount = orderedSlips.filter((slip) => slip.transferred_amount !== null && slip.transferred_amount !== undefined).length;
   return <div className="badminton-slip-review" id="pending-slip-review">
     <div className="badminton-slip-review-title"><ShieldCheck size={20} /><div><strong>สลิปรออนุมัติ</strong><span>รวมสลิปจากทุกรอบไว้ที่นี่ ตรวจรูปและเหตุผลก่อนตัดยอด</span></div></div>
-    <div className="badminton-slip-review-summary"><span><small>รอตรวจ</small><strong>{orderedSlips.length} รายการ</strong></span><span><small>ยอดที่เลือกชำระ</small><strong>{baht(expectedTotal)} บาท</strong></span><span><small>อ่านยอดได้</small><strong>{readableAmountCount}/{orderedSlips.length}</strong></span></div>
+    <div className="badminton-slip-review-summary"><span><small>รอตรวจ</small><strong>{orderedSlips.length} รายการ</strong></span><span><small>ยอดรวมสลิปรอตรวจ</small><strong>{baht(expectedTotal)} บาท</strong></span><span><small>อ่านยอดได้</small><strong>{readableAmountCount}/{orderedSlips.length}</strong></span></div>
     {orderedSlips.map((slip, index) => {
       const expectedAmount = Number(slip.expected_amount || 0);
       const transferredAmount = slip.transferred_amount === null || slip.transferred_amount === undefined

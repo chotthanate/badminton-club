@@ -3,6 +3,7 @@ import { buildPaymentSummary, compareCourtNames } from "../_shared/paymentSummar
 import { sortBySignupOrder } from "../_shared/signupOrder.js";
 import { courtHasStarted } from "../_shared/liveQueueTime.js";
 import { reconcileSlipAmount } from "../_shared/slipAmount.js";
+import { parseSlipDateValue } from "../_shared/slipDate.js";
 
 const defaultPaymentRecipientNames = ["ณฐกฤต อินนะใจ", "NATHAKRIT INN", "NATHAKRIT INNAJAI"];
 
@@ -896,7 +897,7 @@ async function handlePaymentLiffRequest(payload: any) {
     const submittedOcrAmount = finiteNumber(slip.amount);
     const reconciledAmount = reconcileSlipAmount(submittedOcrAmount, expectedAmount, slip.text);
     const transferredAmount = reconciledAmount.amount;
-    const transferredOn = isoDateValue(slip.transferredOn);
+    const transferredOn = isoDateValue(slip.transferredOn) || parseSlipDateValue(slip.text);
     const confidence = finiteNumber(slip.confidence);
     const recipientStatus = classifySlipRecipient(slip.text, recipientNames);
     if (recipientStatus === "mismatch") {
@@ -1025,7 +1026,7 @@ async function handlePaymentLiffRequest(payload: any) {
           .is("paid_at", null);
         return json({
           status: "pending",
-          message: "ยังไม่ได้เปลี่ยนสถานะเป็นจ่ายแล้ว แอดมินจะตรวจสอบรายการนี้อีกครั้ง",
+          message: "รับสลิปแล้ว รายการอยู่ระหว่างรอตรวจสอบ",
         });
       }
     } else {
@@ -1065,7 +1066,7 @@ async function handlePaymentLiffRequest(payload: any) {
       status: autoPaid ? "auto_paid" : "pending",
       message: autoPaid
         ? `ระบบตรวจสลิปผ่านและปิดยอด ${paymentIds.length} รอบเรียบร้อยแล้ว`
-        : "ยังไม่ได้เปลี่ยนสถานะเป็นจ่ายแล้ว แอดมินจะตรวจสอบรายการนี้อีกครั้ง",
+        : "รับสลิปแล้ว รายการอยู่ระหว่างรอตรวจสอบ",
     });
   } catch (error) {
     console.error("LIFF payment request failed", error);
