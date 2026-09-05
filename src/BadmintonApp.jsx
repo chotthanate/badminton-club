@@ -1653,17 +1653,9 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           function removePlayer() {
             if (!window.confirm(`ลบ ${participantName} ออกจากรอบนี้ใช่ไหม?`)) return null;
             return mutate(
-              async () => {
-                await removeParticipant({ eventId: event.id, memberId: member.id });
-                await recordAudit({
-                  clubId: event.clubId,
-                  eventId: event.id,
-                  userId: session.user.id,
-                  action: `ลบผู้เล่น ${participantName} ออกจากรอบ`,
-                  details: { member_id: member.id },
-                });
-              },
+              () => removeParticipant({ eventId: event.id, memberId: member.id }),
               `ลบ ${participantName} ออกจากรอบแล้ว`,
+              { errorMode: "alert" },
             );
           }
 

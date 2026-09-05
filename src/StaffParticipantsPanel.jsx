@@ -127,7 +127,11 @@ export default function StaffParticipantsPanel({ dashboard, event, mutate }) {
   function removePlayer(player) {
     const playerName = nameOf(player.member);
     if (!window.confirm(`ลบ ${playerName} ออกจากรอบนี้ใช่ไหม?`)) return;
-    mutate(() => removeOperatorParticipant({ eventId: event.id, memberId: player.member.id }), `ลบ ${playerName} ออกจากรอบแล้ว`);
+    mutate(
+      () => removeOperatorParticipant({ eventId: event.id, memberId: player.member.id }),
+      `ลบ ${playerName} ออกจากรอบแล้ว`,
+      { errorMode: "alert" },
+    );
   }
 
   async function addCustomExtra(submitEvent) {
