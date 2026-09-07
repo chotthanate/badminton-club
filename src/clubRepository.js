@@ -817,6 +817,18 @@ export async function createQueueDraft({ eventId, memberIds, teamAIds }) {
   return data;
 }
 
+export async function createQueueDraftsBatch({ eventId, lineups }) {
+  const { data, error } = await client().rpc("create_queue_drafts_batch", {
+    target_event_id: eventId,
+    queue_lineups: lineups.map((lineup) => ({
+      member_ids: lineup.memberIds,
+      team_a_member_ids: lineup.teamAIds,
+    })),
+  });
+  throwIfError(error);
+  return data;
+}
+
 export async function createManualQueueDraft(eventId) {
   const { data, error } = await client().rpc("create_manual_queue_draft", {
     target_event_id: eventId,
@@ -861,6 +873,12 @@ export async function startNextQueueOnCourt({ eventId, courtId }) {
 
 export async function finishQueueMatch(matchId) {
   const { data, error } = await client().rpc("finish_queue_match", { target_match_id: matchId });
+  throwIfError(error);
+  return data;
+}
+
+export async function returnPlayingQueueToHead(matchId) {
+  const { data, error } = await client().rpc("return_playing_queue_to_head", { target_match_id: matchId });
   throwIfError(error);
   return data;
 }

@@ -147,15 +147,32 @@ test("ค่าเริ่มต้นมือ N คือ BG N และ S �
   assert.deepEqual(normalizePlayableSkillLevels("N", ["P", "P"]), ["N", "P"]);
 });
 
-test("ความยุติธรรมยึดจำนวนเกมก่อนนาทีและเวลารอ", () => {
+test("ความยุติธรรมให้คนที่รอนานที่สุดก่อน แม้เคยเล่นมากกว่า", () => {
   const result = proposeQueueMatch([
-    player("anchor", "N", { gamesPlayed: 0, minutesPlayed: 50 }),
-    player("b", "N", { gamesPlayed: 1, minutesPlayed: 10 }),
-    player("c", "N", { gamesPlayed: 1, minutesPlayed: 20 }),
-    player("d", "N", { gamesPlayed: 1, minutesPlayed: 30 }),
-    player("e", "N", { gamesPlayed: 2, minutesPlayed: 0 }),
+    player("oldest", "N", { gamesPlayed: 5, minutesPlayed: 100, queuedAt: "2026-08-10T09:00:00Z" }),
+    player("b", "N", { gamesPlayed: 1, minutesPlayed: 10, queuedAt: "2026-08-10T09:01:00Z" }),
+    player("c", "N", { gamesPlayed: 1, minutesPlayed: 20, queuedAt: "2026-08-10T09:02:00Z" }),
+    player("d", "N", { gamesPlayed: 1, minutesPlayed: 30, queuedAt: "2026-08-10T09:03:00Z" }),
+    player("newest", "N", { gamesPlayed: 0, minutesPlayed: 0, queuedAt: "2026-08-10T09:30:00Z" }),
   ]);
-  assert.deepEqual(result.lineup.map((entry) => entry.memberId).sort(), ["anchor", "b", "c", "d"].sort());
+  assert.deepEqual(result.lineup.map((entry) => entry.memberId).sort(), ["oldest", "b", "c", "d"].sort());
+});
+
+test("คิวอัตโนมัติผสมได้เฉพาะมือเดียวกันหรือห่างหนึ่งระดับ", () => {
+  const result = proposeQueueMatch([
+    player("old-bg", "BG", { queuedAt: "2026-08-10T09:00:00Z", playableSkillLevels: ["BG", "S"] }),
+    player("old-s-1", "S", { queuedAt: "2026-08-10T09:01:00Z", playableSkillLevels: ["N", "S"] }),
+    player("old-s-2", "S", { queuedAt: "2026-08-10T09:02:00Z", playableSkillLevels: ["N", "S"] }),
+    player("old-s-3", "S", { queuedAt: "2026-08-10T09:03:00Z", playableSkillLevels: ["N", "S"] }),
+    player("n-1", "N", { queuedAt: "2026-08-10T09:04:00Z", playableSkillLevels: ["N", "S"] }),
+    player("n-2", "N", { queuedAt: "2026-08-10T09:05:00Z", playableSkillLevels: ["N", "S"] }),
+    player("n-3", "N", { queuedAt: "2026-08-10T09:06:00Z", playableSkillLevels: ["N", "S"] }),
+  ]);
+
+  assert.ok(result);
+  const indexes = result.lineup.map((entry) => ["Rookie-", "Rookie", "BG", "N", "S", "P"].indexOf(entry.skillLevel));
+  assert.ok(Math.max(...indexes) - Math.min(...indexes) <= 1);
+  assert.equal(result.lineup.some((entry) => entry.memberId === "old-bg"), false);
 });
 
 test("ผู้เล่นที่ถูกข้ามหนึ่งลำดับยังไม่เข้า proposal ถัดไป", () => {

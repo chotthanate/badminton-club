@@ -41,3 +41,20 @@ test("รองรับหลายคิวร่างและระบุ�
   assert.equal(state.draftPositionsByMember.get("b"), 3);
   assert.deepEqual(state.availableWaiting.map((entry) => entry.memberId), ["c"]);
 });
+
+test("คนในคิวอนุมัติแล้วยังอยู่ในรายชื่อรอพร้อมสถานะและตำแหน่งคิว", () => {
+  const state = buildQueuePlanningState([
+    player("approved-player", "reserved", "2026-09-04T11:00:00Z"),
+    player("free-player", "waiting", "2026-09-04T12:00:00Z"),
+  ], [{
+    id: "approved-1",
+    status: "approved",
+    queuePosition: 1,
+    players: [{ memberId: "approved-player" }],
+  }]);
+
+  assert.deepEqual(state.visibleWaiting.map((entry) => entry.memberId), ["approved-player", "free-player"]);
+  assert.equal(state.queuePositionsByMember.get("approved-player"), 1);
+  assert.equal(state.queueStatusesByMember.get("approved-player"), "approved");
+  assert.deepEqual(state.availableWaiting.map((entry) => entry.memberId), ["free-player"]);
+});

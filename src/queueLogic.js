@@ -8,9 +8,9 @@ export function skillIndex(level) {
 
 export function queueFairnessKey(player) {
   return [
+    new Date(player.queuedAt || 0).getTime() || 0,
     Number(player.gamesPlayed) || 0,
     Number(player.minutesPlayed) || 0,
-    new Date(player.queuedAt || 0).getTime() || 0,
     String(player.memberId || ""),
   ];
 }
@@ -192,12 +192,12 @@ function lineupScore(lineup, repeatStats) {
   }
   const waits = lineup.map((player) => new Date(player.queuedAt || 0).getTime() || 0);
   return [
+    Math.max(...waits),
+    waits.reduce((sum, value) => sum + value, 0),
     Math.max(...lineup.map((player) => Number(player.gamesPlayed) || 0)),
     lineup.reduce((sum, player) => sum + (Number(player.gamesPlayed) || 0), 0),
     Math.max(...lineup.map((player) => Number(player.minutesPlayed) || 0)),
     lineup.reduce((sum, player) => sum + (Number(player.minutesPlayed) || 0), 0),
-    Math.max(...waits),
-    waits.reduce((sum, value) => sum + value, 0),
     repeatPenalty,
   ];
 }
@@ -235,6 +235,9 @@ export function proposeQueueMatch(players, matches = [], nextSequence = 1) {
   for (const anchor of eligible) {
     const candidates = combinations(eligible.filter((player) => player.memberId !== anchor.memberId), 3)
       .map((others) => [anchor, ...others])
+      // Automatic queues only bridge adjacent skill levels. Wider gaps remain
+      // available to an operator through the manual editor with a warning.
+      .filter((lineup) => skillDistanceKey(lineup)[0] <= 1)
       .map((lineup) => {
         const compatibility = lineupCompatibility(lineup, anchor);
         return {
@@ -247,8 +250,10 @@ export function proposeQueueMatch(players, matches = [], nextSequence = 1) {
       })
       .filter((candidate) => candidate.valid);
     if (!candidates.length) continue;
-    candidates.sort((left, right) => compareKeys(compatibilitySortKey(left), compatibilitySortKey(right))
-      || compareKeys(left.score, right.score));
+    // Once the oldest eligible anchor can be placed, prefer the three people
+    // who have waited longest. Skill closeness then breaks near-equal choices.
+    candidates.sort((left, right) => compareKeys(left.score, right.score)
+      || compareKeys(compatibilitySortKey(left), compatibilitySortKey(right)));
     const selected = candidates[0];
     const teams = balanceTeams(selected.lineup, matches);
     return { ...teams, lineup: selected.lineup, tier: selected.tier, baseLevel: anchor.skillLevel };

@@ -1,19 +1,20 @@
 function compareWaiting(left, right) {
-  return (Number(left.gamesPlayed) || 0) - (Number(right.gamesPlayed) || 0)
-    || (Number(left.minutesPlayed) || 0) - (Number(right.minutesPlayed) || 0)
-    || new Date(left.queuedAt || 0) - new Date(right.queuedAt || 0);
+  return new Date(left.queuedAt || 0) - new Date(right.queuedAt || 0)
+    || (Number(left.gamesPlayed) || 0) - (Number(right.gamesPlayed) || 0)
+    || (Number(left.minutesPlayed) || 0) - (Number(right.minutesPlayed) || 0);
 }
 
 export function buildQueuePlanningState(players = [], upcoming = []) {
   const upcomingMemberIds = new Set(upcoming.flatMap((match) => (match.players || []).map((player) => player.memberId)));
-  const draftPositionsByMember = new Map(upcoming
-    .filter((match) => match.status === "draft")
+  const queuePositionsByMember = new Map(upcoming
     .flatMap((match) => (match.players || []).map((player) => [player.memberId, match.queuePosition])));
+  const queueStatusesByMember = new Map(upcoming
+    .flatMap((match) => (match.players || []).map((player) => [player.memberId, match.status])));
   const availableWaiting = players
     .filter((player) => player.status === "waiting" && !upcomingMemberIds.has(player.memberId))
     .sort(compareWaiting);
   const visibleWaiting = players
-    .filter((player) => player.status === "waiting" || (draftPositionsByMember.has(player.memberId) && player.status === "reserved"))
+    .filter((player) => ["waiting", "reserved"].includes(player.status) || queuePositionsByMember.has(player.memberId))
     .sort(compareWaiting);
   const availablePlaying = players.filter((player) => player.status === "playing" && !upcomingMemberIds.has(player.memberId));
   const proposalPlayers = players.map((player) => upcomingMemberIds.has(player.memberId) ? { ...player, status: "reserved" } : player);
@@ -21,7 +22,9 @@ export function buildQueuePlanningState(players = [], upcoming = []) {
   return {
     availablePlaying,
     availableWaiting,
-    draftPositionsByMember,
+    draftPositionsByMember: queuePositionsByMember,
+    queuePositionsByMember,
+    queueStatusesByMember,
     proposalPlayers,
     unavailableForMatch(matchId) {
       return new Set(upcoming
