@@ -130,7 +130,8 @@ function levenshteinWithin(left, right, maxDistance) {
 }
 
 export function parseSlipText(text, expectedAmount = null) {
-  const source = String(text || "").replace(/[๐-๙]/g, (digit) => String("๐๑๒๓๔๕๖๗๘๙".indexOf(digit)));
+  const source = normalizeThaiOcrText(text)
+    .replace(/[๐-๙]/g, (digit) => String("๐๑๒๓๔๕๖๗๘๙".indexOf(digit)));
   return {
     amount: parseSlipAmount(source, expectedAmount),
     date: parseSlipDate(source),
@@ -141,11 +142,11 @@ export function parseSlipText(text, expectedAmount = null) {
 export function parseSlipAmount(text, expectedAmount = null) {
   const normalizedExpectedAmount = Number(expectedAmount);
   const hasExpectedAmount = Number.isFinite(normalizedExpectedAmount) && normalizedExpectedAmount > 0;
-  const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = normalizeThaiOcrText(text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const candidates = lines.flatMap((originalLine, lineIndex) => {
     const line = originalLine.replace(/(\d)\s*\.\s*(\d{1,2})(?!\d)/g, "$1.$2");
     const matches = line.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g) || [];
-    const hasAmountLabel = /จำนวนเงิน|ยอดเงิน|ยอดโอน|ยอดชำระ|amount|total/i.test(line);
+    const hasAmountLabel = /จำนวน(?:เงิน)?|ยอดเงิน|ยอดโอน|ยอดชำระ|amount|total/i.test(line);
     const hasCurrency = /บาท|บา[ทต]|บท|baht|thb|฿/i.test(line);
     const isStandaloneAmount = /^(?:ยอด\s*)?(?:฿|thb)?\s*(?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{1,2})?\s*(?:บาท|thb)?$/i.test(line);
     const isFee = /ค่าธรรมเนียม|ค่าบริการ|fee/i.test(line);
@@ -198,6 +199,13 @@ export function parseSlipAmount(text, expectedAmount = null) {
     || right.score - left.score
     || left.lineIndex - right.lineIndex);
   return candidates[0]?.value ?? null;
+}
+
+function normalizeThaiOcrText(text) {
+  return String(text || "")
+    .normalize("NFKC")
+    // OCR can emit Thai sara am as two code points (ํ + า).
+    .replace(/\u0e4d\u0e32/g, "\u0e33");
 }
 
 export function parseSlipDate(text) {

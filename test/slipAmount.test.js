@@ -20,3 +20,26 @@ test("server never repairs an unrelated reference, fee, or different amount", ()
     { amount: 900, decimalPointRecovered: false },
   );
 });
+
+test("server recovers an SCB amount from a decomposed Thai amount label", () => {
+  assert.deepEqual(
+    reconcileSlipAmount(null, 390, [
+      "โอนเงินสําเร็จ",
+      "09 ก.ย. 2569 - 13:30",
+      "รหัสอ้างอิง: 202609093Hpib22hyAi9Y2ZzF",
+      "จํานวนเงิน                                  390.00",
+    ].join("\n")),
+    { amount: 390, decimalPointRecovered: false },
+  );
+});
+
+test("server does not mistake account or reference numbers for a missing amount", () => {
+  assert.deepEqual(
+    reconcileSlipAmount(null, 390, [
+      "รหัสอ้างอิง: 390",
+      "เลขบัญชี 390",
+      "ค่าธรรมเนียม 0.00 บาท",
+    ].join("\n")),
+    { amount: null, decimalPointRecovered: false },
+  );
+});

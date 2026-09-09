@@ -856,6 +856,20 @@ test("slip parser tolerates common OCR damage around the selected amount", () =>
   assert.equal(parseSlipText("Amount:\n290.00 Baht\n0.00 Baht", 290).amount, 290);
 });
 
+test("slip parser reads SCB amount when OCR emits Thai sara am as separate code points", () => {
+  const result = parseSlipText([
+    "โอนเงินสําเร็จ",
+    "09 ก.ย. 2569 - 13:30",
+    "รหัสอ้างอิง: 202609093Hpib22hyAi9Y2ZzF",
+    "ไปยัง นาย ณฐกฤต อินนะใจ",
+    "XXX-XXX159-5",
+    "จํานวนเงิน                                  390.00",
+  ].join("\n"));
+
+  assert.equal(result.amount, 390);
+  assert.equal(result.date, "2026-09-09");
+});
+
 test("slip parser recovers a decimal point dropped from the selected amount", () => {
   assert.equal(parseSlipText("รายการโอนเงินสำเร็จ\nจำนวนเงิน\n10000\n14 ส.ค. 2569", 100).amount, 100);
   assert.equal(parseSlipText("ยอดโอน 17500 บาท", 175).amount, 175);
