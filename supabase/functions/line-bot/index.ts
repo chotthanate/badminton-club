@@ -4,6 +4,7 @@ import { sortBySignupOrder } from "../_shared/signupOrder.js";
 import { courtHasStarted } from "../_shared/liveQueueTime.js";
 import { reconcileSlipAmount } from "../_shared/slipAmount.js";
 import { parseSlipDateValue } from "../_shared/slipDate.js";
+import { buildArrivalTimeOptionsForEvent, normalizeArrivalTimeForEvent, sessionBoundsForEvent } from "../_shared/eventSchedule.js";
 
 const defaultPaymentRecipientNames = ["ณฐกฤต อินนะใจ", "NATHAKRIT INN", "NATHAKRIT INNAJAI"];
 
@@ -1215,7 +1216,7 @@ async function handleLiffRequest(payload: any) {
           picture: identity.picture || null,
         },
         currentStatus: existingSignup?.status === "coming" ? "coming" : null,
-        currentArrivalTime: existingSignup?.status === "coming" ? shortTime(existingSignup?.arrival_time) : null,
+        currentArrivalTime: existingSignup?.status === "coming" ? normalizeArrivalTimeForEvent(event, existingSignup?.arrival_time) : null,
         roster: await getLiffRoster(admin, event),
         queue: existingMember?.id ? await getLiffQueueStatus(admin, event.id, existingMember.id) : null,
       });
@@ -1264,7 +1265,7 @@ async function handleLiffRequest(payload: any) {
       }
 
       const arrivalTime = shortTime(payload.arrivalTime);
-      const arrivalTimes = buildArrivalTimeOptions(event.starts_at, event.ends_at);
+      const arrivalTimes = buildArrivalTimeOptionsForEvent(event);
       if (!arrivalTime || !arrivalTimes.includes(arrivalTime)) {
         return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
       }
@@ -1347,7 +1348,7 @@ async function handleLiffRequest(payload: any) {
     if (event.status !== "open") return json({ error: "รอบนี้ปิดรับคำตอบแล้ว" }, 409);
 
     const arrivalTime = shortTime(payload.arrivalTime);
-    const arrivalTimes = buildArrivalTimeOptions(event.starts_at, event.ends_at);
+    const arrivalTimes = buildArrivalTimeOptionsForEvent(event);
     if (!arrivalTime || !arrivalTimes.includes(arrivalTime)) {
       return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
     }
@@ -1529,7 +1530,7 @@ async function getLiffRoster(admin: any, event: any) {
   ]));
   const coming = orderedSignups.reduce((rows: Array<{ name: string; arrivalTime: string | null; skillLevel: string | null; signupOrder: number }>, signup: any) => {
     const name = names.get(signup.member_id);
-    if (name) rows.push({ name, arrivalTime: shortTime(signup.arrival_time), skillLevel: signup.skill_level_snapshot || null, signupOrder: rows.length + 1 });
+    if (name) rows.push({ name, arrivalTime: normalizeArrivalTimeForEvent(event, signup.arrival_time), skillLevel: signup.skill_level_snapshot || null, signupOrder: rows.length + 1 });
     return rows;
   }, [] as Array<{ name: string; arrivalTime: string | null; skillLevel: string | null; signupOrder: number }>);
   return { coming };
@@ -1606,6 +1607,7 @@ async function verifyLiffIdToken(idToken: string) {
 
 function eventForLiff(event: any) {
   const club = Array.isArray(event.clubs) ? event.clubs[0] : event.clubs;
+  const { startTime, endTime } = sessionBoundsForEvent(event);
   const courts = [...(event.event_courts || [])]
     .sort(compareCourtNames)
     .map((court) => ({
@@ -1619,44 +1621,18 @@ function eventForLiff(event: any) {
     dateLabel: thaiLongDate(event.event_date),
     venue: event.venue,
     status: event.status,
-    startTime: shortTime(event.starts_at),
-    endTime: shortTime(event.ends_at),
+    startTime,
+    endTime,
     courts,
-    arrivalTimes: buildArrivalTimeOptions(event.starts_at, event.ends_at),
+    arrivalTimes: buildArrivalTimeOptionsForEvent(event),
   };
 }
 
 function hasBadmintonStarted(event: any, now = new Date()) {
-  const startTime = shortTime(event?.starts_at);
+  const { startTime } = sessionBoundsForEvent(event);
   if (!event?.event_date || !startTime) return false;
   const startsAt = new Date(`${event.event_date}T${startTime}:00+07:00`);
   return !Number.isNaN(startsAt.getTime()) && now.getTime() >= startsAt.getTime();
-}
-
-function buildArrivalTimeOptions(startValue: unknown, endValue: unknown) {
-  const start = timeMinutes(startValue);
-  let end = timeMinutes(endValue);
-  if (start === null || end === null) return [];
-  if (end <= start) end += 24 * 60;
-  const options = [];
-  for (let minute = start; minute < end; minute += 15) {
-    options.push(formatMinutes(minute));
-  }
-  return options;
-}
-
-function timeMinutes(value: unknown) {
-  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || ""));
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (hour > 23 || minute > 59) return null;
-  return hour * 60 + minute;
-}
-
-function formatMinutes(value: number) {
-  const minute = value % (24 * 60);
-  return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
 }
 
 function shortTime(value: unknown) {
