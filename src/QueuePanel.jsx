@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import { Check, ListOrdered, Pencil, Play, Plus, Save, Settings, Timer, Trash2, Users, X } from "lucide-react";
 import {
   approveQueueDraft,
@@ -20,6 +20,7 @@ import { buildQueuePlanningState } from "./queuePlanning.js";
 import { courtTimeStatus } from "./queueCourtTime.js";
 import { buildWaitingTimeEstimates, courtStartDelaySeconds, elapsedWaitSeconds, estimateGameDurationSeconds, formatMinuteSecondDuration } from "./queueWaitTime.js";
 import { normalizePlayableSkillLevels } from "./skillLevels.js";
+import { normalizeMemberSearch } from "./memberSearch.js";
 
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`);
 const SLOT_DEFINITIONS = [{ team: "A", position: 1 }, { team: "A", position: 2 }, { team: "B", position: 1 }, { team: "B", position: 2 }];
@@ -216,8 +217,27 @@ function QueueLineupEditor({ match, mutate, onClose, queuePlayers, upcoming }) {
     const assignments = slots.filter((slot) => slot.memberId);
     return mutate(async () => { await updateQueueDraftLineup({ matchId: match.id, slots: assignments }); if (approve) await approveQueueDraft(match.id); }, approve ? "อนุมัติคิวแล้ว" : "บันทึกคิวร่างแล้ว");
   }
-  const options = (players) => players.map((player) => <option key={player.memberId} value={player.memberId}>{player.name} · {player.skillLevel}{queuePositionByMember.has(player.memberId) && !currentMemberIds.has(player.memberId) ? ` · ย้ายจากคิว ${queuePositionByMember.get(player.memberId)}` : ""}</option>);
-  return <div className="badminton-queue-editor"><p className="badminton-queue-editor-hint">เลือกคนจากคิวอื่นได้ ระบบจะสลับคนเดิมกลับไปยังคิวนั้นให้อัตโนมัติ</p><div className="badminton-queue-slots">{slots.map((slot, index) => <label key={`${slot.team}${slot.position}`}><span>{slot.team}{slot.position}</span><select onChange={(event) => selectPlayer(index, event.target.value)} value={slot.memberId}><option value="">ว่าง</option>{waitingCandidates.length ? <optgroup label="ผู้เล่นที่รอและอยู่ในคิวอื่น">{options(waitingCandidates)}</optgroup> : null}{playingCandidates.length ? <optgroup label="ผู้เล่นที่กำลังเล่น (ใช้กับคิวถัดไป)">{options(playingCandidates)}</optgroup> : null}</select></label>)}</div><div className="badminton-queue-actions"><button className="badminton-secondary" onClick={() => save(false)} type="button"><Save size={16} /> บันทึกร่าง</button><button className="badminton-primary" disabled={slots.some((slot) => !slot.memberId)} onClick={() => save(true)} type="button"><Check size={16} /> อนุมัติคิว</button>{match.status === "approved" ? <button onClick={onClose} type="button">ปิด</button> : null}</div></div>;
+  return <div className="badminton-queue-editor"><p className="badminton-queue-editor-hint">เลือกคนจากคิวอื่นได้ ระบบจะสลับคนเดิมกลับไปยังคิวนั้นให้อัตโนมัติ</p><div className="badminton-queue-slots">{slots.map((slot, index) => <div className="badminton-queue-slot" key={`${slot.team}${slot.position}`}><span>{slot.team}{slot.position}</span><QueuePlayerPicker label={`ผู้เล่นทีม ${slot.team} ตำแหน่ง ${slot.position}`} memberId={slot.memberId} onSelect={(memberId) => selectPlayer(index, memberId)} waitingCandidates={waitingCandidates} playingCandidates={playingCandidates} queuePositionByMember={queuePositionByMember} currentMemberIds={currentMemberIds} /></div>)}</div><div className="badminton-queue-actions"><button className="badminton-secondary" onClick={() => save(false)} type="button"><Save size={16} /> บันทึกร่าง</button><button className="badminton-primary" disabled={slots.some((slot) => !slot.memberId)} onClick={() => save(true)} type="button"><Check size={16} /> อนุมัติคิว</button>{match.status === "approved" ? <button onClick={onClose} type="button">ปิด</button> : null}</div></div>;
+}
+
+function QueuePlayerPicker({ label, memberId, onSelect, waitingCandidates, playingCandidates, queuePositionByMember, currentMemberIds }) {
+  const listId = useId();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selected = [...waitingCandidates, ...playingCandidates].find((player) => player.memberId === memberId);
+  const normalizedQuery = normalizeMemberSearch(query);
+  const matches = (player) => !normalizedQuery || [player.name, player.lineName, player.skillLevel].some((field) => normalizeMemberSearch(field).includes(normalizedQuery));
+  const waiting = waitingCandidates.filter(matches);
+  const playing = playingCandidates.filter(matches);
+  const first = waiting[0] || playing[0];
+  function choose(id) { onSelect(id); setQuery(""); setOpen(false); }
+  function options(players) {
+    return players.map((player) => <button className="badminton-queue-picker-option" key={player.memberId} onClick={() => choose(player.memberId)} role="option" aria-selected={memberId === player.memberId} type="button">{player.name} · {player.skillLevel}{queuePositionByMember.has(player.memberId) && !currentMemberIds.has(player.memberId) ? ` · ย้ายจากคิว ${queuePositionByMember.get(player.memberId)}` : ""}</button>);
+  }
+  return <div className={`badminton-queue-picker${open ? " is-open" : ""}`} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setQuery(""); } }}>
+    <input aria-label={label} aria-autocomplete="list" aria-controls={listId} aria-expanded={open} autoComplete="off" onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onFocus={() => { setQuery(""); setOpen(true); }} onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); setQuery(""); event.currentTarget.blur(); } else if (event.key === "Enter" && open) { event.preventDefault(); if (first) choose(first.memberId); else if (!query) choose(""); } }} placeholder="พิมพ์ค้นหาผู้เล่น" role="combobox" value={open ? query : selected?.name || ""} />
+    {open ? <div className="badminton-queue-picker-list" id={listId} role="listbox"><button className="badminton-queue-picker-option" onClick={() => choose("")} role="option" aria-selected={!memberId} type="button">ว่าง / ล้างชื่อ</button>{waiting.length ? <><div className="badminton-queue-picker-heading">ผู้เล่นที่รอและอยู่ในคิวอื่น</div>{options(waiting)}</> : null}{playing.length ? <><div className="badminton-queue-picker-heading">ผู้เล่นที่กำลังเล่น (ใช้กับคิวถัดไป)</div>{options(playing)}</> : null}{!waiting.length && !playing.length && query ? <div className="badminton-queue-picker-empty">ไม่พบผู้เล่น</div> : null}</div> : null}
+  </div>;
 }
 
 function TimeSelect({ label, onChange, value }) {
