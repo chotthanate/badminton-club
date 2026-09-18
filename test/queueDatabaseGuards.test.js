@@ -6,6 +6,7 @@ const migrations = [
   "supabase/migrations/20260905144443_scope_playing_queue_to_current_event.sql",
   "supabase/migrations/20260905145535_finalize_queue_state_before_event_close.sql",
   "supabase/migrations/20260907091643_queue_four_slots_fairness_and_undo.sql",
+  "supabase/migrations/20260918151337_fallback_queue_drafts.sql",
 ];
 
 test("starting a queue only considers playing matches from the current event", () => {
@@ -59,4 +60,12 @@ test("queue screen keeps four slots visible and offers one-or-all automatic crea
   assert.match(queuePanel, /สร้าง 1 คิว/);
   assert.match(queuePanel, /สร้างทั้งหมด/);
   assert.match(queuePanel, /returnPlayingQueueToHead/);
+});
+
+test("fallback draft is atomic, stays unapproved, and does not grant anonymous execution", () => {
+  const sql = readFileSync(migrations[3], "utf8");
+  assert.match(sql, /created_id := public\.create_manual_queue_draft\(target_event_id\)/);
+  assert.match(sql, /perform public\.update_manual_queue_draft_lineup\(created_id, assignments\)/);
+  assert.match(sql, /revoke all on function public\.create_fallback_queue_draft[\s\S]*from public, anon/i);
+  assert.doesNotMatch(sql, /approve_queue_draft/);
 });

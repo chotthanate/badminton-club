@@ -304,17 +304,19 @@ export async function loadDashboard(clubId, eventId = null) {
 }
 
 export async function loadQueueState(eventId) {
-  const [queuePlayersResult, queueMatchesResult, queueMatchPlayersResult] = await Promise.all([
+  const [queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, eventResult] = await Promise.all([
     client().from("event_queue_players").select("*").eq("event_id", eventId),
     client().from("queue_matches").select("*").eq("event_id", eventId).order("sequence", { ascending: false }),
     client().from("queue_match_players").select("*").eq("event_id", eventId),
+    client().from("events").select("status").eq("id", eventId).single(),
   ]);
-  [queuePlayersResult, queueMatchesResult, queueMatchPlayersResult]
+  [queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, eventResult]
     .forEach((result) => throwIfError(result.error));
   return {
     queuePlayers: queuePlayersResult.data || [],
     queueMatches: queueMatchesResult.data || [],
     queueMatchPlayers: queueMatchPlayersResult.data || [],
+    queueEventStatus: eventResult.data.status,
   };
 }
 
@@ -817,12 +819,23 @@ export async function createQueueDraft({ eventId, memberIds, teamAIds }) {
   return data;
 }
 
+export async function createFallbackQueueDraft({ eventId, memberIds, teamAIds }) {
+  const { data, error } = await client().rpc("create_fallback_queue_draft", {
+    target_event_id: eventId,
+    selected_member_ids: memberIds,
+    team_a_member_ids: teamAIds,
+  });
+  throwIfError(error);
+  return data;
+}
+
 export async function createQueueDraftsBatch({ eventId, lineups }) {
   const { data, error } = await client().rpc("create_queue_drafts_batch", {
     target_event_id: eventId,
     queue_lineups: lineups.map((lineup) => ({
       member_ids: lineup.memberIds,
       team_a_member_ids: lineup.teamAIds,
+      fallback: Boolean(lineup.fallback),
     })),
   });
   throwIfError(error);

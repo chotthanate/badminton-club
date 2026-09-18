@@ -277,6 +277,7 @@ function AdminDashboard({ session }) {
   const selectedClubIdRef = useRef(null);
   const selectedEventIdRef = useRef(null);
   const refreshRequestRef = useRef(0);
+  const savingRef = useRef(false);
 
   async function refresh(silent = false, options = {}) {
     const requestId = ++refreshRequestRef.current;
@@ -348,26 +349,69 @@ function AdminDashboard({ session }) {
 
   useEffect(() => {
     if (!dashboard?.event || dashboard.event.status !== "open") return undefined;
-    const timer = window.setInterval(() => refresh(true), 5000);
+    const timer = window.setInterval(async () => {
+      if (savingRef.current || !selectedEventIdRef.current) return;
+      const eventId = selectedEventIdRef.current;
+      const requestId = ++refreshRequestRef.current;
+      try {
+        const nextDashboard = activeTab === "queue"
+          ? await loadQueueState(eventId)
+          : context?.role === "staff"
+            ? await loadStaffDashboard(context.club_id)
+            : await loadDashboard(context.club_id, eventId);
+        if (requestId === refreshRequestRef.current) {
+          setDashboard((current) => current?.event?.id === eventId
+            ? { ...current, ...nextDashboard, event: nextDashboard.queueEventStatus
+              ? { ...current.event, status: nextDashboard.queueEventStatus }
+              : nextDashboard.event || current.event }
+            : current);
+        }
+      } catch (nextError) {
+        if (requestId === refreshRequestRef.current) setError(nextError.message);
+      }
+    }, activeTab === "queue" ? 5000 : 12000);
     return () => window.clearInterval(timer);
-  }, [dashboard?.event?.id, dashboard?.event?.status]);
+  }, [dashboard?.event?.id, dashboard?.event?.status, activeTab, context?.club_id, context?.role]);
 
   async function mutate(action, successMessage, options = {}) {
+    if (savingRef.current) return false;
+    savingRef.current = true;
     setSaving(true);
     setError("");
     setNotice("");
     try {
       await action();
       setNotice(successMessage);
-      if (options.refreshQueueOnly && selectedEventIdRef.current) {
+      if ((options.refreshQueueOnly || (activeTab === "queue" && !options.selectLatest)) && selectedEventIdRef.current) {
         const eventId = selectedEventIdRef.current;
         const requestId = ++refreshRequestRef.current;
         const queueState = await loadQueueState(eventId);
         if (requestId === refreshRequestRef.current) {
           setDashboard((current) => current?.event?.id === eventId
-            ? { ...current, ...queueState }
+            ? { ...current, ...queueState, event: { ...current.event, status: queueState.queueEventStatus } }
             : current);
           setLoading(false);
+        }
+      } else if (!options.selectLatest && context?.club_id && dashboard?.event?.id) {
+        const requestId = ++refreshRequestRef.current;
+        if (context.role === "staff") {
+          const nextDashboard = await loadStaffDashboard(context.club_id);
+          if (requestId === refreshRequestRef.current) setDashboard(nextDashboard);
+        } else {
+          const [nextDashboard, outstandingRows, nextEvents] = await Promise.all([
+            loadDashboard(context.club_id, dashboard.event.id),
+            listOutstandingPayments(context.club_id),
+            listClubEvents(context.club_id),
+          ]);
+          if (requestId === refreshRequestRef.current) {
+            setDashboard(nextDashboard);
+            setEventSummaries(nextEvents);
+            setPreviousOutstanding({
+              count: outstandingRows.length,
+              total: outstandingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+              rows: outstandingRows,
+            });
+          }
         }
       } else {
         await refresh(false, { preferLatest: options.selectLatest });
@@ -381,6 +425,7 @@ function AdminDashboard({ session }) {
       }
       return false;
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }

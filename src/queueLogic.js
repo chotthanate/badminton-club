@@ -261,6 +261,14 @@ export function proposeQueueMatch(players, matches = [], nextSequence = 1) {
   return null;
 }
 
+// Last resort for a busy court: keep the four longest-waiting eligible players
+// together, but leave the resulting draft for an operator to review.
+export function proposeFallbackQueueMatch(players, matches = [], nextSequence = 1) {
+  const lineup = eligibleQueuePlayers(players, nextSequence).slice(0, 4);
+  if (lineup.length < 4) return null;
+  return { ...balanceTeams(lineup, matches), lineup, fallback: true };
+}
+
 function replacementCompatibility(remainingPlayers, incomingPlayer) {
   const lineup = [...remainingPlayers, incomingPlayer];
   const possibleBases = [...remainingPlayers].sort((left, right) => compareKeys(queueFairnessKey(left), queueFairnessKey(right)));

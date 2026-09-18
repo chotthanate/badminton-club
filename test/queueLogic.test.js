@@ -8,6 +8,7 @@ import {
   eligibleQueuePlayers,
   lineupCompatibility,
   proposeQueueMatch,
+  proposeFallbackQueueMatch,
   proposeReplacement,
 } from "../src/queueLogic.js";
 import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "../src/skillLevels.js";
@@ -78,6 +79,16 @@ test("ถ้าไม่มีระดับที่เข้ากัน ร�
     player("d", "P"),
   ]);
   assert.equal(result, null);
+});
+
+test("เมื่อจัดตามระดับไม่ได้ ยังเสนอผู้รอครบสี่คนให้ตรวจด้วยมือ", () => {
+  const rows = [player("a", "Rookie-"), player("b", "BG"), player("c", "S"), player("d", "P")];
+  assert.equal(proposeQueueMatch(rows), null);
+  const fallback = proposeFallbackQueueMatch(rows);
+  assert.equal(fallback.fallback, true);
+  assert.equal(fallback.lineup.length, 4);
+  assert.equal(fallback.teamA.length, 2);
+  assert.equal(fallback.teamB.length, 2);
 });
 
 test("ถ้าคนแรกยังจัดไม่ได้ ระบบข้ามไปจัดกลุ่มที่ผ่านเงื่อนไข", () => {
