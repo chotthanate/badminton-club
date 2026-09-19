@@ -107,7 +107,20 @@ export default function LiffPaymentApp() {
     setResult(null);
   }
 
+  function requireSelectedRound() {
+    if (selectedPaymentIds.length) return true;
+    const message = tr("กรุณาเลือกรอบที่จะชำระเงิน", "Please select a session to pay first.");
+    setError(message);
+    window.alert(message);
+    window.setTimeout(() => document.querySelector(".liff-due-list")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+    return false;
+  }
+
   async function readSlip(changeEvent) {
+    if (!requireSelectedRound()) {
+      changeEvent.target.value = "";
+      return;
+    }
     const file = changeEvent.target.files?.[0];
     changeEvent.target.value = "";
     if (!file) return;
@@ -131,10 +144,7 @@ export default function LiffPaymentApp() {
   }
 
   async function submitPayment() {
-    if (!selectedPaymentIds.length) {
-      setError(tr("กรุณาเลือกรอบที่ต้องการชำระ", "Please select at least one session to pay."));
-      return;
-    }
+    if (!requireSelectedRound()) return;
     if (!slip) {
       setError(tr("กรุณาแนบรูปสลิป", "Please attach your transfer slip."));
       return;
@@ -234,7 +244,7 @@ export default function LiffPaymentApp() {
       {availablePayments.length ? <section className="liff-payment-card">
         <div className="liff-payment-section-title"><div><strong>{tr("แนบรูปสลิป", "Attach transfer slip")}</strong><span>{tr("รองรับภาพจากแอปธนาคาร", "Use an image from your banking app")}</span></div></div>
         <label className={`liff-slip-picker ${slip ? "has-slip" : ""}`}>
-          <input accept="image/*" disabled={reading || submitting} onChange={readSlip} type="file" />
+          <input accept="image/*" disabled={reading || submitting} onChange={readSlip} onClick={(event) => { if (!requireSelectedRound()) event.preventDefault(); }} type="file" />
           {reading ? <><LoaderCircle className="is-spinning" size={28} /><strong>{tr("กำลังอ่านข้อความ", "Reading slip")} {progress}%</strong></> : slip ? <><Check size={29} /><strong>{tr("อ่านสลิปแล้ว", "Slip read")}</strong><span>{tr("ยอด", "Amount")} {slip.amount === null ? tr("อ่านไม่ชัด", "unclear") : `${baht(slip.amount)} ${tr("บาท", "THB")}`} · {tr("วันที่", "Date")} {slip.date || tr("อ่านไม่ชัด", "unclear")} · {tr("เลขอ้างอิง", "Reference")} {slip.reference || tr("อ่านไม่ชัด", "unclear")}</span></> : <><ImagePlus size={29} /><strong>{tr("เลือกรูปสลิป", "Choose slip image")}</strong><span>{tr("แตะเพื่อเลือกรูปจากเครื่อง", "Tap to choose an image")}</span></>}
         </label>
         {slip && recipientStatus === "mismatch" ? <p className="liff-slip-warning">{tr(`บัญชีผู้รับไม่ถูกต้อง กรุณาตรวจสอบว่าโอนไปยัง ${PAYMENT_RECIPIENT_NAME}`, `Incorrect recipient. Please make sure the transfer is sent to ${PAYMENT_RECIPIENT_NAME}.`)}</p> : null}
@@ -242,7 +252,7 @@ export default function LiffPaymentApp() {
         {slip && amountDifference !== null && amountDifference > 0.009 ? <p className="liff-slip-warning">{tr(`ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากมากกว่ายอดที่ต้องจ่ายจริง ต้องชำระ ${baht(total)} บาท แต่สลิปเป็น ${baht(slip.amount)} บาท`, `The transferred amount is too high. Amount due: ${baht(total)} THB; slip: ${baht(slip.amount)} THB.`)}</p> : null}
         {needsManualReview && recipientStatus !== "mismatch" && !amountMismatch ? <p className="liff-slip-warning">{tr("หลังส่ง รายการนี้จะอยู่ระหว่างรอตรวจสอบ", "After submission, this payment will be pending review.")}</p> : null}
         {error ? <div className="liff-inline-error">{error}</div> : null}
-        <button className="liff-payment-submit" disabled={!selectedPaymentIds.length || !slip || recipientStatus === "mismatch" || amountMismatch || reading || submitting} onClick={submitPayment} type="button">{submitting ? tr("กำลังตรวจสอบ...", "Verifying...") : tr(`ยืนยันแจ้งโอน ${baht(total)} บาท`, `Submit payment of ${baht(total)} THB`)}</button>
+        <button className="liff-payment-submit" disabled={reading || submitting || (selectedPaymentIds.length > 0 && (!slip || recipientStatus === "mismatch" || amountMismatch))} onClick={submitPayment} type="button">{submitting ? tr("กำลังตรวจสอบ...", "Verifying...") : tr(`ยืนยันแจ้งโอน ${baht(total)} บาท`, `Submit payment of ${baht(total)} THB`)}</button>
       </section> : null}
 
       {result ? <section className={`liff-payment-result is-${result.status}`}><Check size={25} /><div><strong>{result.status === "auto_paid" ? tr("บันทึกว่าชำระแล้ว", "Payment recorded") : tr("รับสลิปแล้ว · รอตรวจสอบ", "Slip received · Pending review")}</strong><span>{result.status === "auto_paid" ? tr("ยอดที่เลือกถูกบันทึกว่าชำระแล้ว", "Your selected balances have been marked as paid.") : tr("แอดมินจะตรวจสอบและอัปเดตสถานะให้", "An admin will review and update the payment status.")}</span>{result.status === "pending" ? <button onClick={sendNewSlip} type="button"><ImagePlus size={16} /> {tr("ส่งสลิปใหม่", "Send another slip")}</button> : null}</div></section> : null}
