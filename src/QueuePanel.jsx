@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import { Check, ListOrdered, Pencil, Play, Plus, Save, Settings, Timer, Trash2, Users, X } from "lucide-react";
 import {
   approveQueueDraft,
@@ -165,6 +165,11 @@ export default function QueuePanel({ dashboard, event, isStaff = false, mutate }
     await mutate(() => returnPlayingQueueToHead(match.id), `นำเกมออกจาก ${court.name} และคืนเป็นคิว 1 แล้ว`, { refreshQueueOnly: true });
   }
 
+  function cancelUpcomingQueue(match, position) {
+    if (!window.confirm(`ยกเลิกคิว ${position} ใช่ไหม?\n\nรายชื่อในคิวนี้จะกลับไปอยู่ในรายการรอ`)) return;
+    mutate(() => cancelQueueMatch(match.id), `ยกเลิกคิว ${position} แล้ว`);
+  }
+
   return <section className="badminton-queue-workspace">
     <article className="badminton-card badminton-queue-summary"><div><ListOrdered size={20} /><span>รอเล่น<strong>{visibleWaiting.length}</strong></span></div><div><Play size={20} /><span>กำลังเล่น<strong>{playingMatches.length * 4}</strong></span></div><div><Timer size={20} /><span>คิวล่วงหน้า<strong>{upcoming.length}/{MAX_UPCOMING_QUEUES}</strong></span></div></article>
     <div className="badminton-queue-courts">{event.courts.map((court) => {
@@ -177,7 +182,7 @@ export default function QueuePanel({ dashboard, event, isStaff = false, mutate }
     })}</div>
     <article className="badminton-card badminton-upcoming-queues"><div className="badminton-card-title"><ListOrdered size={20} /><div><h2>คิวล่วงหน้า</h2><p>เตรียมได้สูงสุด 4 คิว ผู้เล่นยังแสดงในรายชื่อรอจนกว่าจะลงสนาม</p></div></div><div className="badminton-queue-create-actions"><div className="badminton-auto-queue-actions"><button className="badminton-primary" disabled={event.status !== "open" || upcoming.length >= MAX_UPCOMING_QUEUES || availableWaiting.length < 4} onClick={() => mutate(createAutomaticDraft, "ระบบจัด 1 คิวร่างแล้ว กรุณาตรวจและอนุมัติ", { errorMode: "alert" })} type="button"><Plus size={17} /> สร้าง 1 คิว</button><button className="badminton-primary" disabled={event.status !== "open" || upcoming.length >= MAX_UPCOMING_QUEUES || availableWaiting.length < 4} onClick={() => mutate(createAllAutomaticDrafts, "ระบบจัดคิวร่างทั้งหมดที่ทำได้แล้ว กรุณาตรวจและอนุมัติ", { errorMode: "alert" })} type="button"><ListOrdered size={17} /> สร้างทั้งหมด</button></div><button className="badminton-secondary" disabled={event.status !== "open" || upcoming.length >= MAX_UPCOMING_QUEUES || queue.players.filter((player) => ["waiting", "playing", "reserved"].includes(player.status)).length < 4} onClick={() => mutate(() => createManualQueueDraft(event.id), "สร้างคิวเปล่าแล้ว เลือกผู้เล่น 4 คนได้เลย")} type="button"><Users size={17} /> สร้างคิวด้วยตัวเอง</button></div>{upcoming.map((match, index) => {
       const editing = match.status === "draft" || editingMatchId === match.id;
-      return <section className={`badminton-upcoming-card is-${match.status}`} key={match.id}><header><div><strong>คิว {index + 1}</strong><span>{match.status === "approved" ? "อนุมัติแล้ว" : "รอตรวจสอบ"}</span></div>{match.status === "approved" ? <div className="badminton-queue-order-actions"><button aria-label="เลื่อนขึ้น" disabled={index === 0 || upcoming[index - 1]?.status !== "approved"} onClick={() => mutate(() => moveUpcomingQueue(match.id, -1), "เลื่อนคิวขึ้นแล้ว")} type="button">↑</button><button aria-label="เลื่อนลง" disabled={index === upcoming.length - 1 || upcoming[index + 1]?.status !== "approved"} onClick={() => mutate(() => moveUpcomingQueue(match.id, 1), "เลื่อนคิวลงแล้ว")} type="button">↓</button><button onClick={() => setEditingMatchId(match.id)} type="button"><Pencil size={15} /> แก้</button></div> : null}</header>{editing ? <QueueLineupEditor match={match} mutate={mutate} onClose={() => setEditingMatchId(null)} queuePlayers={queue.players} upcoming={upcoming} /> : <QueueTeamPreview fullNames match={match} />}<button className="badminton-delete-button badminton-full-button" onClick={() => mutate(() => cancelQueueMatch(match.id), `ยกเลิกคิว ${index + 1} แล้ว`)} type="button"><X size={16} /> ยกเลิกคิว</button></section>;
+      return <section className={`badminton-upcoming-card is-${match.status}`} key={match.id}><header><div><strong>คิว {index + 1}</strong><span>{match.status === "approved" ? "อนุมัติแล้ว" : "รอตรวจสอบ"}</span></div>{match.status === "approved" ? <div className="badminton-queue-order-actions"><button aria-label="เลื่อนขึ้น" disabled={index === 0 || upcoming[index - 1]?.status !== "approved"} onClick={() => mutate(() => moveUpcomingQueue(match.id, -1), "เลื่อนคิวขึ้นแล้ว")} type="button">↑</button><button aria-label="เลื่อนลง" disabled={index === upcoming.length - 1 || upcoming[index + 1]?.status !== "approved"} onClick={() => mutate(() => moveUpcomingQueue(match.id, 1), "เลื่อนคิวลงแล้ว")} type="button">↓</button><button onClick={() => setEditingMatchId(match.id)} type="button"><Pencil size={15} /> แก้</button></div> : null}</header>{editing ? <QueueLineupEditor match={match} mutate={mutate} onClose={() => setEditingMatchId(null)} queuePlayers={queue.players} upcoming={upcoming} /> : <QueueTeamPreview fullNames match={match} />}<button className="badminton-delete-button badminton-full-button" onClick={() => cancelUpcomingQueue(match, index + 1)} type="button"><X size={16} /> ยกเลิกคิว</button></section>;
     })}{!upcoming.length ? <div className="badminton-empty">ยังไม่มีคิวล่วงหน้า</div> : null}</article>
     <article className="badminton-card badminton-queue-waiting"><div className="badminton-card-title"><Users size={20} /><div><h2>คิวรอเล่น</h2><p>คนในคิวร่างยังแสดงอยู่เพื่อเปรียบเทียบเวลารอ</p></div></div>{visibleWaiting.length ? <ol>{visibleWaiting.map((player) => {
       const draftPosition = draftPositionsByMember.get(player.memberId);
@@ -217,51 +222,20 @@ function QueueLineupEditor({ match, mutate, onClose, queuePlayers, upcoming }) {
 
 function QueuePlayerSearchInput({ label, memberId, onSelect, options }) {
   const listId = useId();
-  const inputRef = useRef(null);
   const selectedLabel = options.find((option) => option.memberId === memberId)?.label || "";
-  const [value, setValue] = useState(selectedLabel);
   const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const filteredOptions = filterQueuePlayerSearchOptions(options, value);
-
-  useEffect(() => {
-    if (document.activeElement !== inputRef.current) setValue(selectedLabel);
-  }, [memberId, selectedLabel]);
-
-  function change(nextValue) {
-    setValue(nextValue);
-    setOpen(true);
-    setActiveIndex(-1);
-    onSelect("");
-  }
+  const [query, setQuery] = useState("");
+  const filteredOptions = filterQueuePlayerSearchOptions(options, query);
 
   function choose(option) {
     onSelect(option?.memberId || "");
-    setValue(option?.label || "");
     setOpen(false);
-    setActiveIndex(-1);
+    setQuery("");
   }
 
-  function keyDown(event) {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setOpen(true);
-      setActiveIndex((index) => Math.min(index + 1, filteredOptions.length - 1));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((index) => Math.max(0, index - 1));
-    } else if (event.key === "Enter" && open && filteredOptions[activeIndex]) {
-      event.preventDefault();
-      choose(filteredOptions[activeIndex]);
-    } else if (event.key === "Escape") {
-      setOpen(false);
-      setValue(selectedLabel);
-    }
-  }
-
-  return <div className={`badminton-queue-combobox${open ? " is-open" : ""}`} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setValue(selectedLabel); } }}>
-    <input aria-autocomplete="list" aria-controls={listId} aria-expanded={open} aria-label={label} autoComplete="off" onChange={(event) => change(event.target.value)} onClick={(event) => { if (!open) { setValue(""); setOpen(true); setActiveIndex(-1); event.currentTarget.select(); } }} onFocus={(event) => { setValue(""); setOpen(true); setActiveIndex(-1); event.currentTarget.select(); }} onKeyDown={keyDown} placeholder="พิมพ์ค้นหาหรือเลือกชื่อ" ref={inputRef} role="combobox" value={value} />
-    {open ? <div className="badminton-queue-combobox-list" id={listId} role="listbox"><button className="badminton-queue-combobox-option is-clear" onPointerDown={(event) => { event.preventDefault(); choose(null); }} role="option" type="button">ว่าง / ล้างชื่อ</button>{filteredOptions.map((option, index) => <button aria-selected={option.memberId === memberId} className={`badminton-queue-combobox-option${index === activeIndex ? " is-active" : ""}`} key={option.memberId} onPointerDown={(event) => { event.preventDefault(); choose(option); }} role="option" type="button">{option.label}</button>)}{!filteredOptions.length ? <div className="badminton-queue-combobox-empty">ไม่พบผู้เล่น</div> : null}</div> : null}
+  return <div className={`badminton-queue-combobox${open ? " is-open" : ""}`}>
+    <button aria-controls={listId} aria-expanded={open} aria-label={label} className="badminton-queue-combobox-trigger" onClick={() => { setOpen((current) => !current); setQuery(""); }} type="button"><span>{selectedLabel || "เลือกผู้เล่น"}</span><b aria-hidden="true">⌄</b></button>
+    {open ? <div className="badminton-queue-combobox-panel" id={listId}><input aria-label={`ค้นหา ${label}`} autoComplete="off" onChange={(event) => setQuery(event.target.value)} placeholder="พิมพ์ค้นหาชื่อหรือระดับมือ" type="search" value={query} /><div className="badminton-queue-combobox-list" role="listbox"><button className="badminton-queue-combobox-option is-clear" onClick={() => choose(null)} role="option" type="button">ว่าง / ล้างชื่อ</button>{filteredOptions.map((option) => <button aria-selected={option.memberId === memberId} className="badminton-queue-combobox-option" key={option.memberId} onClick={() => choose(option)} role="option" type="button">{option.label}</button>)}{!filteredOptions.length ? <div className="badminton-queue-combobox-empty">ไม่พบผู้เล่น</div> : null}</div></div> : null}
   </div>;
 }
 

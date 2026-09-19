@@ -6084,13 +6084,16 @@
 .badminton-queue-editor-hint { margin: 0 0 9px; color: #637064; font-size: 12px; line-height: 1.45; }
 .badminton-queue-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .badminton-queue-slot { display: grid; align-content: start; gap: 7px; min-width: 0; min-height: 104px; padding: 10px; border: 1px solid #c9dccd; border-radius: 13px; background: #f5faf6; }
-.badminton-queue-slot:focus-within { position: relative; z-index: 5; }
 .badminton-queue-slot > span { font-size: 16px; font-weight: 900; color: #0f7a52; }
 .badminton-queue-combobox { position: relative; min-width: 0; }
-.badminton-queue-combobox input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 66px; padding: 10px; border: 1px solid #9bbbaa; border-radius: 10px; background: white; color: #17251b; font-size: 16px; font-weight: 750; }
-.badminton-queue-combobox-list { position: absolute; top: calc(100% + 4px); right: 0; left: 0; z-index: 6; max-height: 280px; overflow-y: auto; border: 1px solid #9bbbaa; border-radius: 10px; background: white; box-shadow: 0 10px 24px #173b2840; }
+.badminton-queue-combobox-trigger { display: flex; align-items: center; justify-content: space-between; gap: 6px; box-sizing: border-box; width: 100%; min-width: 0; min-height: 66px; padding: 10px; border: 1px solid #9bbbaa; border-radius: 10px; background: white; color: #17251b; font-size: 16px; font-weight: 750; text-align: left; }
+.badminton-queue-combobox-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badminton-queue-combobox-trigger b { flex: 0 0 auto; color: #0f7a52; font-size: 20px; }
+.badminton-queue-combobox-panel { display: grid; gap: 6px; margin-top: 6px; }
+.badminton-queue-combobox-panel > input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 46px; padding: 9px; border: 1px solid #9bbbaa; border-radius: 9px; background: white; color: #17251b; font-size: 16px; }
+.badminton-queue-combobox-list { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; border: 1px solid #9bbbaa; border-radius: 10px; background: white; }
 .badminton-queue-combobox-option { display: block; box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px; border: 0; border-bottom: 1px solid #e3ebe5; border-radius: 0; background: white; color: #17251b; font-size: 14px; line-height: 1.35; text-align: left; }
-.badminton-queue-combobox-option.is-active, .badminton-queue-combobox-option:focus { background: #e6f4ea; }
+.badminton-queue-combobox-option:focus { background: #e6f4ea; }
 .badminton-queue-combobox-option.is-clear { color: #637064; }
 .badminton-queue-combobox-empty { padding: 14px 10px; color: #637064; font-size: 13px; text-align: center; }
 .badminton-queue-actions { display: flex; flex-wrap: wrap; gap: 8px; }

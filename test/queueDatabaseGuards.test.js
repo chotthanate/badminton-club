@@ -62,6 +62,25 @@ test("queue screen keeps four slots visible and offers one-or-all automatic crea
   assert.match(queuePanel, /returnPlayingQueueToHead/);
 });
 
+test("queue player dropdown opens without focusing a search field and remains touch-scrollable", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  const styles = readFileSync("src/badminton.css", "utf8");
+
+  assert.match(queuePanel, /className="badminton-queue-combobox-trigger"/);
+  assert.match(queuePanel, /className="badminton-queue-combobox-panel"/);
+  assert.doesNotMatch(queuePanel, /onPointerDown/);
+  assert.doesNotMatch(styles, /\.badminton-queue-combobox-list\s*\{[^}]*position:\s*absolute/s);
+  assert.match(styles, /\.badminton-queue-combobox-list\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(styles, /\.badminton-queue-combobox-list\s*\{[^}]*-webkit-overflow-scrolling:\s*touch/s);
+});
+
+test("cancelling an upcoming queue always asks for confirmation", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+
+  assert.match(queuePanel, /window\.confirm\(`ยกเลิกคิว \$\{position\} ใช่ไหม\?/);
+  assert.match(queuePanel, /onClick=\{\(\) => cancelUpcomingQueue\(match, index \+ 1\)\}/);
+});
+
 test("fallback draft is atomic, stays unapproved, and does not grant anonymous execution", () => {
   const sql = readFileSync(migrations[3], "utf8");
   assert.match(sql, /created_id := public\.create_manual_queue_draft\(target_event_id\)/);
