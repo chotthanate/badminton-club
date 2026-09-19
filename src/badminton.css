@@ -6093,7 +6093,6 @@
 .badminton-queue-picker-option { display: block; box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 12px; border: 0; border-bottom: 1px solid #e3ebe5; border-radius: 0; background: white; color: #17251b; font-size: 14px; text-align: left; cursor: pointer; }
 .badminton-queue-picker-option:hover, .badminton-queue-picker-option:focus { background: #eaf5ed; }
 .badminton-queue-picker-heading, .badminton-queue-picker-empty { padding: 9px 12px; color: #637064; font-size: 12px; font-weight: 750; }
-@media (max-width: 560px) { .badminton-queue-slots { grid-template-columns: 1fr; } }
 .badminton-queue-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .badminton-queue-actions > button { flex: 1 1 130px; min-height: 46px; }
 .badminton-queue-compatibility-warning {
