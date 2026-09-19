@@ -6085,7 +6085,7 @@
 .badminton-queue-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .badminton-queue-slot { display: grid; align-content: start; gap: 7px; min-width: 0; min-height: 104px; padding: 10px; border: 1px solid #c9dccd; border-radius: 13px; background: #f5faf6; }
 .badminton-queue-slot > span { font-size: 16px; font-weight: 900; color: #0f7a52; }
-.badminton-queue-slot select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 66px; padding: 10px; border: 1px solid #9bbbaa; border-radius: 10px; background: white; color: #17251b; font-size: 16px; font-weight: 750; }
+.badminton-queue-slot input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 66px; padding: 10px; border: 1px solid #9bbbaa; border-radius: 10px; background: white; color: #17251b; font-size: 16px; font-weight: 750; }
 .badminton-queue-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .badminton-queue-actions > button { flex: 1 1 130px; min-height: 46px; }
 .badminton-queue-compatibility-warning {

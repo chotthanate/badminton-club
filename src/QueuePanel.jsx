@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Check, ListOrdered, Pencil, Play, Plus, Save, Settings, Timer, Trash2, Users, X } from "lucide-react";
 import {
   approveQueueDraft,
@@ -20,6 +20,7 @@ import { buildQueuePlanningState } from "./queuePlanning.js";
 import { courtTimeStatus } from "./queueCourtTime.js";
 import { buildWaitingTimeEstimates, courtStartDelaySeconds, elapsedWaitSeconds, estimateGameDurationSeconds, formatMinuteSecondDuration } from "./queueWaitTime.js";
 import { normalizePlayableSkillLevels } from "./skillLevels.js";
+import { buildQueuePlayerSearchOptions, resolveQueuePlayerSearch, updateQueuePlayerSlots } from "./queuePlayerSearch.js";
 
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`);
 const SLOT_DEFINITIONS = [{ team: "A", position: 1 }, { team: "A", position: 2 }, { team: "B", position: 1 }, { team: "B", position: 2 }];
@@ -204,20 +205,33 @@ function QueueLineupEditor({ match, mutate, onClose, queuePlayers, upcoming }) {
   const waitingCandidates = candidates.filter((player) => player.status !== "playing");
   const playingCandidates = candidates.filter((player) => player.status === "playing");
   function selectPlayer(slotIndex, memberId) {
-    setSlots((current) => {
-      const next = current.map((slot) => ({ ...slot }));
-      const otherIndex = next.findIndex((slot, index) => index !== slotIndex && slot.memberId === memberId);
-      if (otherIndex >= 0) next[otherIndex].memberId = next[slotIndex].memberId;
-      next[slotIndex].memberId = memberId;
-      return next;
-    });
+    setSlots((current) => updateQueuePlayerSlots(current, slotIndex, memberId));
   }
   async function save(approve) {
     const assignments = slots.filter((slot) => slot.memberId);
     return mutate(async () => { await updateQueueDraftLineup({ matchId: match.id, slots: assignments }); if (approve) await approveQueueDraft(match.id); }, approve ? "อนุมัติคิวแล้ว" : "บันทึกคิวร่างแล้ว");
   }
-  const options = (players) => players.map((player) => <option key={player.memberId} value={player.memberId}>{player.name} · {player.skillLevel}{queuePositionByMember.has(player.memberId) && !currentMemberIds.has(player.memberId) ? ` · ย้ายจากคิว ${queuePositionByMember.get(player.memberId)}` : ""}</option>);
-  return <div className="badminton-queue-editor"><p className="badminton-queue-editor-hint">เลือกคนจากคิวอื่นได้ ระบบจะสลับคนเดิมกลับไปยังคิวนั้นให้อัตโนมัติ</p><div className="badminton-queue-slots">{slots.map((slot, index) => <label className="badminton-queue-slot" key={`${slot.team}${slot.position}`}><span>{slot.team}{slot.position}</span><select aria-label={`ผู้เล่นทีม ${slot.team} ตำแหน่ง ${slot.position}`} onChange={(event) => selectPlayer(index, event.target.value)} value={slot.memberId}><option value="">ว่าง</option>{waitingCandidates.length ? <optgroup label="ผู้เล่นที่รอและอยู่ในคิวอื่น">{options(waitingCandidates)}</optgroup> : null}{playingCandidates.length ? <optgroup label="ผู้เล่นที่กำลังเล่น (ใช้กับคิวถัดไป)">{options(playingCandidates)}</optgroup> : null}</select></label>)}</div><div className="badminton-queue-actions"><button className="badminton-secondary" onClick={() => save(false)} type="button"><Save size={16} /> บันทึกร่าง</button><button className="badminton-primary" disabled={slots.some((slot) => !slot.memberId)} onClick={() => save(true)} type="button"><Check size={16} /> อนุมัติคิว</button>{match.status === "approved" ? <button onClick={onClose} type="button">ปิด</button> : null}</div></div>;
+  const playerOptions = buildQueuePlayerSearchOptions({ waitingCandidates, playingCandidates, queuePositionByMember, currentMemberIds });
+  return <div className="badminton-queue-editor"><p className="badminton-queue-editor-hint">แตะเพื่อเลือกรายชื่อ หรือพิมพ์ค้นหาได้ เลือกคนจากคิวอื่นแล้วระบบจะสลับคนเดิมกลับให้อัตโนมัติ</p><div className="badminton-queue-slots">{slots.map((slot, index) => <label className="badminton-queue-slot" key={`${slot.team}${slot.position}`}><span>{slot.team}{slot.position}</span><QueuePlayerSearchInput label={`ผู้เล่นทีม ${slot.team} ตำแหน่ง ${slot.position}`} memberId={slot.memberId} onSelect={(memberId) => selectPlayer(index, memberId)} options={playerOptions} /></label>)}</div><div className="badminton-queue-actions"><button className="badminton-secondary" onClick={() => save(false)} type="button"><Save size={16} /> บันทึกร่าง</button><button className="badminton-primary" disabled={slots.some((slot) => !slot.memberId)} onClick={() => save(true)} type="button"><Check size={16} /> อนุมัติคิว</button>{match.status === "approved" ? <button onClick={onClose} type="button">ปิด</button> : null}</div></div>;
+}
+
+function QueuePlayerSearchInput({ label, memberId, onSelect, options }) {
+  const listId = useId();
+  const inputRef = useRef(null);
+  const selectedLabel = options.find((option) => option.memberId === memberId)?.label || "";
+  const [value, setValue] = useState(selectedLabel);
+
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) setValue(selectedLabel);
+  }, [memberId, selectedLabel]);
+
+  function change(nextValue) {
+    setValue(nextValue);
+    const resolved = resolveQueuePlayerSearch(options, nextValue);
+    onSelect(resolved || "");
+  }
+
+  return <><input aria-label={label} autoComplete="off" list={listId} onBlur={() => setValue(options.find((option) => option.memberId === memberId)?.label || "")} onChange={(event) => change(event.target.value)} placeholder="พิมพ์ค้นหาหรือเลือกชื่อ" ref={inputRef} value={value} /><datalist id={listId}>{options.map((option) => <option key={option.memberId} value={option.label} />)}</datalist></>;
 }
 
 function TimeSelect({ label, onChange, value }) {
