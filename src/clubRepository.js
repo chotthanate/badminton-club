@@ -381,6 +381,9 @@ export async function createEvent({
     })
     .select("*")
     .single();
+  if (error?.code === "23505" && String(error.message || "").includes("events_one_unfinished_round_per_club_idx")) {
+    throw new Error("มีรอบที่กำลังเตรียมหรือเปิดลงชื่ออยู่แล้ว กรุณาเลือกรอบนั้นจากรายการรอบทั้งหมด");
+  }
   throwIfError(error);
   if (courts.length) {
     const { error: courtError } = await client().from("event_courts").insert(
