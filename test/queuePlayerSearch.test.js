@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildQueuePlayerSearchOptions, resolveQueuePlayerSearch, updateQueuePlayerSlots } from "../src/queuePlayerSearch.js";
+import { buildQueuePlayerSearchOptions, filterQueuePlayerSearchOptions, resolveQueuePlayerSearch, updateQueuePlayerSlots } from "../src/queuePlayerSearch.js";
 
 test("queue player search options include queue origin and remain unique", () => {
   const options = buildQueuePlayerSearchOptions({
@@ -22,6 +22,16 @@ test("queue player search only resolves a complete option", () => {
   assert.equal(resolveQueuePlayerSearch(options, "ต้น"), null);
   assert.equal(resolveQueuePlayerSearch(options, "ต้น · N"), "one");
   assert.equal(resolveQueuePlayerSearch(options, ""), "");
+});
+
+test("queue player dropdown filters Thai names and ignores spaces", () => {
+  const options = [
+    { memberId: "one", label: "อิ๋ง อิ๋ง · N" },
+    { memberId: "two", label: "K-RodS · BG" },
+  ];
+  assert.deepEqual(filterQueuePlayerSearchOptions(options, "อิ๋งอิ๋ง"), [options[0]]);
+  assert.deepEqual(filterQueuePlayerSearchOptions(options, "k-rods"), [options[1]]);
+  assert.deepEqual(filterQueuePlayerSearchOptions(options, ""), options);
 });
 
 test("selecting an existing player swaps slots without duplicating the player", () => {

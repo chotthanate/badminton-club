@@ -20,7 +20,7 @@ import { buildQueuePlanningState } from "./queuePlanning.js";
 import { courtTimeStatus } from "./queueCourtTime.js";
 import { buildWaitingTimeEstimates, courtStartDelaySeconds, elapsedWaitSeconds, estimateGameDurationSeconds, formatMinuteSecondDuration } from "./queueWaitTime.js";
 import { normalizePlayableSkillLevels } from "./skillLevels.js";
-import { buildQueuePlayerSearchOptions, resolveQueuePlayerSearch, updateQueuePlayerSlots } from "./queuePlayerSearch.js";
+import { buildQueuePlayerSearchOptions, filterQueuePlayerSearchOptions, updateQueuePlayerSlots } from "./queuePlayerSearch.js";
 
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`);
 const SLOT_DEFINITIONS = [{ team: "A", position: 1 }, { team: "A", position: 2 }, { team: "B", position: 1 }, { team: "B", position: 2 }];
@@ -212,7 +212,7 @@ function QueueLineupEditor({ match, mutate, onClose, queuePlayers, upcoming }) {
     return mutate(async () => { await updateQueueDraftLineup({ matchId: match.id, slots: assignments }); if (approve) await approveQueueDraft(match.id); }, approve ? "อนุมัติคิวแล้ว" : "บันทึกคิวร่างแล้ว");
   }
   const playerOptions = buildQueuePlayerSearchOptions({ waitingCandidates, playingCandidates, queuePositionByMember, currentMemberIds });
-  return <div className="badminton-queue-editor"><p className="badminton-queue-editor-hint">แตะเพื่อเลือกรายชื่อ หรือพิมพ์ค้นหาได้ เลือกคนจากคิวอื่นแล้วระบบจะสลับคนเดิมกลับให้อัตโนมัติ</p><div className="badminton-queue-slots">{slots.map((slot, index) => <label className="badminton-queue-slot" key={`${slot.team}${slot.position}`}><span>{slot.team}{slot.position}</span><QueuePlayerSearchInput label={`ผู้เล่นทีม ${slot.team} ตำแหน่ง ${slot.position}`} memberId={slot.memberId} onSelect={(memberId) => selectPlayer(index, memberId)} options={playerOptions} /></label>)}</div><div className="badminton-queue-actions"><button className="badminton-secondary" onClick={() => save(false)} type="button"><Save size={16} /> บันทึกร่าง</button><button className="badminton-primary" disabled={slots.some((slot) => !slot.memberId)} onClick={() => save(true)} type="button"><Check size={16} /> อนุมัติคิว</button>{match.status === "approved" ? <button onClick={onClose} type="button">ปิด</button> : null}</div></div>;
+  return <div className="badminton-queue-editor"><p className="badminton-queue-editor-hint">แตะเพื่อเปิดรายชื่อทั้งหมด หรือพิมพ์ค้นหาได้ เลือกคนจากคิวอื่นแล้วระบบจะสลับคนเดิมกลับให้อัตโนมัติ</p><div className="badminton-queue-slots">{slots.map((slot, index) => <div className="badminton-queue-slot" key={`${slot.team}${slot.position}`}><span>{slot.team}{slot.position}</span><QueuePlayerSearchInput label={`ผู้เล่นทีม ${slot.team} ตำแหน่ง ${slot.position}`} memberId={slot.memberId} onSelect={(memberId) => selectPlayer(index, memberId)} options={playerOptions} /></div>)}</div><div className="badminton-queue-actions"><button className="badminton-secondary" onClick={() => save(false)} type="button"><Save size={16} /> บันทึกร่าง</button><button className="badminton-primary" disabled={slots.some((slot) => !slot.memberId)} onClick={() => save(true)} type="button"><Check size={16} /> อนุมัติคิว</button>{match.status === "approved" ? <button onClick={onClose} type="button">ปิด</button> : null}</div></div>;
 }
 
 function QueuePlayerSearchInput({ label, memberId, onSelect, options }) {
@@ -220,6 +220,9 @@ function QueuePlayerSearchInput({ label, memberId, onSelect, options }) {
   const inputRef = useRef(null);
   const selectedLabel = options.find((option) => option.memberId === memberId)?.label || "";
   const [value, setValue] = useState(selectedLabel);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const filteredOptions = filterQueuePlayerSearchOptions(options, value);
 
   useEffect(() => {
     if (document.activeElement !== inputRef.current) setValue(selectedLabel);
@@ -227,11 +230,39 @@ function QueuePlayerSearchInput({ label, memberId, onSelect, options }) {
 
   function change(nextValue) {
     setValue(nextValue);
-    const resolved = resolveQueuePlayerSearch(options, nextValue);
-    onSelect(resolved || "");
+    setOpen(true);
+    setActiveIndex(-1);
+    onSelect("");
   }
 
-  return <><input aria-label={label} autoComplete="off" list={listId} onBlur={() => setValue(options.find((option) => option.memberId === memberId)?.label || "")} onChange={(event) => change(event.target.value)} placeholder="พิมพ์ค้นหาหรือเลือกชื่อ" ref={inputRef} value={value} /><datalist id={listId}>{options.map((option) => <option key={option.memberId} value={option.label} />)}</datalist></>;
+  function choose(option) {
+    onSelect(option?.memberId || "");
+    setValue(option?.label || "");
+    setOpen(false);
+    setActiveIndex(-1);
+  }
+
+  function keyDown(event) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((index) => Math.min(index + 1, filteredOptions.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((index) => Math.max(0, index - 1));
+    } else if (event.key === "Enter" && open && filteredOptions[activeIndex]) {
+      event.preventDefault();
+      choose(filteredOptions[activeIndex]);
+    } else if (event.key === "Escape") {
+      setOpen(false);
+      setValue(selectedLabel);
+    }
+  }
+
+  return <div className={`badminton-queue-combobox${open ? " is-open" : ""}`} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setValue(selectedLabel); } }}>
+    <input aria-autocomplete="list" aria-controls={listId} aria-expanded={open} aria-label={label} autoComplete="off" onChange={(event) => change(event.target.value)} onClick={(event) => { if (!open) { setValue(""); setOpen(true); setActiveIndex(-1); event.currentTarget.select(); } }} onFocus={(event) => { setValue(""); setOpen(true); setActiveIndex(-1); event.currentTarget.select(); }} onKeyDown={keyDown} placeholder="พิมพ์ค้นหาหรือเลือกชื่อ" ref={inputRef} role="combobox" value={value} />
+    {open ? <div className="badminton-queue-combobox-list" id={listId} role="listbox"><button className="badminton-queue-combobox-option is-clear" onPointerDown={(event) => { event.preventDefault(); choose(null); }} role="option" type="button">ว่าง / ล้างชื่อ</button>{filteredOptions.map((option, index) => <button aria-selected={option.memberId === memberId} className={`badminton-queue-combobox-option${index === activeIndex ? " is-active" : ""}`} key={option.memberId} onPointerDown={(event) => { event.preventDefault(); choose(option); }} role="option" type="button">{option.label}</button>)}{!filteredOptions.length ? <div className="badminton-queue-combobox-empty">ไม่พบผู้เล่น</div> : null}</div> : null}
+  </div>;
 }
 
 function TimeSelect({ label, onChange, value }) {

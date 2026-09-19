@@ -25,6 +25,12 @@ export function resolveQueuePlayerSearch(options, value) {
   return options.find((option) => option.label === normalized)?.memberId || null;
 }
 
+export function filterQueuePlayerSearchOptions(options, query) {
+  const normalizedQuery = normalizeMemberSearch(query);
+  if (!normalizedQuery) return options;
+  return options.filter((option) => normalizeMemberSearch(option.label).includes(normalizedQuery));
+}
+
 export function updateQueuePlayerSlots(slots, slotIndex, memberId) {
   const next = slots.map((slot) => ({ ...slot }));
   const otherIndex = memberId
@@ -34,3 +40,4 @@ export function updateQueuePlayerSlots(slots, slotIndex, memberId) {
   next[slotIndex].memberId = memberId;
   return next;
 }
+import { normalizeMemberSearch } from "./memberSearch.js";
