@@ -70,7 +70,10 @@ test("queue player dropdown opens without focusing a search field and remains to
   assert.match(queuePanel, /className="badminton-queue-combobox-panel"/);
   assert.doesNotMatch(queuePanel, /onPointerDown/);
   assert.doesNotMatch(styles, /\.badminton-queue-combobox-list\s*\{[^}]*position:\s*absolute/s);
+  assert.match(styles, /\.badminton-queue-combobox-panel\s*\{[^}]*position:\s*absolute/s);
+  assert.match(styles, /\.badminton-queue-combobox\.is-open\s*\{[^}]*z-index:\s*45/s);
   assert.match(styles, /\.badminton-queue-combobox-list\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(styles, /\.badminton-queue-combobox-list\s*\{[^}]*touch-action:\s*pan-y/s);
   assert.match(styles, /\.badminton-queue-combobox-list\s*\{[^}]*-webkit-overflow-scrolling:\s*touch/s);
 });
 
