@@ -1102,7 +1102,7 @@ async function handleLiveQueueRequest(payload: any) {
     else eventQuery = eventQuery.order("event_date", { ascending: false }).order("created_at", { ascending: false });
     const { data: event, error: eventError } = await eventQuery.limit(1).maybeSingle();
     if (eventError) throw eventError;
-    if (!event) return json({ error: "ตอนนี้ยังไม่มีรอบที่กำลังเล่น" }, 404);
+    if (!event) return json({ serverNow: new Date().toISOString(), event: null, courts: [], upcoming: [], waiting: [], profile: null });
 
     const [courtsResult, membersResult, signupsResult, queuePlayersResult, matchesResult] = await Promise.all([
       admin.from("event_courts").select("id, court_name, starts_at, ends_at, position").eq("event_id", event.id).order("position"),

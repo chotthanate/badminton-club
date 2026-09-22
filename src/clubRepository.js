@@ -320,6 +320,27 @@ export async function loadQueueState(eventId) {
   };
 }
 
+export async function loadParticipantState(clubId, eventId) {
+  const [membersResult, signupsResult, attendanceResult, extraItemsResult, memberExtrasResult, queueState] = await Promise.all([
+    client().from("club_members").select("id, display_name, nickname, aliases, role, active, line_user_id, payment_exempt, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level, created_at").eq("club_id", clubId).order("created_at"),
+    client().from("signups").select("*").eq("event_id", eventId).order("created_at"),
+    client().from("attendance").select("*").eq("event_id", eventId),
+    client().from("extra_item_catalog").select("*").eq("club_id", clubId).eq("active", true).order("created_at"),
+    client().from("member_extra_charges").select("*").eq("event_id", eventId).order("created_at"),
+    loadQueueState(eventId),
+  ]);
+  [membersResult, signupsResult, attendanceResult, extraItemsResult, memberExtrasResult]
+    .forEach((result) => throwIfError(result.error));
+  return {
+    members: membersResult.data || [],
+    signups: signupsResult.data || [],
+    attendance: attendanceResult.data || [],
+    extraItems: extraItemsResult.data || [],
+    memberExtras: memberExtrasResult.data || [],
+    ...queueState,
+  };
+}
+
 export async function loadStaffDashboard(clubId) {
   const [dashboardResult, operationsResult] = await Promise.all([
     client().rpc("load_staff_dashboard", { target_club_id: clubId }),
@@ -1129,7 +1150,7 @@ export async function listOutstandingPayments(clubId) {
   const memberIds = [...new Set(payments.map((row) => row.member_id))];
   const [eventsResult, membersResult] = await Promise.all([
     client().from("events").select("id, event_date, venue, status").in("id", eventIds),
-    client().from("club_members").select("id, nickname, display_name, payment_exempt").in("id", memberIds),
+    client().from("club_members").select("id, nickname, display_name, line_user_id, payment_exempt").in("id", memberIds),
   ]);
   throwIfError(eventsResult.error);
   throwIfError(membersResult.error);

@@ -2112,6 +2112,41 @@
   color: #9da59b;
 }
 
+.badminton-round-danger {
+  position: relative;
+}
+
+.badminton-round-danger > summary {
+  width: 42px;
+  min-height: 42px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  list-style: none;
+  border: 1px solid #d7dfd5;
+  border-radius: 8px;
+  background: #fff;
+  color: #526057;
+  font-weight: 900;
+}
+
+.badminton-round-danger > div {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 210px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d9e1d7;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(25, 42, 29, .18);
+}
+
+.badminton-round-danger > div button { width: 100%; display: flex; gap: 7px; }
+
 .badminton-round-switcher small {
   max-width: 360px;
   color: #637064;
@@ -4613,6 +4648,32 @@
   margin-top: 14px;
 }
 
+.badminton-outstanding-tools {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) auto auto;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.badminton-outstanding-tools select,
+.badminton-outstanding-search {
+  min-height: 44px;
+  border: 1px solid #cad6c8;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.badminton-outstanding-search { display: flex; align-items: center; gap: 7px; padding: 0 10px; }
+.badminton-outstanding-search input { min-width: 0; flex: 1; border: 0; outline: 0; }
+.badminton-copy-outstanding { grid-column: 1 / -1; }
+
+.badminton-offline-banner,
+.badminton-sync-status { margin-bottom: 10px; border-radius: 10px; }
+.badminton-offline-banner { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #fff1d6; color: #795600; }
+.badminton-sync-status { color: #687169; font-size: 11px; text-align: right; }
+.is-game-mode .badminton-header { margin-bottom: 6px; }
+.is-game-mode .badminton-round-switcher small { display: none; }
+
 .badminton-outstanding-list details {
   overflow: hidden;
   border: 1px solid #d9e1d6;
@@ -4668,6 +4729,8 @@
 }
 
 @media (max-width: 640px) {
+  .badminton-outstanding-tools { grid-template-columns: 1fr 1fr; }
+  .badminton-outstanding-search { grid-column: 1 / -1; }
   .badminton-checkpoint-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

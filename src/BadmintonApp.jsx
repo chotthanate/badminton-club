@@ -60,6 +60,7 @@ import {
   listClubEvents,
   listOutstandingPayments,
   loadDashboard,
+  loadParticipantState,
   loadQueueState,
   loadStaffDashboard,
   markOutstandingPaymentPaid,
@@ -132,6 +133,8 @@ import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "./skil
 import { authenticateBackofficeCode } from "./backofficeAuth.js";
 import { selectStaffWorkspace } from "./staffWorkspace.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
+import NetworkStatus, { useOnlineStatus } from "./NetworkStatus.jsx";
+import { buildOutstandingLineMessage, filterAndSortOutstanding, outstandingAgeInDays } from "./outstandingPayments.js";
 
 const EVENT_STATUS_LABELS = {
   draft: "เตรียมรอบ",
@@ -274,6 +277,8 @@ function AdminDashboard({ session }) {
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [previousOutstanding, setPreviousOutstanding] = useState({ count: 0, total: 0, rows: [] });
   const [adminContexts, setAdminContexts] = useState([]);
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  const online = useOnlineStatus();
   const selectedClubIdRef = useRef(null);
   const selectedEventIdRef = useRef(null);
   const refreshRequestRef = useRef(0);
@@ -337,6 +342,7 @@ function AdminDashboard({ session }) {
       selectedEventIdRef.current = isStaffContext ? nextDashboard.event?.id || null : targetEventId;
       setDashboard(nextDashboard);
       setPreviousOutstanding(nextOutstanding);
+      setLastSyncedAt(new Date());
       if (isStaffContext) setActiveTab((current) => ["round", "queue", "players"].includes(current) ? current : "queue");
     } catch (nextError) {
       if (requestId === refreshRequestRef.current) setError(nextError.message);
@@ -356,6 +362,8 @@ function AdminDashboard({ session }) {
       try {
         const nextDashboard = activeTab === "queue"
           ? await loadQueueState(eventId)
+          : activeTab === "players" && context?.role !== "staff"
+            ? await loadParticipantState(context.club_id, eventId)
           : context?.role === "staff"
             ? await loadStaffDashboard(context.club_id)
             : await loadDashboard(context.club_id, eventId);
@@ -365,6 +373,7 @@ function AdminDashboard({ session }) {
               ? { ...current.event, status: nextDashboard.queueEventStatus }
               : nextDashboard.event || current.event }
             : current);
+          setLastSyncedAt(new Date());
         }
       } catch (nextError) {
         if (requestId === refreshRequestRef.current) setError(nextError.message);
@@ -373,8 +382,16 @@ function AdminDashboard({ session }) {
     return () => window.clearInterval(timer);
   }, [dashboard?.event?.id, dashboard?.event?.status, activeTab, context?.club_id, context?.role]);
 
+  useEffect(() => {
+    if (dashboard?.event?.status === "open") setActiveTab("queue");
+  }, [dashboard?.event?.id, dashboard?.event?.status]);
+
   async function mutate(action, successMessage, options = {}) {
     if (savingRef.current) return false;
+    if (!navigator.onLine) {
+      setError("ยังไม่ได้เชื่อมต่ออินเทอร์เน็ต ข้อมูลที่กรอกยังอยู่ กรุณาเชื่อมต่อแล้วกดบันทึกอีกครั้ง");
+      return false;
+    }
     savingRef.current = true;
     setSaving(true);
     setError("");
@@ -391,6 +408,17 @@ function AdminDashboard({ session }) {
             ? { ...current, ...queueState, event: { ...current.event, status: queueState.queueEventStatus } }
             : current);
           setLoading(false);
+          setLastSyncedAt(new Date());
+        }
+      } else if (!options.selectLatest && activeTab === "players" && context?.role !== "staff" && context?.club_id && dashboard?.event?.id) {
+        const eventId = dashboard.event.id;
+        const requestId = ++refreshRequestRef.current;
+        const participantState = await loadParticipantState(context.club_id, eventId);
+        if (requestId === refreshRequestRef.current) {
+          setDashboard((current) => current?.event?.id === eventId
+            ? { ...current, ...participantState, event: { ...current.event, status: participantState.queueEventStatus } }
+            : current);
+          setLastSyncedAt(new Date());
         }
       } else if (!options.selectLatest && context?.club_id && dashboard?.event?.id) {
         const requestId = ++refreshRequestRef.current;
@@ -411,6 +439,7 @@ function AdminDashboard({ session }) {
               total: outstandingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
               rows: outstandingRows,
             });
+            setLastSyncedAt(new Date());
           }
         }
       } else {
@@ -527,7 +556,7 @@ function AdminDashboard({ session }) {
   const visibleTabs = isStaff ? ADMIN_TABS.filter((tab) => ["round", "players", "queue"].includes(tab.id)) : ADMIN_TABS;
 
   return (
-    <main className="badminton-app">
+    <main className={`badminton-app ${dashboard.event?.status === "open" ? "is-game-mode" : ""}`}>
       <section className="badminton-shell">
         <header className="badminton-header">
           <div>
@@ -558,6 +587,8 @@ function AdminDashboard({ session }) {
             </button>
           </div>
         </header>
+
+        <NetworkStatus lastSyncedAt={lastSyncedAt} online={online} />
 
         {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
         {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
@@ -719,10 +750,10 @@ function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
               </option>
             ))}
           </select>
-          <button aria-label="ลบรอบที่เลือก" disabled={!canDelete} onClick={confirmDelete} title={selectedRound?.status === "draft" ? "ลบรอบที่กำลังเตรียม" : selectedRound?.status === "closed" ? "ลบรอบที่ชำระเงินครบแล้ว" : "รอบที่เปิดลงชื่ออยู่ยังลบไม่ได้"} type="button"><Trash2 size={17} /></button>
+          <details className="badminton-round-danger"><summary aria-label="เปิดเมนูจัดการรอบ" title="จัดการรอบ">•••</summary><div><strong>การดำเนินการเพิ่มเติม</strong><button aria-label="ลบรอบที่เลือก" disabled={!canDelete} onClick={confirmDelete} title={selectedRound?.status === "draft" ? "ลบรอบที่กำลังเตรียม" : selectedRound?.status === "closed" ? "ลบรอบที่ชำระเงินครบแล้ว" : "รอบที่เปิดลงชื่ออยู่ยังลบไม่ได้"} type="button"><Trash2 size={17} /> ลบรอบนี้</button></div></details>
         </div>
       </label>
-      <small>ลบรอบที่กำลังเตรียมได้ทันที ส่วนรอบที่จบแล้วต้องเก็บเงินครบก่อน</small>
+      <small>เมนูลบรอบอยู่ในปุ่ม ••• เพื่อป้องกันการแตะผิดระหว่างใช้งาน</small>
     </section>
   );
 }
@@ -2074,6 +2105,10 @@ function PricingPanel({ event, mutate, session, settlement }) {
 
 function SettlementPanel({ context, event, mutate, previousOutstanding, session, settlement }) {
   const [copied, setCopied] = useState(false);
+  const [outstandingCopied, setOutstandingCopied] = useState(false);
+  const [outstandingQuery, setOutstandingQuery] = useState("");
+  const [outstandingSource, setOutstandingSource] = useState("all");
+  const [outstandingSort, setOutstandingSort] = useState("amount");
   const [billDraft, setBillDraft] = useState(null);
   const [paymentView, setPaymentView] = useState("current");
   const [paymentSettingsOpen, setPaymentSettingsOpen] = useState(false);
@@ -2102,11 +2137,22 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
     });
     return [...grouped.values()].sort((left, right) => left.member.nickname?.localeCompare(right.member.nickname || "", "th"));
   }, [previousOutstanding.rows]);
+  const visibleOutstandingGroups = useMemo(() => filterAndSortOutstanding(outstandingGroups, {
+    query: outstandingQuery,
+    source: outstandingSource,
+    sort: outstandingSort,
+  }), [outstandingGroups, outstandingQuery, outstandingSource, outstandingSort]);
 
   async function copySummary() {
     await navigator.clipboard.writeText(lineSummary);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  async function copyAllOutstanding() {
+    await copyTextToClipboard(buildOutstandingLineMessage(outstandingGroups, previousOutstanding.total));
+    setOutstandingCopied(true);
+    window.setTimeout(() => setOutstandingCopied(false), 1800);
   }
 
   function togglePayment(row) {
@@ -2281,13 +2327,20 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
       <section className="badminton-card badminton-settlement-card" id="settlement">
         <PaymentSubtabs />
         <div className="badminton-card-title"><WalletCards size={20} /><div><h2>คนที่ค้างจ่าย</h2><p>{outstandingGroups.length} คน · {previousOutstanding.count} รอบ</p></div><strong>{baht(previousOutstanding.total)} บาท</strong></div>
+        <div className="badminton-outstanding-tools">
+          <label className="badminton-outstanding-search"><Search size={16} /><input aria-label="ค้นหาคนค้างจ่าย" onChange={(changeEvent) => setOutstandingQuery(changeEvent.target.value)} placeholder="ค้นหาชื่อหรือชื่อ LINE" type="search" value={outstandingQuery} /></label>
+          <select aria-label="กรองประเภทผู้เล่น" onChange={(changeEvent) => setOutstandingSource(changeEvent.target.value)} value={outstandingSource}><option value="all">ทุกคน</option><option value="line">เชื่อม LINE</option><option value="walkin">Walk-in</option></select>
+          <select aria-label="เรียงยอดค้าง" onChange={(changeEvent) => setOutstandingSort(changeEvent.target.value)} value={outstandingSort}><option value="amount">ยอดมากสุด</option><option value="rounds">จำนวนรอบมากสุด</option><option value="oldest">ค้างนานสุด</option><option value="name">เรียงตามชื่อ</option></select>
+          <button className="badminton-primary badminton-copy-outstanding" disabled={!outstandingGroups.length} onClick={copyAllOutstanding} type="button"><Copy size={17} /> {outstandingCopied ? "คัดลอกแล้ว" : "คัดลอกรายชื่อและยอดค้างทั้งหมด"}</button>
+        </div>
         <div className="badminton-outstanding-list">
-          {outstandingGroups.length ? outstandingGroups.map((group) => {
+          {visibleOutstandingGroups.length ? visibleOutstandingGroups.map((group) => {
             const nickname = memberName(group.member);
             const lineName = String(group.member.display_name || "").trim();
             const lineLabel = lineName && lineName !== nickname ? `LINE: ${lineName} · ` : "";
-            return <details key={group.member.id}><summary><span><strong>{nickname}</strong><small>{lineLabel}{group.rows.length} รอบ</small></span><b>{baht(group.total)} บาท</b></summary><div>{group.rows.map((row) => <article key={row.id}><span><strong>{formatRoundOption(row.event.event_date)}</strong><small>{row.event.venue}</small></span><b>{baht(row.amount)} บาท</b><button className="badminton-primary" onClick={() => settleOutstanding(row)} type="button"><Check size={15} /> จ่ายรอบนี้แล้ว</button></article>)}</div></details>;
-          }) : <div className="badminton-empty"><Check size={20} /> ไม่มีใครค้างจ่าย</div>}
+            const age = outstandingAgeInDays(group);
+            return <details key={group.member.id}><summary><span><strong>{nickname}</strong><small>{lineLabel}{group.rows.length} รอบ · {age > 0 ? `ค้างสูงสุด ${age} วัน` : "ค้างวันนี้"}</small></span><b>{baht(group.total)} บาท</b></summary><div>{group.rows.map((row) => <article key={row.id}><span><strong>{formatRoundOption(row.event.event_date)}</strong><small>{row.event.venue}</small></span><b>{baht(row.amount)} บาท</b><button className="badminton-primary" onClick={() => settleOutstanding(row)} type="button"><Check size={15} /> จ่ายรอบนี้แล้ว</button></article>)}</div></details>;
+          }) : <div className="badminton-empty"><Check size={20} /> {outstandingGroups.length ? "ไม่พบรายชื่อตามตัวกรอง" : "ไม่มีใครค้างจ่าย"}</div>}
         </div>
       </section>
     );
