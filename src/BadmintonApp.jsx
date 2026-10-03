@@ -1554,10 +1554,10 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     if (currentRow?.paid && !currentRow.paymentExempt) {
       throw new Error("คนนี้รับเงินแล้ว หากต้องแก้เวลากลับ กรุณายกเลิกสถานะรับเงินก่อน");
     }
-    if (event.billingModel === "per_round" && leftAt) {
-      if (currentRow?.billingFinalized) {
-        throw new Error("คนนี้สรุปยอดแล้ว หากต้องแก้เวลากลับ กรุณาแก้ยอดหรือปลดล็อกก่อน");
-      }
+    if (event.billingModel === "per_round" && leftAt && currentRow?.billingFinalized) {
+      throw new Error("คนนี้สรุปยอดแล้ว หากต้องแก้เวลากลับ กรุณาแก้ยอดหรือปลดล็อกก่อน");
+    }
+    if (event.billingModel === "per_round" && leftAt && cumulativeCount !== null) {
       return snapshotPerRoundDeparture({
         eventId: event.id,
         memberId,
@@ -1595,6 +1595,30 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         requires_manual_bill_confirmation: true,
       },
     });
+  }
+
+  async function submitPendingDeparture(includeShuttlecockCount) {
+    if (!pendingDeparture) return;
+    if (includeShuttlecockCount && pendingDeparture.cumulativeCount === "") {
+      window.alert("กรุณากรอกจำนวนลูกแบดสะสม หรือเลือกลงเวลากลับอย่างเดียว");
+      return;
+    }
+    if (includeShuttlecockCount) {
+      const affectedLocked = settlement.rows.filter((entry) => entry.billingFinalized && entry.leftAt === pendingDeparture.leftAt);
+      if (affectedLocked.length && !window.confirm(`เวลา ${pendingDeparture.leftAt} มี ${affectedLocked.length} คนที่สรุปยอดแล้ว หากแก้จำนวนลูกแบด ระบบจะถอนยอดที่ยังไม่รับเงินและให้สรุปใหม่เพื่อป้องกันยอดผิด ดำเนินการต่อไหม?`)) return;
+    }
+    const saved = await mutate(() => saveDeparture({
+      memberId: pendingDeparture.memberId,
+      participantName: pendingDeparture.participantName,
+      plannedArrival: pendingDeparture.plannedArrival,
+      leftAt: pendingDeparture.leftAt,
+      cumulativeCount: includeShuttlecockCount ? pendingDeparture.cumulativeCount : null,
+    }), includeShuttlecockCount
+      ? event.billingModel === "per_round"
+        ? `บันทึก Snapshot ของ ${pendingDeparture.participantName} แล้ว · ยังไม่สรุปยอด`
+        : `บันทึกเวลากลับของ ${pendingDeparture.participantName} แล้ว · ยังไม่สรุปยอด`
+      : `บันทึกเฉพาะเวลากลับของ ${pendingDeparture.participantName} แล้ว · ลูกแบดจะหารจากยอดรวมตอนจบรอบ`);
+    if (saved) setPendingDeparture(null);
   }
 
   return (
@@ -1879,21 +1903,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       {pendingCheckIn ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ยืนยันเวลาเช็กชื่อ" aria-modal="true" className="badminton-custom-charge-modal badminton-check-in-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เช็กชื่อผู้เล่น</p><h2>{pendingCheckIn.participantName} มาถึงแล้ว</h2></div><button aria-label="ปิด" onClick={() => setPendingCheckIn(null)} type="button"><X size={19} /></button></div><p>ลงชื่อไว้เวลา <strong>{pendingCheckIn.plannedArrival} น.</strong> ตอนนี้ประมาณ <strong>{pendingCheckIn.suggestedArrival} น.</strong></p><div className="badminton-check-in-actions"><button className="badminton-secondary" onClick={() => completeCheckIn(pendingCheckIn, false)} type="button">ใช้เวลาเดิม {pendingCheckIn.plannedArrival}</button><button className="badminton-primary" onClick={() => completeCheckIn(pendingCheckIn, true)} type="button">ปรับเป็น {pendingCheckIn.suggestedArrival}</button></div></div></div> : null}
       {pendingDeparture ? <div className="badminton-modal-backdrop" role="presentation"><form aria-label="บันทึกเวลากลับและจำนวนลูกแบด" className="badminton-custom-charge-modal" onSubmit={async (submitEvent) => {
         submitEvent.preventDefault();
-        const affectedLocked = settlement.rows.filter((entry) => entry.billingFinalized && entry.leftAt === pendingDeparture.leftAt);
-        if (affectedLocked.length && !window.confirm(`เวลา ${pendingDeparture.leftAt} มี ${affectedLocked.length} คนที่สรุปยอดแล้ว หากแก้จำนวนลูกแบด ระบบจะถอนยอดที่ยังไม่รับเงินและให้สรุปใหม่เพื่อป้องกันยอดผิด ดำเนินการต่อไหม?`)) return;
-        const saved = await mutate(async () => {
-          await saveDeparture({
-            memberId: pendingDeparture.memberId,
-            participantName: pendingDeparture.participantName,
-            plannedArrival: pendingDeparture.plannedArrival,
-            leftAt: pendingDeparture.leftAt,
-            cumulativeCount: pendingDeparture.cumulativeCount,
-          });
-        }, event.billingModel === "per_round"
-          ? `บันทึก Snapshot ของ ${pendingDeparture.participantName} แล้ว · ยังไม่สรุปยอด`
-          : `บันทึกเวลากลับของ ${pendingDeparture.participantName} แล้ว · ยังไม่สรุปยอด`);
-        if (saved) setPendingDeparture(null);
-      }}><div className="badminton-modal-title"><div><p className="badminton-kicker">ผู้เล่นกลับก่อน</p><h2>{pendingDeparture.participantName} · {pendingDeparture.leftAt} น.</h2></div><button aria-label="ปิด" onClick={() => setPendingDeparture(null)} type="button"><X size={19} /></button></div><p>ตอนเวลานี้ใช้ลูกแบดสะสมไปทั้งหมดกี่ลูก?</p><label>จำนวนลูกแบดสะสม<input autoFocus min="0" onChange={(changeEvent) => setPendingDeparture({ ...pendingDeparture, cumulativeCount: changeEvent.target.value })} placeholder="กรอกจำนวนที่ใช้จริง" required type="number" value={pendingDeparture.cumulativeCount} /></label>{event.billingModel === "per_round" ? <small className="badminton-settings-help">ระบบจะเก็บต้นทุนและจำนวนเกมของช่วงนี้ไว้เป็น Snapshot แต่จะยังไม่ส่งยอดให้ผู้เล่นจนกว่าแอดมินจะสรุปยอด</small> : <small className="badminton-settings-help">ระบบจะบันทึกเวลากลับและจำนวนลูกแบดไว้คำนวณ ยอดยังไม่ถูกส่งให้ผู้เล่นจนกว่าแอดมินจะสรุปยอด</small>}<button className="badminton-primary" type="submit"><Check size={17} /> {event.billingModel === "per_round" ? "บันทึก Snapshot" : "บันทึกเวลากลับ"}</button></form></div> : null}
+        await submitPendingDeparture(true);
+      }}><div className="badminton-modal-title"><div><p className="badminton-kicker">ผู้เล่นกลับก่อน</p><h2>{pendingDeparture.participantName} · {pendingDeparture.leftAt} น.</h2></div><button aria-label="ปิด" onClick={() => setPendingDeparture(null)} type="button"><X size={19} /></button></div><p>ตอนเวลานี้ใช้ลูกแบดสะสมไปทั้งหมดกี่ลูก?</p><label>จำนวนลูกแบดสะสม<input autoFocus min="0" onChange={(changeEvent) => setPendingDeparture({ ...pendingDeparture, cumulativeCount: changeEvent.target.value })} placeholder="กรอกจำนวนที่ใช้จริง" required type="number" value={pendingDeparture.cumulativeCount} /></label>{event.billingModel === "per_round" ? <small className="badminton-settings-help">ถ้าบันทึก Snapshot ระบบจะเก็บต้นทุนและจำนวนเกมของช่วงนี้ไว้ หากไม่ต้องการแยกลูกตามเวลา ให้เลือกลงเวลากลับอย่างเดียวแล้วหารลูกทั้งหมดตอนจบรอบ</small> : <small className="badminton-settings-help">เลือกลงเวลากลับอย่างเดียวได้ หากต้องการใช้จำนวนลูกแบดรวมตอนจบรอบ</small>}<div className="badminton-check-in-actions"><button className="badminton-secondary" onClick={() => submitPendingDeparture(false)} type="button">ลงเวลากลับอย่างเดียว</button><button className="badminton-primary" type="submit"><Check size={17} /> {event.billingModel === "per_round" ? "บันทึก Snapshot พร้อมลูก" : "บันทึกพร้อมจำนวนลูก"}</button></div></form></div> : null}
     </section>
   );
 }

@@ -7,6 +7,7 @@ const migrations = [
   "supabase/migrations/20260905145535_finalize_queue_state_before_event_close.sql",
   "supabase/migrations/20260907091643_queue_four_slots_fairness_and_undo.sql",
   "supabase/migrations/20260918151337_fallback_queue_drafts.sql",
+  "supabase/migrations/20261003203503_remove_upcoming_queue_limit.sql",
 ];
 
 test("starting a queue only considers playing matches from the current event", () => {
@@ -36,12 +37,13 @@ test("finishing a game refreshes only queue state before the next full dashboard
   assert.match(queuePanel, /finishQueueMatch\(match\.id\)[\s\S]{0,160}refreshQueueOnly:\s*true/);
 });
 
-test("queue migration caps upcoming queues at four and batches automatic drafts transactionally", () => {
-  const sql = readFileSync(migrations[2], "utf8");
+test("latest queue migration removes the arbitrary queue cap and keeps batch creation transactional", () => {
+  const sql = readFileSync(migrations[4], "utf8");
 
-  assert.match(sql, /status in \('draft', 'approved'\)\) >= 4/i);
   assert.match(sql, /create or replace function public\.create_queue_drafts_batch/i);
   assert.match(sql, /perform pg_advisory_xact_lock\(hashtext\(target_event_id::text\)\)/i);
+  assert.doesNotMatch(sql, /สูงสุด 4 คิว|requested_count\s*>\s*4|\)\s*>=\s*4/i);
+  assert.match(sql, /revoke all on function public\.create_queue_drafts_batch\(uuid, jsonb\) from public, anon/i);
 });
 
 test("cross-queue edits swap players and an accidental start can return to queue one", () => {
@@ -53,10 +55,11 @@ test("cross-queue edits swap players and an accidental start can return to queue
   assert.doesNotMatch(sql, /return_playing_queue_to_head[\s\S]*games_played\s*=\s*games_played\s*\+/i);
 });
 
-test("queue screen keeps four slots visible and offers one-or-all automatic creation", () => {
+test("queue screen keeps four player slots but allows every available future queue", () => {
   const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
 
-  assert.match(queuePanel, /MAX_UPCOMING_QUEUES\s*=\s*4/);
+  assert.doesNotMatch(queuePanel, /MAX_UPCOMING_QUEUES|สูงสุด 4 คิว/);
+  assert.match(queuePanel, /Math\.floor\(availableWaiting\.length \/ 4\)/);
   assert.match(queuePanel, /สร้าง 1 คิว/);
   assert.match(queuePanel, /สร้างทั้งหมด/);
   assert.match(queuePanel, /returnPlayingQueueToHead/);
