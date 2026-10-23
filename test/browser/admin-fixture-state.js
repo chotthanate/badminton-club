@@ -1,6 +1,7 @@
 // Used only by admin-test-server.mjs. No network or production identifiers.
 const clubId = "local-admin-fixture-club";
 const eventId = "local-admin-fixture-event";
+const sandbox = new URLSearchParams(window.location.search).has("sandbox");
 const members = Array.from({ length: 18 }, (_, index) => ({ id: `local-member-${index + 1}`, club_id: clubId, role: "member", active: true, nickname: `ทดสอบ ${String(index + 1).padStart(2, "0")}`, display_name: `Player ${index + 1}`, skill_level: index === 0 ? "Rookie-" : index % 2 ? "N" : "BG", playable_skill_levels: ["BG", "N"], created_at: `2026-01-01T00:${String(index).padStart(2, "0")}:00Z` }));
 const event = { id: eventId, club_id: clubId, title: "รอบทดสอบในเครื่อง", venue: "Local court", event_date: "2000-01-01", starts_at: "18:00:00", ends_at: "22:00:00", status: "open", billing_model: "legacy", court_hourly_rate: 200, shuttlecock_count: 4, shuttlecock_unit_price: 95 };
 let data = {
@@ -11,7 +12,8 @@ let data = {
   courts: [{ id: "local-court", event_id: eventId, court_name: "คอร์ททดสอบ", starts_at: "18:00:00", ends_at: "22:00:00" }],
   expenses: [], payments: [], auditLogs: [], memberExtras: [], queuePlayers: [], queueMatches: [], queueMatchPlayers: [], paymentSlips: [], paymentSlipPayments: [], extraItems: [{ id: "local-water", name: "น้ำเปล่า", price: 10 }], venues: [], duplicateDismissals: [], shuttlecockCheckpoints: [], perRoundSnapshots: [], perRoundSnapshotAllocations: [], perRoundSnapshotMatches: [],
 };
-const contexts = [{ club_id: clubId, role: "owner", clubs: { id: clubId, name: "สโมสรทดสอบเฉพาะในเครื่อง", is_test: false } }];
+if (sandbox) Object.assign(event, { event_date: "2099-01-01", status: "draft", starts_at: "21:00:00" });
+const contexts = [{ club_id: clubId, role: "owner", clubs: { id: clubId, name: "สโมสรทดสอบเฉพาะในเครื่อง", is_test: sandbox } }];
 export const fixture = { inFlight: 0, maxParallelWrites: 0, writes: [], failures: [], reads: [], failWrite: false, failRead: false, slowFullRead: false };
 let version = 0;
 const listeners = new Set();
@@ -46,7 +48,23 @@ export async function fixtureCall(name, args) {
     await pause(650);
     if (fixture.failWrite) { fixture.failWrite = false; fixture.failures.push(`${name}:simulated write failure`); changed(); throw new Error("จำลองบันทึกล้มเหลว"); }
     const input = args[0];
-    if (name === "updateAttendance") {
+    let result = input;
+    if (name === "prepareTestRound") {
+      if (!sandbox) throw new Error("Not a sandbox fixture");
+      event.status = "open";
+      result = eventId;
+    } else if (name === "addRandomTestPlayers") {
+      if (!sandbox || input.eventId !== eventId) throw new Error("Sandbox event mismatch");
+      const offset = data.members.length;
+      for (let index = 0; index < input.count; index += 1) {
+        const member = { ...members[0], id: `local-random-${offset + index}`, nickname: `สุ่ม ${offset + index}`, skill_level: "N" };
+        data.members.push(member);
+        data.signups.push({ id: `signup-${member.id}`, event_id: eventId, member_id: member.id, status: "coming", arrival_time: "21:00:00", skill_level_snapshot: "N" });
+        data.attendance.push({ id: `attendance-${member.id}`, event_id: eventId, member_id: member.id, arrived: true, arrived_at: "06:00:00", left_at: null });
+        data.queuePlayers.push({ id: `queue-${member.id}`, event_id: eventId, member_id: member.id, status: "waiting", available_since: new Date().toISOString(), games_played: 0 });
+      }
+      result = input.count;
+    } else if (name === "updateAttendance") {
       const existing = data.attendance.find((row) => row.member_id === input.memberId);
       if (existing) Object.assign(existing, input.patch);
       else data.attendance.push({ id: `attendance-${input.memberId}`, event_id: eventId, member_id: input.memberId, ...input.patch });
@@ -64,7 +82,7 @@ export async function fixtureCall(name, args) {
       data.payments.push({ id: `payment-${input.memberId}`, event_id: eventId, member_id: input.memberId, amount: input.billedAmount, calculated_amount: input.calculatedAmount, payment_status: "awaiting", billed_at: new Date().toISOString(), admin_confirmed_at: new Date().toISOString(), shared_amount: input.sharedAmount, extras_amount: input.extrasAmount });
     } else throw new Error(`Fixture intentionally does not implement ${name}`);
     fixture.writes.push({ name, args: copy(args) });
-    return copy(input);
+    return copy(result);
   } finally { fixture.inFlight -= 1; changed(); }
 }
 

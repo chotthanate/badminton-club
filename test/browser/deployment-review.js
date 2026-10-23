@@ -1,13 +1,17 @@
-import migration from "../../supabase/migrations/20261023215740_reliable_queue_and_member_profiles.sql?raw";
+import migration from "../../supabase/migrations/20261023231637_test_round_and_queue_actions.sql?raw";
+import mergeMigration from "../../supabase/migrations/20261023232127_safe_member_merge.sql?raw";
 import lineBot from "../../supabase/functions/line-bot/index.ts?raw";
-import paymentSubmission from "../../supabase/functions/_shared/paymentSubmission.js?raw";
 import liffProfile from "../../supabase/functions/_shared/liffProfile.js?raw";
+import liveQueueTime from "../../supabase/functions/_shared/liveQueueTime.js?raw";
+import liffClubContext from "../../supabase/functions/_shared/liffClubContext.js?raw";
 
 const files = [
-  ["migration", "20261023215740_reliable_queue_and_member_profiles.sql", migration],
+  ["migration", "20261023231637_test_round_and_queue_actions.sql", migration],
+  ["merge-migration", "20261023232127_safe_member_merge.sql", mergeMigration],
   ["line-bot", "line-bot/index.ts", lineBot],
-  ["payment-submission", "_shared/paymentSubmission.js", paymentSubmission],
   ["liff-profile", "_shared/liffProfile.js", liffProfile],
+  ["live-queue-time", "_shared/liveQueueTime.js", liveQueueTime],
+  ["liff-club-context", "_shared/liffClubContext.js", liffClubContext],
 ];
 const container = document.getElementById("source-files");
 for (const [id, name, source] of files) {

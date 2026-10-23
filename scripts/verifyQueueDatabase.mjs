@@ -261,5 +261,234 @@ await check("public/anon cannot call new privileged RPCs", async () => {
     assert.equal(await value("select has_function_privilege('authenticated',$1,'execute') as value", [`public.${signature}`]), true);
   }
 });
+await check("test preparation preserves open queues and booking times without resetting history", async () => {
+  const match = await createManual(ids.slice(0,4));
+  const before = await value("select to_jsonb(e) as value from public.events e where id=$1",[event]);
+  assert.equal(await value("select public.prepare_test_round($1) as value",[club]),event);
+  assert.equal(await value("select public.prepare_test_round($1) as value",[club]),event);
+  const after = await value("select to_jsonb(e) as value from public.events e where id=$1",[event]);
+  assert.equal(after.event_date,before.event_date); assert.equal(after.starts_at,before.starts_at); assert.equal(after.ends_at,before.ends_at);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[match]),'draft');
+  assert.equal(await value("select count(*)::int as value from public.event_courts where event_id=$1",[event]),2);
+  assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1",[match]),4);
+  assert.equal(await value("select status as value from public.events where id=$1",[closedEvent]),'closed');
+});
+await check("test preparation opens a draft and creates a new round only after the previous one closes", async () => {
+  await db.query("update public.events set status='draft' where id=$1",[event]);
+  assert.equal(await value("select public.prepare_test_round($1) as value",[club]),event);
+  assert.equal(await value("select status as value from public.events where id=$1",[event]),'open');
+  await db.query("update public.events set status='closed' where id=$1",[event]);
+  const next = await value("select public.prepare_test_round($1) as value",[club]);
+  assert.notEqual(next,event); assert.notEqual(next,closedEvent);
+  assert.equal(await value("select status as value from public.events where id=$1",[next]),'open');
+  assert.equal(await value("select count(*)::int as value from public.event_courts where event_id=$1",[next]),2);
+  assert.equal(await value("select count(*)::int as value from public.events where club_id=$1",[club]),3);
+});
+await check("random sample creation commits complete profiles, signups and check-ins atomically", async () => {
+  const profiles=Array.from({length:40},()=>({skill_level:'BG',playable_skill_levels:['Rookie','BG','N']}));
+  assert.equal(await value("select public.add_random_test_players($1,$2,$3::jsonb) as value",[club,event,JSON.stringify(profiles)]),40);
+  assert.equal(await value("select count(*)::int as value from public.signups where event_id=$1",[event]),72);
+  assert.equal(await value("select count(*)::int as value from public.attendance where event_id=$1 and arrived and left_at is null",[event]),72);
+  assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and status='waiting'",[event]),72);
+  const memberCount=await value("select count(*)::int as value from public.club_members where club_id=$1",[club]);
+  await db.exec("savepoint invalid_random");
+  await assert.rejects(value("select public.add_random_test_players($1,$2,$3::jsonb) as value",[club,event,JSON.stringify([profiles[0],{skill_level:'bogus',playable_skill_levels:[]}])]),/ระดับมือ/);
+  await db.exec("rollback to invalid_random");
+  assert.equal(await value("select count(*)::int as value from public.club_members where club_id=$1",[club]),memberCount);
+});
+await check("manual save approves in one transaction and approval failure leaves no queue", async () => {
+  const match=await value(`select public.create_manual_queue('${event}',${literalIds(ids.slice(0,4))},${literalIds(ids.slice(0,2))}) as value`);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[match]),'approved');
+  assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and status='reserved'",[event]),4);
+  await db.exec(`create function pg_temp.reject_approve() returns trigger language plpgsql as $$ begin if new.status='approved' then raise exception 'test approve rejected'; end if; return new; end; $$;
+    create trigger test_reject_approve before update of status on public.queue_matches for each row execute function pg_temp.reject_approve();`);
+  await db.exec("savepoint rejected_manual");
+  await assert.rejects(value(`select public.create_manual_queue('${event}',${literalIds(ids.slice(4,8))},${literalIds(ids.slice(4,6))}) as value`),/test approve rejected/);
+  await db.exec("rollback to rejected_manual");
+  assert.equal(await value("select count(*)::int as value from public.queue_matches where event_id=$1",[event]),1);
+});
+await check("automatic single and full-batch creation return ready queues without changing FIFO or active games", async () => {
+  const active=await createManual(ids.slice(28,32)); await makePlaying(active,ids.slice(28,32));
+  const first=await value(`select public.create_automatic_queue('${event}',${literalIds(ids.slice(0,4))},${literalIds(ids.slice(0,2))}) as value`);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[first]),'approved');
+  const lineups=[4,8,12,16,20,24].map((i)=>({member_ids:ids.slice(i,i+4),team_a_member_ids:ids.slice(i,i+2),fallback:false}));
+  const generated=await value("select public.create_automatic_queues($1,$2::jsonb) as value",[event,JSON.stringify(lineups)]);
+  assert.equal(generated.length,6);
+  assert.equal(await value("select count(*)::int as value from public.queue_matches where event_id=$1 and status='approved'",[event]),7);
+  assert.equal(await value("select count(*)::int as value from public.queue_matches where event_id=$1 and status='draft'",[event]),0);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[active]),'playing');
+  assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and status='playing'",[event]),4);
+});
+await check("automatic batch approval failure rolls back every newly created queue and reservation", async () => {
+  await db.exec(`create function pg_temp.reject_second_auto() returns trigger language plpgsql as $$ begin if new.status='approved' and new.sequence=2 then raise exception 'test second approval rejected'; end if; return new; end; $$;
+    create trigger test_reject_second_auto before update of status on public.queue_matches for each row execute function pg_temp.reject_second_auto();`);
+  const lineups=[0,4].map((i)=>({member_ids:ids.slice(i,i+4),team_a_member_ids:ids.slice(i,i+2),fallback:false}));
+  await db.exec("savepoint rejected_auto_batch");
+  await assert.rejects(value("select public.create_automatic_queues($1,$2::jsonb) as value",[event,JSON.stringify(lineups)]),/test second approval rejected/);
+  await db.exec("rollback to rejected_auto_batch");
+  assert.equal(await value("select count(*)::int as value from public.queue_matches where event_id=$1",[event]),0);
+  assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and status='reserved'",[event]),0);
+});
+await check("automatic batch rejects repeated players without leaving partial queues", async () => {
+  const lineup={member_ids:ids.slice(0,4),team_a_member_ids:ids.slice(0,2),fallback:false};
+  await db.exec("savepoint duplicate_auto_batch");
+  await assert.rejects(value("select public.create_automatic_queues($1,$2::jsonb) as value",[event,JSON.stringify([lineup,lineup])]),/เปลี่ยนแล้ว/);
+  await db.exec("rollback to duplicate_auto_batch");
+  assert.equal(await value("select count(*)::int as value from public.queue_matches where event_id=$1",[event]),0);
+});
+await check("automatic higher-level fallback is approved immediately while keeping the oldest player", async () => {
+  await db.query("update public.signups set skill_level_snapshot='Rookie-' where event_id=$1",[event]);
+  for(const [i,level] of [[0,'N'],[1,'BG'],[2,'S'],[3,'P']]) await db.query("update public.signups set skill_level_snapshot=$1 where event_id=$2 and member_id=$3",[level,event,ids[i]]);
+  const match=await value(`select public.create_automatic_queue('${event}',${literalIds(ids.slice(0,4))},${literalIds(ids.slice(0,2))}) as value`);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[match]),'approved');
+  assert.equal(await value("select manual_override as value from public.queue_matches where id=$1",[match]),true);
+  assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1 and member_id=$2",[match,ids[0]]),1);
+});
+await check("bulk cancellation preserves playing games and releases only selected upcoming queues", async () => {
+  const a=await createManual(ids.slice(0,4)); const b=await createManual(ids.slice(4,8)); const c=await createManual(ids.slice(8,12));
+  const unselected=await createManual(ids.slice(12,16));
+  await value("select public.approve_queue_draft($1) as value",[a]); await makePlaying(a,ids.slice(0,4));
+  await value("select public.approve_queue_draft($1) as value",[b]);
+  const request=[{match_id:b,revision:await revision(b)},{match_id:c,revision:await revision(c)}];
+  assert.equal(await value("select public.cancel_upcoming_queues($1,$2::jsonb) as value",[event,JSON.stringify(request)]),2);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[a]),'playing');
+  assert.equal(await value("select queue_position as value from public.queue_matches where id=$1",[unselected]),1);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[unselected]),'draft');
+  assert.equal(await value("select count(*)::int as value from public.queue_matches where status='cancelled'",[]),2);
+  assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and member_id=any($2::uuid[]) and status='waiting'",[event,ids.slice(4,12)]),8);
+});
+await check("bulk cancellation rejects stale revisions or playing entries and rolls back all", async () => {
+  const a=await createManual(ids.slice(0,4)); const b=await createManual(ids.slice(4,8));
+  const request=[{match_id:a,revision:await revision(a)},{match_id:b,revision:0}];
+  await db.exec("savepoint stale_cancel");
+  await assert.rejects(value("select public.cancel_upcoming_queues($1,$2::jsonb) as value",[event,JSON.stringify(request)]),/เครื่องอื่น/);
+  await db.exec("rollback to stale_cancel");
+  assert.equal(await value("select count(*)::int as value from public.queue_matches where status='draft'"),2);
+  await makePlaying(b,ids.slice(4,8)); request[1].revision=await revision(b);
+  await db.exec("savepoint playing_cancel");
+  await assert.rejects(value("select public.cancel_upcoming_queues($1,$2::jsonb) as value",[event,JSON.stringify(request)]),/เครื่องอื่น/);
+  await db.exec("rollback to playing_cancel");
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[a]),'draft');
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[b]),'playing');
+});
+await check("test games start before booking or on old dates and finish at actual time", async () => {
+  await db.query("update public.events set event_date=(now() at time zone 'Asia/Bangkok')::date+10 where id=$1",[event]);
+  const court=await value("insert into public.event_courts(club_id,event_id,court_name,starts_at,ends_at) values($1,$2,'Future court','21:00','22:00') returning id as value",[club,event]);
+  const match=await value(`select public.create_manual_queue('${event}',${literalIds(ids.slice(0,4))},${literalIds(ids.slice(0,2))}) as value`);
+  assert.equal(await value("select public.start_next_queue_on_court($1,$2) as value",[event,court]),match);
+  await db.query("update public.events set event_date='2000-01-01' where id=$1",[event]);
+  await db.query("update public.queue_matches set started_at=now()-interval '15 minutes' where id=$1",[match]);
+  assert.equal(await value("select public.finish_queue_match($1) as value",[match]),15);
+  assert.equal(await value("select ended_at=now() as value from public.queue_matches where id=$1",[match]),true);
+  const next=await value(`select public.create_manual_queue('${event}',${literalIds(ids.slice(4,8))},${literalIds(ids.slice(4,6))}) as value`);
+  assert.equal(await value("select public.start_next_queue_on_court($1,$2) as value",[event,court]),next);
+});
+await check("test mode never auto-finishes a still playing member because an old booking expired", async () => {
+  await db.query("update public.events set event_date='2000-01-01' where id=$1",[event]);
+  const courts=(await db.query("insert into public.event_courts(club_id,event_id,court_name,starts_at,ends_at) values($1,$2,'Old 1','21:00','22:00'),($1,$2,'Old 2','21:00','22:00') returning id",[club,event])).rows;
+  const match=await value(`select public.create_manual_queue('${event}',${literalIds(ids.slice(0,4))},${literalIds(ids.slice(0,2))}) as value`);
+  await value("select public.start_next_queue_on_court($1,$2) as value",[event,courts[0].id]);
+  await value(`select public.create_manual_queue('${event}',${literalIds(ids.slice(0,4))},${literalIds(ids.slice(0,2))}) as value`);
+  await db.exec("savepoint still_playing");
+  await assert.rejects(value("select public.start_next_queue_on_court($1,$2) as value",[event,courts[1].id]),/ยังเล่นอยู่/);
+  await db.exec("rollback to still_playing");
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[match]),'playing');
+});
+await check("real clubs cannot use sandbox RPCs or bypass future and expired court times", async () => {
+  await db.query("update public.clubs set is_test=false where id=$1",[club]);
+  for(const sql of ["select public.prepare_test_round($1) as value","select public.add_random_test_players($1,'"+event+"','[]'::jsonb) as value"]){
+    await db.exec("savepoint real_denied"); await assert.rejects(value(sql,[club]),/โหมดทดลอง/); await db.exec("rollback to real_denied");
+  }
+  const court=await value("insert into public.event_courts(club_id,event_id,court_name,starts_at,ends_at) values($1,$2,'Real court','21:00','22:00') returning id as value",[club,event]);
+  await value(`select public.create_manual_queue('${event}',${literalIds(ids.slice(0,4))},${literalIds(ids.slice(0,2))}) as value`);
+  for(const [date,error] of [["2099-01-01",/ยังไม่ถึงเวลา/],["2000-01-01",/หมดเวลา/]]){
+    await db.query("update public.events set event_date=$1 where id=$2",[date,event]);
+    await db.exec("savepoint clock_denied"); await assert.rejects(value("select public.start_next_queue_on_court($1,$2) as value",[event,court]),error); await db.exec("rollback to clock_denied");
+  }
+});
+await check("sandbox and bulk-action RPC grants exclude anonymous callers", async () => {
+  for(const signature of ['prepare_test_round(uuid)','add_random_test_players(uuid,uuid,jsonb)','create_manual_queue(uuid,uuid[],uuid[])','create_automatic_queue(uuid,uuid[],uuid[])','create_automatic_queues(uuid,jsonb)','cancel_upcoming_queues(uuid,jsonb)']){
+    assert.equal(await value("select has_function_privilege('anon',$1,'execute') as value",[`public.${signature}`]),false);
+    assert.equal(await value("select has_function_privilege('authenticated',$1,'execute') as value",[`public.${signature}`]),true);
+  }
+});
+const createApproved = (players) => value(`select public.create_manual_queue('${event}',${literalIds(players)},${literalIds(players.slice(0,2))}) as value`);
+const moveQueue = (match, direction) => value("select public.move_upcoming_queue($1,$2) as value",[match,direction]);
+const upcomingOrder = () => db.query("select id,queue_position,status,revision from public.queue_matches where event_id=$1 and status in ('draft','approved') order by queue_position",[event]).then((result)=>result.rows);
+await check("reorder swaps two ready queues up and down without changing either lineup", async () => {
+  const a=await createApproved(ids.slice(0,4)); const b=await createApproved(ids.slice(4,8));
+  const rosterBefore=(await db.query("select match_id,member_id,team,position,skill_level_snapshot from public.queue_match_players where event_id=$1 order by match_id,team,position",[event])).rows;
+  await moveQueue(b,-1);
+  assert.deepEqual((await upcomingOrder()).map((row)=>row.id),[b,a]);
+  await moveQueue(b,1);
+  assert.deepEqual((await upcomingOrder()).map((row)=>row.id),[a,b]);
+  assert.deepEqual((await upcomingOrder()).map((row)=>row.queue_position),[1,2]);
+  assert.deepEqual((await db.query("select match_id,member_id,team,position,skill_level_snapshot from public.queue_match_players where event_id=$1 order by match_id,team,position",[event])).rows,rosterBefore);
+  assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and status='reserved'",[event]),8);
+  assert.equal(await value("select count(*)::int as value from public.audit_logs where event_id=$1 and action='เลื่อนลำดับคิว'",[event]),2);
+});
+await check("reorder moves the middle of three ready queues one place and never touches a playing court", async () => {
+  const playing=await createApproved(ids.slice(12,16)); await makePlaying(playing,ids.slice(12,16));
+  const a=await createApproved(ids.slice(0,4)); const b=await createApproved(ids.slice(4,8)); const c=await createApproved(ids.slice(8,12));
+  const activeBefore=await value("select to_jsonb(m) as value from public.queue_matches m where id=$1",[playing]);
+  const activePlayersBefore=(await db.query("select * from public.event_queue_players where event_id=$1 and member_id=any($2::uuid[]) order by member_id",[event,ids.slice(12,16)])).rows;
+  await moveQueue(b,-1); assert.deepEqual((await upcomingOrder()).map((row)=>row.id),[b,a,c]);
+  await moveQueue(b,1); assert.deepEqual((await upcomingOrder()).map((row)=>row.id),[a,b,c]);
+  await moveQueue(b,1); assert.deepEqual((await upcomingOrder()).map((row)=>row.id),[a,c,b]);
+  await moveQueue(c,-1); assert.deepEqual((await upcomingOrder()).map((row)=>row.id),[c,a,b]);
+  assert.deepEqual((await upcomingOrder()).map((row)=>row.queue_position),[1,2,3]);
+  assert.deepEqual(await value("select to_jsonb(m) as value from public.queue_matches m where id=$1",[playing]),activeBefore);
+  assert.deepEqual((await db.query("select * from public.event_queue_players where event_id=$1 and member_id=any($2::uuid[]) order by member_id",[event,ids.slice(12,16)])).rows,activePlayersBefore);
+});
+await check("reorder at first-up or last-down boundaries is an unchanged no-op", async () => {
+  const a=await createApproved(ids.slice(0,4)); const b=await createApproved(ids.slice(4,8));
+  const before=await upcomingOrder();
+  await moveQueue(a,-1); await moveQueue(b,1);
+  assert.deepEqual(await upcomingOrder(),before);
+  assert.equal(await value("select count(*)::int as value from public.audit_logs where event_id=$1 and action='เลื่อนลำดับคิว'",[event]),0);
+});
+await check("a legacy draft between ready queues blocks crossing it; direct RPC stays unchanged", async () => {
+  const a=await createApproved(ids.slice(0,4)); const draft=await createManual(ids.slice(4,8)); const b=await createApproved(ids.slice(8,12));
+  const before=await upcomingOrder();
+  await moveQueue(a,1); await moveQueue(b,-1);
+  assert.deepEqual(await upcomingOrder(),before);
+  await db.exec("savepoint move_draft"); await assert.rejects(moveQueue(draft,-1),/อนุมัติแล้ว/); await db.exec("rollback to move_draft");
+  assert.deepEqual(await upcomingOrder(),before);
+  assert.equal(await value("select count(*)::int as value from public.audit_logs where event_id=$1 and action='เลื่อนลำดับคิว'",[event]),0);
+});
+await check("reorder rejects playing targets, invalid direction and closed rounds without mutation", async () => {
+  const playing=await createApproved(ids.slice(12,16)); await makePlaying(playing,ids.slice(12,16));
+  const a=await createApproved(ids.slice(0,4)); const b=await createApproved(ids.slice(4,8));
+  const before=await upcomingOrder();
+  await db.exec("savepoint move_playing"); await assert.rejects(moveQueue(playing,-1),/อนุมัติแล้ว/); await db.exec("rollback to move_playing");
+  await db.exec("savepoint invalid_direction"); await assert.rejects(moveQueue(a,0),/ทิศทาง/); await db.exec("rollback to invalid_direction");
+  assert.deepEqual(await upcomingOrder(),before);
+  await db.query("update public.events set status='closed' where id=$1",[event]);
+  const closedBefore=(await db.query("select * from public.queue_matches where event_id=$1 order by id",[event])).rows;
+  await db.exec("savepoint move_closed"); await assert.rejects(moveQueue(b,-1),/ปิดแล้ว/); await db.exec("rollback to move_closed");
+  assert.deepEqual((await db.query("select * from public.queue_matches where event_id=$1 order by id",[event])).rows,closedBefore);
+});
+await check("reorder permits authorized staff but rejects outsiders and anonymous RPC access", async () => {
+  const a=await createApproved(ids.slice(0,4)); const b=await createApproved(ids.slice(4,8));
+  const before=await upcomingOrder();
+  await db.query("select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-999999999999',true)");
+  await db.exec("savepoint move_outsider"); await assert.rejects(moveQueue(b,-1),/สิทธิ์/); await db.exec("rollback to move_outsider");
+  assert.deepEqual(await upcomingOrder(),before);
+  const staff='10000000-0000-0000-0000-000000000003';
+  await db.query("insert into auth.users(id) values($1)",[staff]);
+  await db.query("insert into public.club_members(club_id,profile_id,display_name,role) values($1,$2,'Reorder test staff','staff')",[club,staff]);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[staff]);
+  await moveQueue(b,-1); assert.deepEqual((await upcomingOrder()).map((row)=>row.id),[b,a]);
+  assert.equal(await value("select has_function_privilege('anon','public.move_upcoming_queue(uuid,integer)','execute') as value"),false);
+  assert.equal(await value("select has_function_privilege('authenticated','public.queue_move_legacy(uuid,integer)','execute') as value"),false);
+});
+await check("reorder audit failure rolls both swapped positions and revisions back", async () => {
+  const a=await createApproved(ids.slice(0,4)); const b=await createApproved(ids.slice(4,8));
+  const before=await upcomingOrder();
+  await db.exec(`create function pg_temp.reject_reorder_audit() returns trigger language plpgsql as $$ begin if new.action='เลื่อนลำดับคิว' then raise exception 'test reorder audit rejected'; end if; return new; end; $$;
+    create trigger test_reject_reorder_audit before insert on public.audit_logs for each row execute function pg_temp.reject_reorder_audit();`);
+  await db.exec("savepoint reorder_audit"); await assert.rejects(moveQueue(b,-1),/test reorder audit rejected/); await db.exec("rollback to reorder_audit");
+  assert.deepEqual(await upcomingOrder(),before);
+});
 console.log(`Database behavioral checks: ${passed} passed`);
 await db.close();

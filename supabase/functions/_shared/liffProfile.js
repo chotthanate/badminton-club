@@ -20,3 +20,10 @@ export function registrationSnapshot(skill, signup, queueStatus) {
     allowHigherLevel: Boolean(signup.allow_higher_level_snapshot),
   };
 }
+
+export function signupCancellationBlockReason({ attendance, queueStatus } = {}) {
+  if (attendance?.arrived || ["waiting", "reserved", "playing"].includes(queueStatus)) {
+    return "เช็กชื่อหรืออยู่ในคิวแล้ว กรุณาแจ้งแอดมินให้ยกเลิก";
+  }
+  return null;
+}

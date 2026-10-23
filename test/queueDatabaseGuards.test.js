@@ -83,11 +83,63 @@ test("players remain marked as playing when their court booking expires", () => 
   assert.doesNotMatch(statusMap, /courtTimeStatus|expired/);
 });
 
-test("cancelling an upcoming queue always asks for confirmation", () => {
+test("bulk cancellation confirms the exact count and uses atomic versioned targets", () => {
   const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  assert.match(queuePanel, /const snapshots = queueVersionRequests\(matches\)/);
+  assert.match(queuePanel, /window\.confirm\(`ลบ[\s\S]{0,100}\$\{matches.length\} คิว/);
+  assert.match(queuePanel, /cancelUpcomingQueues\(\{ eventId: event.id, matches: snapshots \}\)/);
+  assert.match(queuePanel, /if \(saved\) \{\s*matches.forEach/);
+});
 
-  assert.match(queuePanel, /window\.confirm\(`ยกเลิกคิว \$\{position\} ใช่ไหม\?/);
-  assert.match(queuePanel, /onClick=\{\(\) => cancelUpcomingQueue\(match, index \+ 1\)\}/);
+test("normal queue cards have no selection checkbox or duplicate approval action", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  assert.match(queuePanel, /\{manageMode \? <label className="queue-manage-checkbox"/);
+  assert.doesNotMatch(queuePanel, /setReviewDrafts\(\[match\]\)|selectedDraftIds/);
+  assert.match(queuePanel, /saveQueueLineup\(\{ matchId: match.id, slots, expectedVersion: draft.baseVersion, approve: true \}\)/);
+  assert.match(queuePanel, /createManualQueue\(\{ eventId, memberIds: draft.memberIds/);
+  assert.doesNotMatch(queuePanel, /save\(false\)|save\(true\)|สร้างคิวร่าง<\/button>/);
+});
+
+test("automatic queues are ready immediately with no review or approval interface", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  assert.doesNotMatch(queuePanel, /approveQueueDrafts|QueueApprovalReview|reviewDrafts|readyQueueDrafts|อนุมัติ|ตรวจคิวร่าง/);
+  assert.match(queuePanel, /ระบบจัด 1 คิวพร้อมเล่นแล้ว/);
+  assert.match(queuePanel, /ระบบจัดคิวทั้งหมดที่ทำได้พร้อมเล่นแล้ว/);
+  assert.match(queuePanel, /คิวที่ยังไม่บันทึก/);
+  const management = queuePanel.slice(queuePanel.indexOf('className="queue-manage-toolbar"'), queuePanel.indexOf('{upcoming.map'));
+  assert.match(management, /cancelQueues\(selectedQueues\)/);
+  assert.match(management, /cancelQueues\(upcoming, true\)/);
+  assert.doesNotMatch(management, /approve|review/i);
+});
+
+test("phone picker remains two columns with minimum touch-sized cards", () => {
+  const styles = readFileSync("src/queue-improvements.css", "utf8");
+  assert.match(styles, /max-width: 760px[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.doesNotMatch(styles, /\.queue-player-group > div \{ grid-template-columns: 1fr/);
+  assert.match(styles, /\.queue-pick-player \{[^}]*min-height: 44px/);
+  assert.match(styles, /\.queue-pick-player \{[^}]*border: 0/);
+  assert.match(styles, /\.queue-pick-player strong \{[^}]*font-size: 13px/);
+  assert.match(styles, /\.queue-pick-player small \{[^}]*font-size: 11px/);
+});
+
+test("picker uses only backgrounds and checkboxes while keeping other queues and playing courts clear", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  const styles = readFileSync("src/queue-improvements.css", "utf8");
+  assert.match(queuePanel, /queueBadge = position \? `คิว \$\{position\}` : ""/);
+  assert.doesNotMatch(queuePanel, /inCurrentQueue|is-current-queue|"เลือกแล้ว"/);
+  assert.match(queuePanel, /court \? `กำลังเล่น · \$\{court\}`/);
+  assert.match(queuePanel, /position \? " is-queued"/);
+  assert.doesNotMatch(styles, /\.queue-pick-player\.[^{]+\{[^}]*(?:border:|box-shadow:|outline:)/);
+  assert.match(styles, /\.queue-pick-player\.is-playing \{[^}]*background: #fff0d6;/);
+  assert.ok(styles.indexOf(".queue-pick-player.is-playing { background:") > styles.indexOf(".queue-pick-player.is-selected { background:"), "playing background wins when also selected");
+  assert.doesNotMatch(styles, /\.queue-pick-player\.is-playing\.is-selected\s*\{/);
+});
+
+test("sandbox court-time bypass is explicitly scoped by isTestMode", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  assert.match(queuePanel, /isTestMode = false/);
+  assert.match(queuePanel, /timeStatus = isTestMode \? "active" : courtTimeStatus/);
+  assert.match(queuePanel, /return isTestMode \? 0 : courtStartDelaySeconds/);
 });
 
 test("fallback draft is atomic, stays unapproved, and does not grant anonymous execution", () => {

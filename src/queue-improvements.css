@@ -3,29 +3,40 @@
 .queue-selection-modal *, .queue-selection-modal *::before, .queue-selection-modal *::after { box-sizing: border-box; }
 .queue-selection-modal > header, .queue-selection-modal > footer { flex: none; display: flex; align-items: center; gap: 12px; padding: 16px 20px; }
 .queue-selection-modal > header { justify-content: space-between; border-bottom: 1px solid #dbe7de; }
-.queue-selection-modal h2 { margin: 0; font-size: 1.2rem; }
+.queue-selection-modal h2 { margin: 0; font-size: 16px; }
 .queue-selection-modal > header button { border: 0; background: #edf5ef; border-radius: 12px; width: 44px; height: 44px; display: grid; place-items: center; cursor: pointer; }
 .queue-selection-modal > footer { border-top: 1px solid #dbe7de; flex-wrap: wrap; background: #f7faf7; justify-content: flex-end; }
 .queue-selection-modal > footer > span { margin-right: auto; }
 .queue-selection-modal button, .queue-selection-modal input { font: inherit; }
 .queue-selection-modal button:disabled { opacity: .55; cursor: not-allowed; }
 .queue-modal-body { flex: 1 1 auto; min-height: 0; padding: 0 20px 20px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
-.queue-picker-hint { color: #617367; font-size: .9rem; }
-.queue-picker-search { width: 100%; box-sizing: border-box; padding: 14px 16px; border: 1px solid #adc9b7; border-radius: 12px; background: #fff; color: #20382b; font-size: 16px !important; }
-.queue-selected-people { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-.queue-selected-people button { display: flex; align-items: center; gap: 8px; background: #e0f4e9; border: 1px solid #8dbba2; border-radius: 30px; padding: 8px 12px; cursor: pointer; }
-.queue-player-group h3 { display: flex; align-items: baseline; gap: 10px; font-size: 1.05rem; margin: 22px 0 10px; }
-.queue-player-group h3 small { color: #718477; font-size: .8rem; font-weight: normal; }
-.queue-player-group > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.queue-pick-player { min-width: 0; min-height: 76px; padding: 12px; border: 1px solid #d7e3db; border-radius: 12px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
-.queue-pick-player.is-selected { border-color: #16845a; background: #e6f6ed; box-shadow: inset 0 0 0 1px #16845a; }
-.queue-pick-player.is-playing { background: #fff7e9; }
-.queue-pick-player.is-playing.is-selected { border-color: #16845a; background: #ecf5de; }
-.queue-pick-player.is-unavailable { background: #f0f2f1; color: #79847e; }
+.queue-picker-hint { color: #617367; font-size: 12px; margin: 6px 0; }
+.queue-picker-search { width: 100%; box-sizing: border-box; min-height: 44px; padding: 8px 12px; border: 1px solid #adc9b7; border-radius: 10px; background: #fff; color: #20382b; font-size: 16px !important; }
+.queue-selected-people { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+.queue-selected-people:empty { display: none; }
+.queue-selected-people button { display: flex; align-items: center; gap: 4px; min-height: 44px; background: transparent; border: 0; border-radius: 0; color: #19724f; padding: 2px 5px; font-size: 12px; cursor: pointer; }
+.queue-player-group h3 { display: flex; align-items: baseline; gap: 6px; font-size: 14px; line-height: 1.2; margin: 7px 0 2px; }
+.queue-player-group h3 small { color: #718477; font-size: 11px; font-weight: normal; }
+.queue-player-group > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px 5px; }
+.queue-pick-player { min-width: 0; min-height: 44px; padding: 4px 3px; border: 0; border-radius: 0; background: transparent; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.queue-pick-player.is-selected, .queue-pick-player.is-queued, .queue-pick-player.is-playing { border-radius: 12px; }
+.queue-pick-player.is-selected { background: #edf7f1; }
+.queue-pick-player.is-queued { background: #eff5fb; color: #294c6c; }
+.queue-pick-player.is-queued small { color: #42627e; }
+.queue-pick-player.is-unavailable { color: #79847e; }
+.queue-pick-player.is-playing { background: #fff0d6; color: #67400f; }
+.queue-pick-player.is-playing small { color: #8b4d08; }
 .queue-pick-player input, .queue-compact-heading input[type="checkbox"] { flex: none; width: 22px; min-width: 22px; height: 22px; min-height: 22px; padding: 0; accent-color: #16845a; margin: 0; }
-.queue-pick-player > span { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
-.queue-pick-player strong { overflow-wrap: anywhere; font-size: 1rem; }
-.queue-pick-player small { color: #66766b; font-size: .8rem; }
+.queue-pick-player > span { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.queue-pick-player strong { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; line-height: 1.15; }
+.queue-player-queue-tag { white-space: nowrap; font-size: 10px; font-style: normal; font-weight: 600; line-height: 1.25; color: #176c45; }
+.queue-pick-player.is-queued .queue-player-queue-tag { color: #24567f; }
+.queue-pick-player small { color: #526458; font-size: 11px; font-weight: 400; line-height: 1.2; overflow-wrap: anywhere; }
+.queue-pick-player input { width: 18px; min-width: 18px; height: 18px; min-height: 18px; }
+.queue-picker-modal > footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.queue-picker-modal > footer > span { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.queue-picker-modal > footer .queue-dirty-badge { font-size: .65rem; padding: 2px 5px; }
+.queue-save-error { grid-column: 1 / -1; margin: 0; padding: 8px 10px; border-radius: 10px; color: #9d3327; background: #fff0ed; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .queue-dirty-badge { display: inline-block; font-size: .75rem; border-radius: 6px; background: #fff1cc; color: #8b5d00; padding: 4px 7px; font-weight: 600; }
 .queue-work-notice, .queue-work-conflict { padding: 12px 14px; border-radius: 10px; font-size: .9rem; background: #fff4d9; color: #72510d; }
 .queue-work-conflict { background: #fff0ed; color: #9d3327; }
@@ -35,11 +46,20 @@
 .queue-compact-heading { display: flex !important; flex-direction: row !important; align-items: center; flex-wrap: wrap; gap: 8px; }
 .queue-compact-card .badminton-queue-teams { margin: 10px 0; }
 .queue-compact-card .badminton-queue-teams > div { padding: 8px 12px; }
+.queue-compact-card .badminton-queue-order-actions { gap: 6px; }
+.queue-compact-card .badminton-queue-order-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 44px; min-height: 44px; padding: 8px; border: 0; border-radius: 12px; background: #f0f4f1; color: #355b47; }
+.queue-compact-card .badminton-queue-order-actions button[aria-label^="เลื่อนคิว"] { width: 44px; font-size: 20px; line-height: 1; }
+.queue-compact-card .badminton-queue-order-actions button[aria-label^="แก้ไขคิว"] { background: #e8f5ed; color: #176c45; padding-inline: 12px; }
+.queue-compact-card .badminton-queue-order-actions button:disabled { opacity: .4; cursor: not-allowed; }
 .queue-compact-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .queue-compact-footer button { min-height: 42px; }
 .queue-batch-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
-.queue-review-item { border-bottom: 1px solid #dbe7de; padding-bottom: 14px; }
+.queue-manage-toolbar { background: #eff6f1; border: 1px solid #cbded0; border-radius: 12px; padding: 12px; margin: 12px 0; display: grid; gap: 10px; }
+.queue-manage-toolbar > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.queue-manage-toolbar > small { color: #587060; }
+.queue-manage-toolbar button { min-height: 44px; }
+.queue-manage-checkbox { display: grid; place-items: center; width: 44px; min-height: 44px; cursor: pointer; }
 .queue-court-edit { margin: 12px 0; }
-@media (max-width: 760px) { .queue-player-group > div { grid-template-columns: repeat(2, minmax(0, 1fr)); } .queue-selection-modal > header, .queue-selection-modal > footer { padding: 12px; } .queue-modal-body { padding: 0 12px 12px; } .queue-modal-backdrop { padding: 8px; } .queue-pick-player { gap: 8px; padding: 10px; } }
+@media (max-width: 760px) { .queue-player-group > div { grid-template-columns: repeat(2, minmax(0, 1fr)); } .queue-selection-modal > header, .queue-selection-modal > footer { padding: 8px 10px; gap: 8px; } .queue-modal-body { padding: 0 10px 10px; } .queue-modal-backdrop { padding: 6px; } .queue-picker-modal { height: 97vh; height: 97dvh; } .queue-picker-modal > footer { flex-wrap: nowrap; } .queue-picker-modal > footer > span { flex-basis: auto; } .queue-picker-modal > footer button { flex: none; min-height: 44px; padding: 8px 12px; } }
 @media (max-width: 600px) { .badminton-queue-workspace .badminton-queue-teams > div > div, .queue-selection-modal .badminton-queue-teams > div > div { grid-template-columns: minmax(0, 1fr); } .badminton-queue-workspace .badminton-queue-teams em, .queue-selection-modal .badminton-queue-teams em { justify-self: start; min-height: 20px; font-size: 11px; } .queue-compact-card .badminton-queue-teams > div { padding: 8px; } }
-@media (max-width: 420px) { .queue-player-group > div { grid-template-columns: 1fr; } .queue-selection-modal > footer > span { flex-basis: 100%; } .queue-selection-modal > footer button { flex: 1; } .queue-compact-footer { flex-wrap: wrap; } }
+@media (max-width: 420px) { .queue-selection-modal:not(.queue-picker-modal) > footer > span { flex-basis: 100%; } .queue-selection-modal:not(.queue-picker-modal) > footer button { flex: 1; } .queue-compact-footer { flex-wrap: wrap; } }

@@ -39,6 +39,7 @@ import {
   addLineMember,
   addMemberExtraCharge,
   addRandomTestPlayers,
+  prepareTestRound,
   approveQueueDraft,
   archiveClubMember,
   cancelQueueMatch,
@@ -448,7 +449,9 @@ function AdminDashboard({ session }) {
     ++refreshRequestRef.current;
     return mutationsRef.current.enqueue(options.actionKey, async () => {
       if (!navigator.onLine) {
-        setError("ยังไม่ได้เชื่อมต่ออินเทอร์เน็ต ข้อมูลที่กรอกยังอยู่ กรุณาเชื่อมต่อแล้วกดบันทึกอีกครั้ง");
+        const offlineError = new Error("ยังไม่ได้เชื่อมต่ออินเทอร์เน็ต ข้อมูลที่กรอกยังอยู่ กรุณาเชื่อมต่อแล้วกดบันทึกอีกครั้ง");
+        if (options.onError) options.onError(offlineError);
+        else setError(offlineError.message);
         return false;
       }
       setError("");
@@ -456,7 +459,8 @@ function AdminDashboard({ session }) {
       return runMutationLifecycle({
         action,
         onError: (nextError) => {
-          if (options.errorMode === "alert") window.alert(nextError.message);
+          if (options.onError) options.onError(nextError);
+          else if (options.errorMode === "alert") window.alert(nextError.message);
           else setError(nextError.message);
         },
         onSaved: (auditWarning) => {
@@ -468,6 +472,11 @@ function AdminDashboard({ session }) {
         },
         refresh: async () => {
           const { activeTab, context, dashboard } = viewRef.current;
+          const selectedAfterSave = options.selectEventId?.();
+          if (selectedAfterSave) {
+            await refresh(false, { eventId: selectedAfterSave, throwOnError: true });
+            return;
+          }
           if ((options.refreshQueueOnly || (activeTab === "queue" && !options.selectLatest)) && selectedEventIdRef.current) {
             const eventId = selectedEventIdRef.current;
             const requestId = ++refreshRequestRef.current;
@@ -537,63 +546,56 @@ function AdminDashboard({ session }) {
 
   async function switchTestMode() {
     if (!canLeaveRound()) return;
-    const productionContext = adminContexts.find((entry) => !entry.clubs.is_test);
-    if (context?.clubs.is_test) {
-      if (productionContext) {
-        setActiveTab("round");
-        await refresh(false, { clubId: productionContext.club_id });
-        setNotice("กลับสู่ข้อมูลจริงแล้ว");
+    await mutationsRef.current.enqueue("sandbox:switch", async () => {
+      setLoading(true);
+      setError("");
+      try {
+        if (context?.clubs.is_test) {
+          const productionContext = adminContexts.find((entry) => !entry.clubs.is_test);
+          if (!productionContext) throw new Error("ไม่พบกลุ่มข้อมูลจริงของบัญชีนี้");
+          await refresh(false, { clubId: productionContext.club_id, throwOnError: true });
+          setActiveTab("round");
+          setNotice("กลับสู่ข้อมูลจริงแล้ว");
+        } else {
+          const existingTestContext = adminContexts.find((entry) => entry.clubs.is_test);
+          const clubId = existingTestContext?.club_id || (await createTestClub({ ownerId: session.user.id })).id;
+          const eventId = await prepareTestRound({ clubId });
+          await refresh(false, { clubId, eventId, throwOnError: true });
+          setActiveTab("queue");
+          setNotice("โหมดทดลองพร้อมเล่นแล้ว ใช้ทุกคอร์ทได้ทันทีโดยไม่รอเวลาจอง และไม่กระทบรอบจริง");
+        }
+      } catch (nextError) {
+        setError(nextError.message);
+      } finally {
+        setLoading(false);
       }
-      return;
-    }
-    const existingTestContext = adminContexts.find((entry) => entry.clubs.is_test);
-    if (existingTestContext) {
-      setActiveTab("round");
-      await refresh(false, { clubId: existingTestContext.club_id });
-      setNotice("เข้าสู่โหมดทดลองแล้ว ข้อมูลในนี้ไม่กระทบรอบจริง");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const testClub = await createTestClub({ ownerId: session.user.id });
-      setActiveTab("round");
-      await refresh(false, { clubId: testClub.id });
-      setNotice("สร้างโหมดทดลองแล้ว ข้อมูลในนี้ไม่กระทบรอบจริง");
-    } catch (nextError) {
-      setError(nextError.message);
-    } finally {
-      setSaving(false);
-    }
+    });
   }
 
   async function resetDemo() {
     if (!context?.clubs.is_test) return;
     if (!window.confirm("ล้างรอบ ผู้เล่น และค่าใช้จ่ายทั้งหมดในโหมดทดลอง? ข้อมูลจริงจะไม่ถูกแตะต้อง")) return;
-    await mutate(() => resetTestClub(context.club_id), "รีเซ็ตข้อมูลทดลองแล้ว");
-    setActiveTab("round");
+    let preparedEventId;
+    const saved = await mutate(async () => {
+      await resetTestClub(context.club_id);
+      preparedEventId = await prepareTestRound({ clubId: context.club_id });
+    }, "รีเซ็ตข้อมูลทดลองแล้ว พร้อมเริ่มเกมทดลองทันที", { actionKey: "sandbox:reset", selectEventId: () => preparedEventId });
+    if (saved) setActiveTab("queue");
   }
 
   async function addDemoQueuePlayers() {
-    if (!context?.clubs.is_test || dashboard?.event?.status !== "open") {
-      window.alert("กรุณาเปิดลงชื่อในรอบทดลองก่อนเพิ่มผู้เล่นสุ่ม");
-      return;
-    }
+    if (!context?.clubs.is_test) return;
     const count = randomTestPlayerCount();
     if (!window.confirm(`เพิ่มผู้เล่นสุ่มคละระดับ ${count} คน และเช็กชื่อให้พร้อมเข้าคิวเลยใช่ไหม?`)) return;
+    let preparedEventId;
     const saved = await mutate(async () => {
-      const addedCount = await addRandomTestPlayers({
+      preparedEventId = await prepareTestRound({ clubId: context.club_id });
+      await addRandomTestPlayers({
         clubId: context.club_id,
-        eventId: dashboard.event.id,
+        eventId: preparedEventId,
         count,
       });
-      await recordAudit({
-        clubId: context.club_id,
-        eventId: dashboard.event.id,
-        userId: session.user.id,
-        action: `เพิ่มผู้เล่นสุ่มคละระดับ ${addedCount} คนในโหมดทดลอง`,
-      });
-    }, `เพิ่มผู้เล่นสุ่มคละระดับ ${count} คนและเช็กชื่อแล้ว`);
+    }, `เพิ่มผู้เล่นสุ่มคละระดับ ${count} คนและเช็กชื่อแล้ว`, { actionKey: "sandbox:add-players", selectEventId: () => preparedEventId });
     if (saved) setActiveTab("queue");
   }
 
@@ -608,7 +610,7 @@ function AdminDashboard({ session }) {
       ? buildTestSignupLiffUrl({ ...common, eventId: dashboard.event?.id })
       : kind === "payment"
         ? buildTestPaymentLiffUrl(common)
-        : buildLiveQueueUrl({ eventId: dashboard.event?.id, testClubId: context.club_id });
+        : buildLiveQueueUrl({ testClubId: context.club_id });
     if (!link) {
       setError(kind === "signup" ? "กรุณาสร้างและเปิดลงชื่อรอบทดลองก่อน" : "สร้างลิงก์ชำระเงินทดลองไม่สำเร็จ");
       return;
@@ -669,7 +671,7 @@ function AdminDashboard({ session }) {
 
         {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
         {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
-        {!isStaff && context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ข้อมูลนี้แยกจากรอบจริงและจะไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving || dashboard.event?.status !== "open"} onClick={addDemoQueuePlayers} title={dashboard.event?.status === "open" ? "สุ่มจำนวน ระดับ และความยินยอม พร้อมเช็กชื่อเข้าคิว" : "เปิดลงชื่อในรอบทดลองก่อน"} type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 23–40 คน</button><button disabled={saving || dashboard.event?.status !== "open"} onClick={() => copyTestLink("signup")} type="button"><Copy size={15} /> ลิงก์ลงชื่อทดลอง</button><button disabled={saving} onClick={() => copyTestLink("payment")} type="button"><Copy size={15} /> ลิงก์ชำระเงินทดลอง</button><button disabled={saving || !dashboard.event} onClick={() => copyTestLink("live")} type="button"><Copy size={15} /> ลิงก์สนามและคิวทดลอง</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
+        {!isStaff && context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ทุกคอร์ทพร้อมทดลอง ไม่อิงเวลาจองจริง ข้อมูลแยกจากรอบจริงและไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving} onClick={addDemoQueuePlayers} title="เตรียมรอบและเพิ่มผู้เล่นสุ่ม พร้อมเช็กชื่อเข้าคิวทันที" type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 23–40 คน</button><button disabled={saving || dashboard.event?.status !== "open"} onClick={() => copyTestLink("signup")} type="button"><Copy size={15} /> ลิงก์ลงชื่อทดลอง</button><button disabled={saving} onClick={() => copyTestLink("payment")} type="button"><Copy size={15} /> ลิงก์ชำระเงินทดลอง</button><button disabled={saving || !dashboard.event} onClick={() => copyTestLink("live")} type="button"><Copy size={15} /> ลิงก์สนามและคิวทดลอง</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
 
         {!dashboard.event && !isStaff ? (
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />
@@ -728,7 +730,7 @@ function AdminDashboard({ session }) {
             ) : null}
 
             {activeTab === "queue" ? (
-              <QueuePanel dashboard={dashboard} event={appEvent} isStaff={isStaff} mutate={mutate} />
+              <QueuePanel dashboard={dashboard} event={appEvent} isStaff={isStaff} isTestMode={Boolean(context.clubs.is_test)} mutate={mutate} />
             ) : null}
 
             {!isStaff && activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} settlement={settlement} /> : null}
@@ -880,6 +882,13 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
   const defaults = roundDefaultsForDate(initial.date, context.clubs);
 
   async function createRound() {
+    if (context.clubs.is_test) {
+      let preparedEventId;
+      await mutate(async () => {
+        preparedEventId = await prepareTestRound({ clubId: context.club_id });
+      }, "รอบทดลองพร้อมเล่นแล้ว", { actionKey: `round:create:${context.club_id}`, selectEventId: () => preparedEventId });
+      return;
+    }
     await mutate(async () => {
       const created = await createEvent({
         clubId: context.club_id,
@@ -1319,6 +1328,9 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [exemptMemberId, setExemptMemberId] = useState("");
   const [mergeSourceId, setMergeSourceId] = useState("");
   const [mergeTargetId, setMergeTargetId] = useState("");
+  const [mergePending, setMergePending] = useState(false);
+  const [mergeError, setMergeError] = useState("");
+  const mergePendingRef = useRef(false);
   const participants = event.signups
     .filter((signup) => signup.status === "coming")
     .map((signup) => ({
@@ -1535,6 +1547,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
   async function mergeDuplicateMember(submitEvent) {
     submitEvent.preventDefault();
+    if (mergePendingRef.current) return;
     if (!mergeSourceId || !mergeTargetId || mergeSourceId === mergeTargetId) {
       window.alert("กรุณาเลือกชื่อที่ต้องการเก็บ และชื่อซ้ำที่ต้องการรวม");
       return;
@@ -1546,19 +1559,20 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       `รวม “${memberName(source)}” เข้าเป็นคนเดียวกับ “${memberName(target)}” ใช่ไหม?\n\nประวัติการลงชื่อ ยอดค้าง และรายการเดิมจะย้ายไปยังชื่อที่เก็บ ส่วนชื่อซ้ำจะถูกลบ`,
     );
     if (!confirmed) return;
+    mergePendingRef.current = true;
+    setMergePending(true);
+    setMergeError("");
+    try {
     const saved = await mutate(async () => {
       await mergeClubMembers({ sourceMemberId: source.id, targetMemberId: target.id });
-      await recordAudit({
-        clubId: context.club_id,
-        eventId: event.id,
-        userId: session.user.id,
-        action: `รวมรายชื่อซ้ำ ${memberName(source)} เข้ากับ ${memberName(target)}`,
-        details: { source_member_id: source.id, target_member_id: target.id },
-      });
-    }, `รวม ${memberName(source)} เข้ากับ ${memberName(target)} แล้ว`);
+    }, `รวม ${memberName(source)} เข้ากับ ${memberName(target)} แล้ว`, { actionKey: "members:merge", onError: (error) => setMergeError(error.message) });
     if (saved) {
       setMergeSourceId("");
       setMergeTargetId("");
+    }
+    } finally {
+      mergePendingRef.current = false;
+      setMergePending(false);
     }
   }
 
@@ -1916,7 +1930,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           );
         }) : <div className="badminton-empty">ไม่พบผู้เล่นตามตัวกรอง</div>}
       </div>
-      {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><WalletCards size={17} /><strong>รายชื่อไม่ต้องเก็บเงิน</strong><em>{savedMembers.filter((member) => member.payment_exempt).length} คน</em></div><form className="badminton-exempt-member-form" onSubmit={addPaymentExemptMember}><select aria-label="เลือกสมาชิกที่ไม่ต้องเก็บเงิน" onChange={(changeEvent) => setExemptMemberId(changeEvent.target.value)} required value={exemptMemberId}><option value="">เลือกสมาชิกจากรายชื่อเดิม</option>{savedMembers.filter((member) => !member.payment_exempt).sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option key={member.id} value={member.id}>{paymentExemptIdentity(member)}</option>)}</select><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form><div className="badminton-exempt-member-list">{savedMembers.filter((member) => member.payment_exempt).map((member) => <span key={member.id}><span><strong>{memberName(member)}</strong><small>{member.line_user_id ? `LINE: ${member.display_name || "เชื่อมแล้ว"}` : "ยังไม่เชื่อม LINE"}</small></span><button aria-label={`นำ ${memberName(member)} ออกจากรายชื่อไม่ต้องเก็บเงิน`} onClick={() => removePaymentExemptMember(member)} type="button"><X size={14} /></button></span>)}</div><small className="badminton-settings-help">เลือกจากสมาชิกตัวจริงโดยดูชื่อ LINE ประกอบ ระบบจะไม่จับคู่ด้วยชื่อเล่น จึงแยกคนชื่อซ้ำได้ถูกต้อง</small><small className="badminton-settings-help">คนในรายชื่อนี้ยังร่วมถูกหารค่าใช้จ่าย แต่ระบบจะถือว่าชำระแล้วและไม่ใส่ในข้อความส่ง LINE</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รวมรายชื่อซ้ำ</strong><em>พบชื่อซ้ำ {duplicateMemberGroups.length} กลุ่ม</em></div>{duplicateMemberGroups.length ? <div className="badminton-duplicate-suggestions">{duplicateMemberGroups.map((group) => <button key={group.map((member) => member.id).join("-")} onClick={() => chooseDuplicateGroup(group)} type="button">{group.map((member) => memberName(member)).join(" ↔ ")}</button>)}</div> : <small className="badminton-settings-help">ไม่พบชื่อที่สะกดตรงกัน หากคนเดียวกันใช้คนละชื่อสามารถเลือกเองด้านล่าง</small>}<form className="badminton-member-merge-form" onSubmit={mergeDuplicateMember}><label><span>เก็บคนนี้ไว้</span><select aria-label="ชื่อหลักที่ต้องการเก็บ" onChange={(changeEvent) => setMergeTargetId(changeEvent.target.value)} required value={mergeTargetId}><option value="">เลือกชื่อหลัก</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeSourceId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><label><span>รวมชื่อซ้ำนี้</span><select aria-label="ชื่อซ้ำที่ต้องการรวม" onChange={(changeEvent) => setMergeSourceId(changeEvent.target.value)} required value={mergeSourceId}><option value="">เลือกชื่อซ้ำ</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeTargetId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><button className="badminton-secondary" type="submit">รวมประวัติและลบชื่อซ้ำ</button></form><small className="badminton-settings-help">ควรเก็บรายการที่มีคำว่า “เชื่อม LINE” เป็นชื่อหลัก ระบบจะย้ายประวัติ ยอดค้าง และจำชื่อเดิมไว้ค้นหาครั้งต่อไป</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => { const value = changeEvent.target.value; mutate(() => updateExtraCatalogItem(item.id, value), `แก้ราคา ${item.name} แล้ว`, { actionKey: `catalog:price:${item.id}` }); }} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
+      {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><WalletCards size={17} /><strong>รายชื่อไม่ต้องเก็บเงิน</strong><em>{savedMembers.filter((member) => member.payment_exempt).length} คน</em></div><form className="badminton-exempt-member-form" onSubmit={addPaymentExemptMember}><select aria-label="เลือกสมาชิกที่ไม่ต้องเก็บเงิน" onChange={(changeEvent) => setExemptMemberId(changeEvent.target.value)} required value={exemptMemberId}><option value="">เลือกสมาชิกจากรายชื่อเดิม</option>{savedMembers.filter((member) => !member.payment_exempt).sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option key={member.id} value={member.id}>{paymentExemptIdentity(member)}</option>)}</select><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form><div className="badminton-exempt-member-list">{savedMembers.filter((member) => member.payment_exempt).map((member) => <span key={member.id}><span><strong>{memberName(member)}</strong><small>{member.line_user_id ? `LINE: ${member.display_name || "เชื่อมแล้ว"}` : "ยังไม่เชื่อม LINE"}</small></span><button aria-label={`นำ ${memberName(member)} ออกจากรายชื่อไม่ต้องเก็บเงิน`} onClick={() => removePaymentExemptMember(member)} type="button"><X size={14} /></button></span>)}</div><small className="badminton-settings-help">เลือกจากสมาชิกตัวจริงโดยดูชื่อ LINE ประกอบ ระบบจะไม่จับคู่ด้วยชื่อเล่น จึงแยกคนชื่อซ้ำได้ถูกต้อง</small><small className="badminton-settings-help">คนในรายชื่อนี้ยังร่วมถูกหารค่าใช้จ่าย แต่ระบบจะถือว่าชำระแล้วและไม่ใส่ในข้อความส่ง LINE</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รวมรายชื่อซ้ำ</strong><em>พบชื่อซ้ำ {duplicateMemberGroups.length} กลุ่ม</em></div>{duplicateMemberGroups.length ? <div className="badminton-duplicate-suggestions">{duplicateMemberGroups.map((group) => <button key={group.map((member) => member.id).join("-")} onClick={() => chooseDuplicateGroup(group)} type="button">{group.map((member) => memberName(member)).join(" ↔ ")}</button>)}</div> : <small className="badminton-settings-help">ไม่พบชื่อที่สะกดตรงกัน หากคนเดียวกันใช้คนละชื่อสามารถเลือกเองด้านล่าง</small>}<form className="badminton-member-merge-form" onSubmit={mergeDuplicateMember}><label><span>เก็บคนนี้ไว้</span><select disabled={mergePending} aria-label="ชื่อหลักที่ต้องการเก็บ" onChange={(changeEvent) => setMergeTargetId(changeEvent.target.value)} required value={mergeTargetId}><option value="">เลือกชื่อหลัก</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeSourceId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><label><span>รวมชื่อซ้ำนี้</span><select disabled={mergePending} aria-label="ชื่อซ้ำที่ต้องการรวม" onChange={(changeEvent) => setMergeSourceId(changeEvent.target.value)} required value={mergeSourceId}><option value="">เลือกชื่อซ้ำ</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeTargetId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><button className="badminton-secondary" disabled={mergePending} type="submit">{mergePending ? "กำลังรวมรายชื่อ…" : "รวมประวัติและลบชื่อซ้ำ"}</button>{mergeError ? <p className="badminton-form-message is-error" role="alert">{mergeError}</p> : null}</form><small className="badminton-settings-help">ควรเก็บรายการที่มีคำว่า “เชื่อม LINE” เป็นชื่อหลัก ระบบจะย้ายประวัติ ยอดค้าง และจำชื่อเดิมไว้ค้นหาครั้งต่อไป</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => { const value = changeEvent.target.value; mutate(() => updateExtraCatalogItem(item.id, value), `แก้ราคา ${item.name} แล้ว`, { actionKey: `catalog:price:${item.id}` }); }} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
       {editingMember ? (
         <div className="badminton-modal-backdrop badminton-member-edit-backdrop" role="presentation">
           <form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}>
@@ -1948,6 +1962,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
               <input onChange={(changeEvent) => setMemberDirectoryQuery(changeEvent.target.value)} placeholder="ค้นหาชื่อเล่นหรือชื่อ LINE" value={memberDirectoryQuery} />
               {memberDirectoryQuery ? <button aria-label="ล้างคำค้นหา" onClick={() => setMemberDirectoryQuery("")} type="button"><X size={16} /></button> : null}
             </label>
+            <div className="member-directory-scroll" role="region" aria-label="รายการสมาชิกและรายชื่อซ้ำ" tabIndex={0}>
             {duplicateMemberGroups.length ? (
               <section className="badminton-member-directory-duplicates">
                 <div><strong>คำแนะนำรายชื่อซ้ำ</strong><em>{duplicateMemberGroups.length} กลุ่ม</em></div>
@@ -1974,6 +1989,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                   }), `บันทึกชื่อและมือของ ${patch.nickname} แล้ว`, { actionKey: `profile:${target.id}` })} />
                 );
               }) : <div className="badminton-empty">ไม่พบรายชื่อที่ค้นหา</div>}
+            </div>
             </div>
           </div>
         </div>

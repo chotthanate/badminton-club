@@ -1,11 +1,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildPaymentSummary, compareCourtNames } from "../_shared/paymentSummary.js";
 import { sortBySignupOrder } from "../_shared/signupOrder.js";
-import { courtHasStarted } from "../_shared/liveQueueTime.js";
+import { showLiveCourt } from "../_shared/liveQueueTime.js";
+import { resolveLiffClubContext, resolveLiffClubId } from "../_shared/liffClubContext.js";
 import { reconcileSlipAmount } from "../_shared/slipAmount.js";
 import { parseSlipDateValue } from "../_shared/slipDate.js";
 import { evaluatePaymentSubmission, isSamePaymentSubmission, paymentSubmissionState } from "../_shared/paymentSubmission.js";
-import { registrationProfile, registrationSnapshot } from "../_shared/liffProfile.js";
+import { registrationProfile, registrationSnapshot, signupCancellationBlockReason } from "../_shared/liffProfile.js";
 import { buildArrivalTimeOptionsForEvent, normalizeArrivalTimeForEvent, sessionBoundsForEvent } from "../_shared/eventSchedule.js";
 
 const defaultPaymentRecipientNames = ["ณฐกฤต อินนะใจ", "NATHAKRIT INN", "NATHAKRIT INNAJAI"];
@@ -1136,7 +1137,7 @@ async function handleLiveQueueRequest(payload: any) {
   if (!configuredClubId) return json({ error: "LINE_CLUB_ID is not configured" }, 503);
   try {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const clubId = await resolveLiffClubId(admin, payload, configuredClubId);
+    const { clubId, isTestClub } = await resolveLiffClubContext(admin, payload, configuredClubId);
     let eventQuery = admin.from("events")
       .select("id, event_date, venue, status, starts_at, ends_at")
       .eq("club_id", clubId)
@@ -1145,7 +1146,7 @@ async function handleLiveQueueRequest(payload: any) {
     else eventQuery = eventQuery.order("event_date", { ascending: false }).order("created_at", { ascending: false });
     const { data: event, error: eventError } = await eventQuery.limit(1).maybeSingle();
     if (eventError) throw eventError;
-    if (!event) return json({ serverNow: new Date().toISOString(), event: null, courts: [], upcoming: [], waiting: [], profile: null });
+    if (!event) return json({ serverNow: new Date().toISOString(), isTestMode: isTestClub, event: null, courts: [], upcoming: [], waiting: [], profile: null });
 
     const [courtsResult, membersResult, signupsResult, queuePlayersResult, matchesResult] = await Promise.all([
       admin.from("event_courts").select("id, court_name, starts_at, ends_at, position").eq("event_id", event.id).order("position"),
@@ -1174,7 +1175,7 @@ async function handleLiveQueueRequest(payload: any) {
     }
     const playingByCourt = new Map((matchesResult.data || []).filter((match: any) => match.status === "playing").map((match: any) => [match.court_id, match]));
     const courts = [...(courtsResult.data || [])]
-      .filter((court: any) => courtHasStarted(event.event_date, event.starts_at, court.starts_at))
+      .filter((court: any) => showLiveCourt(event, court, { isTestClub }))
       .sort(compareCourtNames).map((court: any) => {
       const match: any = playingByCourt.get(court.id);
       return { id: court.id, name: court.court_name, startsAt: shortTime(court.starts_at), playing: Boolean(match), startedAt: match?.started_at || null, players: match ? (playersByMatch.get(match.id) || []) : [] };
@@ -1192,7 +1193,7 @@ async function handleLiveQueueRequest(payload: any) {
       const { data: linkedMember } = await admin.from("club_members").select("id, nickname, skill_level, playable_skill_levels").eq("club_id", clubId).eq("line_user_id", identity.sub).eq("active", true).eq("role", "member").maybeSingle();
       profile = { memberId: linkedMember?.id || null, nickname: linkedMember?.nickname || "", skillLevel: linkedMember?.skill_level || "", playableSkillLevels: linkedMember?.playable_skill_levels || [] };
     }
-    return json({ serverNow: new Date().toISOString(), event: { id: event.id, date: event.event_date, venue: event.venue, startTime: shortTime(event.starts_at), endTime: shortTime(event.ends_at) }, courts, upcoming, waiting, profile });
+    return json({ serverNow: new Date().toISOString(), isTestMode: isTestClub, event: { id: event.id, date: event.event_date, venue: event.venue, startTime: shortTime(event.starts_at), endTime: shortTime(event.ends_at) }, courts, upcoming, waiting, profile });
   } catch (error) {
     console.error("Live queue request failed", error);
     const message = error instanceof Error ? error.message : "โหลดสนามสดไม่สำเร็จ";
@@ -1272,11 +1273,17 @@ async function handleLiffRequest(payload: any) {
         if (hasBadmintonStarted(event)) {
           return json({ error: "ถึงเวลาเริ่มตีแบดแล้ว กรุณาแจ้งแอดมินให้ยกเลิก" }, 409);
         }
-        const chargesResult = await admin.from("member_extra_charges")
-          .select("id", { count: "exact", head: true })
-          .eq("event_id", event.id)
-          .eq("member_id", existingMember.id);
-        if (chargesResult.error) throw chargesResult.error;
+        const [chargesResult, attendanceResult, queueResult] = await Promise.all([
+          admin.from("member_extra_charges").select("id", { count: "exact", head: true })
+            .eq("event_id", event.id).eq("member_id", existingMember.id),
+          admin.from("attendance").select("arrived, left_at")
+            .eq("event_id", event.id).eq("member_id", existingMember.id).maybeSingle(),
+          admin.from("event_queue_players").select("status")
+            .eq("event_id", event.id).eq("member_id", existingMember.id).maybeSingle(),
+        ]);
+        for (const result of [chargesResult, attendanceResult, queueResult]) if (result.error) throw result.error;
+        const cancellationBlock = signupCancellationBlockReason({ attendance: attendanceResult.data, queueStatus: queueResult.data?.status });
+        if (cancellationBlock) return json({ error: cancellationBlock }, 409);
         if ((chargesResult.count || 0) > 0) {
           return json({ error: "มีรายการน้ำ/ขนมแล้ว กรุณาแจ้งแอดมินให้ยกเลิก" }, 409);
         }
@@ -1447,19 +1454,6 @@ async function handleLiffRequest(payload: any) {
     const status = message.includes("LINE login") ? 401 : 500;
     return json({ error: message }, status);
   }
-}
-
-async function resolveLiffClubId(admin: any, payload: any, configuredClubId: string) {
-  if (!payload?.testMode) return configuredClubId;
-  const testClubId = String(payload.testClubId || "");
-  if (!testClubId) throw new Error("ไม่พบกลุ่มทดลองสำหรับลิงก์นี้");
-  const { data: club, error } = await admin.from("clubs")
-    .select("id, is_test")
-    .eq("id", testClubId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!club?.is_test) throw new Error("ลิงก์นี้ไม่ได้เชื่อมกับกลุ่มทดลอง");
-  return club.id;
 }
 
 async function findOrCreateGuestMember(admin: any, clubId: string, guestName: string, skill: any) {

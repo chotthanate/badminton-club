@@ -20,3 +20,7 @@ export function courtHasStarted(eventDate, eventStartTime, courtStartTime, nowMs
   const startsAt = scheduledCourtStartMs(eventDate, eventStartTime, courtStartTime);
   return startsAt === null || nowMs >= startsAt;
 }
+
+export function showLiveCourt(event, court, { isTestClub = false, nowMs = Date.now() } = {}) {
+  return isTestClub === true || courtHasStarted(event.event_date, event.starts_at, court.starts_at, nowMs);
+}

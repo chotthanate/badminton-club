@@ -122,68 +122,26 @@ export async function resetTestClub(clubId) {
   await seedTestMembers(clubId);
 }
 
+export async function prepareTestRound({ clubId }) {
+  const { data, error } = await client().rpc("prepare_test_round", { target_club_id: clubId });
+  throwIfError(error);
+  return data;
+}
+
 export async function addRandomTestPlayers({ clubId, eventId, count = 23, random = Math.random }) {
   const profiles = buildRandomTestPlayerProfiles(count, random);
-  const [clubResult, eventResult, memberCountResult] = await Promise.all([
-    client().from("clubs").select("id, is_test").eq("id", clubId).single(),
-    client().from("events").select("id, club_id, status, starts_at").eq("id", eventId).single(),
-    client().from("club_members").select("id", { count: "exact", head: true }).eq("club_id", clubId).eq("role", "member"),
-  ]);
-  throwIfError(clubResult.error);
-  throwIfError(eventResult.error);
-  throwIfError(memberCountResult.error);
-  if (!clubResult.data?.is_test) throw new Error("เพิ่มผู้เล่นสุ่มได้เฉพาะโหมดทดลอง");
-  if (eventResult.data?.club_id !== clubId) throw new Error("รอบทดลองไม่ตรงกับกลุ่มที่เลือก");
-  if (eventResult.data?.status !== "open") throw new Error("กรุณาเปิดลงชื่อในรอบทดลองก่อนเพิ่มผู้เล่นสุ่ม");
-
-  const firstNumber = Number(memberCountResult.count || 0) + 1;
-  const memberRows = profiles.map(({ skillLevel, playableSkillLevels }, index) => {
-    const legacyPreferences = legacyPreferencesForPlayable(skillLevel, playableSkillLevels);
-    const number = String(firstNumber + index).padStart(2, "0");
-    return {
-      club_id: clubId,
-      display_name: `LINE Random ${number}`,
-      nickname: `ผู้เล่นสุ่ม ${number}`,
-      role: "member",
-      active: true,
+  // Club isolation, open-round validation, master profiles, signups and arrival
+  // rows are committed together so a failed request never leaves a partial set.
+  const { data, error } = await client().rpc("add_random_test_players", {
+    target_club_id: clubId,
+    target_event_id: eventId,
+    player_profiles: profiles.map(({ skillLevel, playableSkillLevels }) => ({
       skill_level: skillLevel,
       playable_skill_levels: playableSkillLevels,
-      allow_lower_level: legacyPreferences.allowLowerLevel,
-      allow_higher_level: legacyPreferences.allowHigherLevel,
-    };
+    })),
   });
-  const { data: members, error: memberError } = await client().from("club_members")
-    .insert(memberRows)
-    .select("id, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level");
-  throwIfError(memberError);
-
-  const arrivalTime = String(eventResult.data.starts_at || "").slice(0, 5);
-  const signupRows = (members || []).map((member) => ({
-    club_id: clubId,
-    event_id: eventId,
-    member_id: member.id,
-    status: "coming",
-    arrival_time: arrivalTime,
-    skill_level_snapshot: member.skill_level,
-    playable_skill_levels_snapshot: member.playable_skill_levels,
-    allow_lower_level_snapshot: member.allow_lower_level,
-    allow_higher_level_snapshot: member.allow_higher_level,
-  }));
-  const attendanceRows = (members || []).map((member) => ({
-    club_id: clubId,
-    event_id: eventId,
-    member_id: member.id,
-    arrived: true,
-    arrived_at: arrivalTime,
-    left_at: null,
-  }));
-  const [signupResult, attendanceResult] = await Promise.all([
-    client().from("signups").insert(signupRows),
-    client().from("attendance").insert(attendanceRows),
-  ]);
-  throwIfError(signupResult.error);
-  throwIfError(attendanceResult.error);
-  return members?.length || 0;
+  throwIfError(error);
+  return Number(data || 0);
 }
 
 export async function listClubEvents(clubId) {
@@ -318,8 +276,14 @@ export async function loadQueueState(eventId) {
 
 export async function loadParticipantState(clubId, eventId) {
   // Departure/paid badges depend on bills and per-round snapshots as well as
-  // attendance. This RPC already includes the catalog and member extras.
-  return loadFinanceState(clubId, eventId);
+  // attendance. The directory also needs fresh dismissed-duplicate decisions
+  // so "not the same person" disappears immediately and syncs across devices.
+  const [financeState, dismissalsResult] = await Promise.all([
+    loadFinanceState(clubId, eventId),
+    client().from("member_duplicate_dismissals").select("signature").eq("club_id", clubId),
+  ]);
+  throwIfError(dismissalsResult.error);
+  return { ...financeState, duplicateDismissals: dismissalsResult.data || [] };
 }
 
 export async function loadFinanceState(clubId, eventId) {
@@ -832,7 +796,7 @@ export async function ensureEventQueuePlayers({ clubId, eventId }) {
 }
 
 export async function createQueueDraft({ eventId, memberIds, teamAIds }) {
-  const { data, error } = await client().rpc("create_queue_draft", {
+  const { data, error } = await client().rpc("create_automatic_queue", {
     target_event_id: eventId,
     selected_member_ids: memberIds,
     team_a_member_ids: teamAIds,
@@ -842,7 +806,7 @@ export async function createQueueDraft({ eventId, memberIds, teamAIds }) {
 }
 
 export async function createFallbackQueueDraft({ eventId, memberIds, teamAIds }) {
-  const { data, error } = await client().rpc("create_fallback_queue_draft", {
+  const { data, error } = await client().rpc("create_automatic_queue", {
     target_event_id: eventId,
     selected_member_ids: memberIds,
     team_a_member_ids: teamAIds,
@@ -852,7 +816,7 @@ export async function createFallbackQueueDraft({ eventId, memberIds, teamAIds })
 }
 
 export async function createQueueDraftsBatch({ eventId, lineups }) {
-  const { data, error } = await client().rpc("create_queue_drafts_batch", {
+  const { data, error } = await client().rpc("create_automatic_queues", {
     target_event_id: eventId,
     queue_lineups: lineups.map((lineup) => ({
       member_ids: lineup.memberIds,
@@ -866,6 +830,16 @@ export async function createQueueDraftsBatch({ eventId, lineups }) {
 
 export async function createManualQueueDraft({ eventId, memberIds, teamAIds }) {
   const { data, error } = await client().rpc("create_manual_queue_with_players", {
+    target_event_id: eventId,
+    selected_member_ids: memberIds,
+    team_a_member_ids: teamAIds || memberIds.slice(0, 2),
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function createManualQueue({ eventId, memberIds, teamAIds }) {
+  const { data, error } = await client().rpc("create_manual_queue", {
     target_event_id: eventId,
     selected_member_ids: memberIds,
     team_a_member_ids: teamAIds || memberIds.slice(0, 2),
@@ -894,6 +868,15 @@ export const updateQueueDraftLineup = saveQueueLineup;
 export async function approveQueueDrafts({ drafts }) {
   const { data, error } = await client().rpc("approve_queue_drafts", {
     requested_drafts: drafts.map(({ matchId, expectedVersion }) => ({ match_id: matchId, revision: expectedVersion })),
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function cancelUpcomingQueues({ eventId, matches }) {
+  const { data, error } = await client().rpc("cancel_upcoming_queues", {
+    target_event_id: eventId,
+    requested_matches: matches.map(({ matchId, expectedVersion }) => ({ match_id: matchId, revision: expectedVersion })),
   });
   throwIfError(error);
   return data;
