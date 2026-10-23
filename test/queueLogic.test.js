@@ -30,7 +30,7 @@ function player(id, level, overrides = {}) {
   };
 }
 
-test("จัดกลุ่มระดับเดียวกันก่อนแม้มีระดับข้างเคียงรออยู่", () => {
+test("เมื่อเวลารอเท่ากันใช้ลำดับที่แน่นอน", () => {
   const result = proposeQueueMatch([
     player("a", "BG"), player("b", "BG"), player("c", "BG"), player("d", "BG"),
     player("e", "N", { gamesPlayed: 0 }),
@@ -81,7 +81,7 @@ test("ถ้าไม่มีระดับที่เข้ากัน ร�
   assert.equal(result, null);
 });
 
-test("เมื่อจัดตามระดับไม่ได้ ยังเสนอผู้รอครบสี่คนให้ตรวจด้วยมือ", () => {
+test("เมื่อจัดตามระดับไม่ได้ เติมด้วยมือสูงกว่าที่ใกล้ที่สุด", () => {
   const rows = [player("a", "Rookie-"), player("b", "BG"), player("c", "S"), player("d", "P")];
   assert.equal(proposeQueueMatch(rows), null);
   const fallback = proposeFallbackQueueMatch(rows);
@@ -91,13 +91,13 @@ test("เมื่อจัดตามระดับไม่ได้ ยั�
   assert.equal(fallback.teamB.length, 2);
 });
 
-test("ถ้าคนแรกยังจัดไม่ได้ ระบบข้ามไปจัดกลุ่มที่ผ่านเงื่อนไข", () => {
-  const result = proposeQueueMatch([
+test("ถ้าคนแรกยังจัดแบบหนึ่งขั้นไม่ได้ ต้องไม่ข้ามคนแรก", () => {
+  const rows = [
     player("anchor", "Rookie-", { queuedAt: "2026-08-10T09:00:00Z" }),
     player("b", "N"), player("c", "N"), player("d", "N"), player("e", "N"),
-  ]);
-  assert.equal(result.tier, 1);
-  assert.deepEqual(result.lineup.map((entry) => entry.memberId).sort(), ["b", "c", "d", "e"].sort());
+  ];
+  assert.equal(proposeQueueMatch(rows), null);
+  assert.deepEqual(proposeFallbackQueueMatch(rows).lineup.map((entry) => entry.memberId), ["anchor", "b", "c", "d"]);
 });
 
 test("ดึงมือต่ำกว่าเมื่อเจ้าตัวยอมเล่นสูงและมือหลักยอมอย่างน้อยสองในสาม", () => {
@@ -183,7 +183,46 @@ test("คิวอัตโนมัติผสมได้เฉพาะม�
   assert.ok(result);
   const indexes = result.lineup.map((entry) => ["Rookie-", "Rookie", "BG", "N", "S", "P"].indexOf(entry.skillLevel));
   assert.ok(Math.max(...indexes) - Math.min(...indexes) <= 1);
-  assert.equal(result.lineup.some((entry) => entry.memberId === "old-bg"), false);
+  assert.equal(result.lineup.some((entry) => entry.memberId === "old-bg"), true);
+});
+
+test("มือข้างเคียงที่รอนานกว่าต้องได้ก่อนมือเดียวกันที่เพิ่งมา แม้ไม่ได้ตั้งค่ายินยอม", () => {
+  const result = proposeQueueMatch([
+    player("anchor", "N", { queuedAt: "2026-08-10T09:00:00Z" }),
+    player("older-bg", "BG", { queuedAt: "2026-08-10T09:01:00Z" }),
+    player("older-n", "N", { queuedAt: "2026-08-10T09:02:00Z" }),
+    player("older-bg2", "BG", { queuedAt: "2026-08-10T09:03:00Z" }),
+    player("new-n1", "N"), player("new-n2", "N"), player("new-n3", "N"),
+  ]);
+  assert.deepEqual(result.lineup.map((entry) => entry.memberId), ["anchor", "older-bg", "older-n", "older-bg2"]);
+});
+
+test("เลือกช่วงมือที่เติมครบได้โดยไม่รวมสองฝั่งจนห่างเกินหนึ่งขั้น", () => {
+  const result = proposeQueueMatch([
+    player("anchor", "N", { queuedAt: "2026-08-10T09:00:00Z" }),
+    player("bg", "BG", { queuedAt: "2026-08-10T09:01:00Z" }),
+    player("s1", "S", { queuedAt: "2026-08-10T09:02:00Z" }),
+    player("s2", "S", { queuedAt: "2026-08-10T09:03:00Z" }),
+    player("s3", "S", { queuedAt: "2026-08-10T09:04:00Z" }),
+  ]);
+  assert.deepEqual(result.lineup.map((entry) => entry.memberId), ["anchor", "s1", "s2", "s3"]);
+});
+
+test("fallback เลือกมือสูงที่ใกล้กว่าก่อน และรอนานก่อนภายในมือนั้น", () => {
+  const rows = [
+    player("anchor", "Rookie", { queuedAt: "2026-08-10T08:00:00Z" }),
+    player("far-p", "P", { queuedAt: "2026-08-10T08:01:00Z" }),
+    player("near-n-new", "N", { queuedAt: "2026-08-10T09:30:00Z" }),
+    player("near-n-old", "N", { queuedAt: "2026-08-10T09:00:00Z" }),
+    player("near-n-mid", "N", { queuedAt: "2026-08-10T09:15:00Z" }),
+  ];
+  assert.deepEqual(proposeFallbackQueueMatch(rows).lineup.map((entry) => entry.memberId), ["anchor", "near-n-old", "near-n-mid", "near-n-new"]);
+});
+
+test("fallback ห้ามดึงมือต่ำกว่าคนแรกเกินหนึ่งขั้นหรือข้ามคนแรก", () => {
+  const rows = [player("anchor", "P", { queuedAt: "2026-08-10T08:00:00Z" }), player("a", "N"), player("b", "N"), player("c", "N"), player("d", "N")];
+  assert.equal(proposeQueueMatch(rows), null);
+  assert.equal(proposeFallbackQueueMatch(rows), null);
 });
 
 test("ผู้เล่นที่ถูกข้ามหนึ่งลำดับยังไม่เข้า proposal ถัดไป", () => {

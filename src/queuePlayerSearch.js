@@ -9,7 +9,7 @@ export function buildQueuePlayerSearchOptions({
     const queueNote = queuePositionByMember.has(player.memberId) && !currentMemberIds.has(player.memberId)
       ? ` · ย้ายจากคิว ${queuePositionByMember.get(player.memberId)}`
       : "";
-    const baseLabel = `${player.name} · ${player.skillLevel || "ไม่ระบุมือ"}${queueNote}`;
+    const baseLabel = `${player.name} · ${skillLabel(player.skillLevel) || "ไม่ระบุมือ"}${queueNote}`;
     const occurrence = (usedLabels.get(baseLabel) || 0) + 1;
     usedLabels.set(baseLabel, occurrence);
     return {
@@ -41,3 +41,4 @@ export function updateQueuePlayerSlots(slots, slotIndex, memberId) {
   return next;
 }
 import { normalizeMemberSearch } from "./memberSearch.js";
+import { skillLabel } from "./skillLevels.js";

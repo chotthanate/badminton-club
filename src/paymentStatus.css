@@ -1,0 +1,16 @@
+.payment-refresh-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.payment-refresh-bar small { color: #667569; }
+.payment-refresh-bar button, .payment-manual-review { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-height: 44px; border: 1px solid #c6d8cd; border-radius: 12px; background: white; color: #175c43; padding: 10px 14px; font: inherit; cursor: pointer; }
+.payment-refresh-bar button:disabled, .payment-manual-review:disabled { opacity: .55; cursor: wait; }
+.payment-refresh-warning { padding: 14px; border-radius: 12px; background: #fff7de; border: 1px solid #ead39a; color: #755108; }
+.payment-state-badge { display: inline-flex; width: fit-content; align-items: center; font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 8px; background: #f0f2ee; color: #647165; }
+.payment-state-badge.is-review { background: #fff0ca; color: #795407; }
+.payment-state-badge.is-paid { background: #e1f4e9; color: #176444; }
+.liff-due-list label.is-under-review { cursor: default; background: #fffcf4; border-color: #e6d6ac; }
+.liff-due-list .payment-rejected-note { color: #9c3825; }
+.payment-manual-review { width: 100%; margin-top: 10px; font-weight: 700; }
+.payment-paid-history article { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid #e6ece7; }
+.payment-paid-history article:last-child { border-bottom: 0; padding-bottom: 0; }
+.payment-paid-history article > div { display: grid; gap: 5px; }
+.payment-paid-history article > div:last-child { text-align: right; justify-items: end; }
+.payment-paid-history small { color: #667569; }

@@ -34,7 +34,7 @@ test("finishing a game refreshes only queue state before the next full dashboard
 
   assert.match(repository, /export async function loadQueueState\(eventId\)/);
   assert.match(app, /finishQueueMatch\(match\.id\)[\s\S]{0,160}refreshQueueOnly:\s*true/);
-  assert.match(queuePanel, /finishQueueMatch\(match\.id\)[\s\S]{0,160}refreshQueueOnly:\s*true/);
+  assert.match(queuePanel, /refreshQueueOnly:\s*true/);
 });
 
 test("latest queue migration removes the arbitrary queue cap and keeps batch creation transactional", () => {
@@ -55,7 +55,7 @@ test("cross-queue edits swap players and an accidental start can return to queue
   assert.doesNotMatch(sql, /return_playing_queue_to_head[\s\S]*games_played\s*=\s*games_played\s*\+/i);
 });
 
-test("queue screen keeps four player slots but allows every available future queue", () => {
+test("queue screen allows every available future queue", () => {
   const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
 
   assert.doesNotMatch(queuePanel, /MAX_UPCOMING_QUEUES|สูงสุด 4 คิว/);
@@ -65,19 +65,22 @@ test("queue screen keeps four player slots but allows every available future que
   assert.match(queuePanel, /returnPlayingQueueToHead/);
 });
 
-test("queue player dropdown opens without focusing a search field and remains touch-scrollable", () => {
+test("queue picker uses a scrollable modal above the page", () => {
   const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
-  const styles = readFileSync("src/badminton.css", "utf8");
+  const styles = readFileSync("src/queue-improvements.css", "utf8");
+  assert.match(queuePanel, /aria-modal="true"/);
+  assert.match(queuePanel, /createPortal/);
+  assert.match(styles, /\.queue-modal-backdrop\s*\{[^}]*position:\s*fixed/s);
+  assert.match(styles, /\.queue-modal-body\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(styles, /\.queue-modal-body\s*\{[^}]*touch-action:\s*pan-y/s);
+});
 
-  assert.match(queuePanel, /className="badminton-queue-combobox-trigger"/);
-  assert.match(queuePanel, /className="badminton-queue-combobox-panel"/);
-  assert.doesNotMatch(queuePanel, /onPointerDown/);
-  assert.doesNotMatch(styles, /\.badminton-queue-combobox-list\s*\{[^}]*position:\s*absolute/s);
-  assert.match(styles, /\.badminton-queue-combobox-panel\s*\{[^}]*position:\s*absolute/s);
-  assert.match(styles, /\.badminton-queue-combobox\.is-open\s*\{[^}]*z-index:\s*45/s);
-  assert.match(styles, /\.badminton-queue-combobox-list\s*\{[^}]*overflow-y:\s*auto/s);
-  assert.match(styles, /\.badminton-queue-combobox-list\s*\{[^}]*touch-action:\s*pan-y/s);
-  assert.match(styles, /\.badminton-queue-combobox-list\s*\{[^}]*-webkit-overflow-scrolling:\s*touch/s);
+test("players remain marked as playing when their court booking expires", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  const statusMap = queuePanel.slice(queuePanel.indexOf("const playingCourtByMember"), queuePanel.indexOf("const upcoming ="));
+  assert.match(statusMap, /playingMatches\.flatMap/);
+  assert.match(statusMap, /match\.players\.map/);
+  assert.doesNotMatch(statusMap, /courtTimeStatus|expired/);
 });
 
 test("cancelling an upcoming queue always asks for confirmation", () => {

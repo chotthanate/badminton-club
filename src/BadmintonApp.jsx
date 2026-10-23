@@ -60,6 +60,9 @@ import {
   listClubEvents,
   listOutstandingPayments,
   loadDashboard,
+  loadFinanceState,
+  loadEventControlState,
+  loadAuditState,
   loadParticipantState,
   loadQueueState,
   loadStaffDashboard,
@@ -129,7 +132,15 @@ import { loadPlayerSortMode, savePlayerSortMode } from "./playerSortPreference.j
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
 import QueuePanel, { OperatorCourtControls } from "./QueuePanel.jsx";
 import StaffParticipantsPanel from "./StaffParticipantsPanel.jsx";
-import { defaultPlayableSkillLevels, normalizePlayableSkillLevels } from "./skillLevels.js";
+import { defaultPlayableSkillLevels, normalizePlayableSkillLevels, skillLabel } from "./skillLevels.js";
+import { createMutationQueue } from "./mutationQueue.js";
+import { runMutationLifecycle } from "./mutationOutcome.js";
+import { hasUnsavedQueueWork } from "./queueDrafts.js";
+import ParticipantFilters, { filterParticipants } from "./ParticipantFilters.jsx";
+import MemberDirectoryRow from "./MemberDirectoryRow.jsx";
+import { usePersistentEditor } from "./usePersistentEditor.js";
+import { hasUnsavedEditorWork } from "./editorDrafts.js";
+import "./admin-improvements.css";
 import { authenticateBackofficeCode } from "./backofficeAuth.js";
 import { selectStaffWorkspace } from "./staffWorkspace.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
@@ -283,8 +294,22 @@ function AdminDashboard({ session }) {
   const selectedEventIdRef = useRef(null);
   const refreshRequestRef = useRef(0);
   const savingRef = useRef(false);
+  const [pendingKeys, setPendingKeys] = useState([]);
+  const pollInFlightRef = useRef(false);
+  const fullRefreshCountRef = useRef(0);
+  const latestFullRefreshRef = useRef(0);
+  const viewRef = useRef(null);
+  viewRef.current = { activeTab, context, dashboard };
+  const mutationsRef = useRef(null);
+  if (!mutationsRef.current) mutationsRef.current = createMutationQueue((keys) => {
+    savingRef.current = keys.length > 0;
+    setSaving(keys.length > 0);
+    setPendingKeys(keys);
+  });
 
   async function refresh(silent = false, options = {}) {
+    fullRefreshCountRef.current += 1;
+    const fullRequestId = ++latestFullRefreshRef.current;
     const requestId = ++refreshRequestRef.current;
     if (!silent) setLoading(true);
     setError("");
@@ -333,7 +358,7 @@ function AdminDashboard({ session }) {
         total: outstandingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
         rows: outstandingRows,
       };
-      if (requestId !== refreshRequestRef.current) return;
+      if (requestId !== refreshRequestRef.current) return false;
       setAdminContexts(nextContexts);
       selectedClubIdRef.current = nextContext.club_id;
       setContext(nextContext);
@@ -344,19 +369,35 @@ function AdminDashboard({ session }) {
       setPreviousOutstanding(nextOutstanding);
       setLastSyncedAt(new Date());
       if (isStaffContext) setActiveTab((current) => ["round", "queue", "players"].includes(current) ? current : "queue");
+      return true;
     } catch (nextError) {
       if (requestId === refreshRequestRef.current) setError(nextError.message);
+      if (options.throwOnError) throw nextError;
+      return false;
     } finally {
-      if (!silent && requestId === refreshRequestRef.current) setLoading(false);
+      fullRefreshCountRef.current -= 1;
+      if (fullRequestId === latestFullRefreshRef.current) setLoading(false);
     }
   }
 
   useEffect(() => { refresh(); }, [session.user.id]);
+  useEffect(() => {
+    const warn = (event) => {
+      if (savingRef.current || hasUnsavedQueueWork(selectedEventIdRef.current) || hasUnsavedEditorWork(selectedEventIdRef.current)) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
 
   useEffect(() => {
     if (!dashboard?.event || dashboard.event.status !== "open") return undefined;
-    const timer = window.setInterval(async () => {
-      if (savingRef.current || !selectedEventIdRef.current) return;
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled || savingRef.current || fullRefreshCountRef.current || pollInFlightRef.current || document.hidden || !navigator.onLine || !selectedEventIdRef.current) return;
+      pollInFlightRef.current = true;
       const eventId = selectedEventIdRef.current;
       const requestId = ++refreshRequestRef.current;
       try {
@@ -366,100 +407,136 @@ function AdminDashboard({ session }) {
             ? await loadParticipantState(context.club_id, eventId)
           : context?.role === "staff"
             ? await loadStaffDashboard(context.club_id)
-            : await loadDashboard(context.club_id, eventId);
-        if (requestId === refreshRequestRef.current) {
+            : activeTab === "round"
+              ? await loadFinanceState(context.club_id, eventId)
+              : activeTab === "history"
+                ? await loadAuditState(context.club_id, eventId)
+                : await loadFinanceState(context.club_id, eventId);
+        if (!cancelled && requestId === refreshRequestRef.current) {
           setDashboard((current) => current?.event?.id === eventId
-            ? { ...current, ...nextDashboard, event: nextDashboard.queueEventStatus
+            ? { ...current, ...nextDashboard, event: nextDashboard.event || (nextDashboard.queueEventStatus
               ? { ...current.event, status: nextDashboard.queueEventStatus }
-              : nextDashboard.event || current.event }
+              : current.event) }
             : current);
           setLastSyncedAt(new Date());
         }
       } catch (nextError) {
-        if (requestId === refreshRequestRef.current) setError(nextError.message);
+        if (!cancelled && requestId === refreshRequestRef.current) setError(nextError.message);
+      } finally {
+        pollInFlightRef.current = false;
       }
-    }, activeTab === "queue" ? 5000 : 12000);
-    return () => window.clearInterval(timer);
+    };
+    const timer = window.setInterval(poll, activeTab === "queue" ? 5000 : 15000);
+    document.addEventListener("visibilitychange", poll);
+    window.addEventListener("online", poll);
+    window.addEventListener("focus", poll);
+    poll();
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
+      window.removeEventListener("online", poll);
+      window.removeEventListener("focus", poll);
+      cancelled = true;
+    };
   }, [dashboard?.event?.id, dashboard?.event?.status, activeTab, context?.club_id, context?.role]);
 
   useEffect(() => {
     if (dashboard?.event?.status === "open") setActiveTab("queue");
   }, [dashboard?.event?.id, dashboard?.event?.status]);
 
-  async function mutate(action, successMessage, options = {}) {
-    if (savingRef.current) return false;
-    if (!navigator.onLine) {
-      setError("ยังไม่ได้เชื่อมต่ออินเทอร์เน็ต ข้อมูลที่กรอกยังอยู่ กรุณาเชื่อมต่อแล้วกดบันทึกอีกครั้ง");
-      return false;
-    }
-    savingRef.current = true;
-    setSaving(true);
-    setError("");
-    setNotice("");
-    try {
-      await action();
-      setNotice(successMessage);
-      if ((options.refreshQueueOnly || (activeTab === "queue" && !options.selectLatest)) && selectedEventIdRef.current) {
-        const eventId = selectedEventIdRef.current;
-        const requestId = ++refreshRequestRef.current;
-        const queueState = await loadQueueState(eventId);
-        if (requestId === refreshRequestRef.current) {
-          setDashboard((current) => current?.event?.id === eventId
-            ? { ...current, ...queueState, event: { ...current.event, status: queueState.queueEventStatus } }
-            : current);
-          setLoading(false);
-          setLastSyncedAt(new Date());
-        }
-      } else if (!options.selectLatest && activeTab === "players" && context?.role !== "staff" && context?.club_id && dashboard?.event?.id) {
-        const eventId = dashboard.event.id;
-        const requestId = ++refreshRequestRef.current;
-        const participantState = await loadParticipantState(context.club_id, eventId);
-        if (requestId === refreshRequestRef.current) {
-          setDashboard((current) => current?.event?.id === eventId
-            ? { ...current, ...participantState, event: { ...current.event, status: participantState.queueEventStatus } }
-            : current);
-          setLastSyncedAt(new Date());
-        }
-      } else if (!options.selectLatest && context?.club_id && dashboard?.event?.id) {
-        const requestId = ++refreshRequestRef.current;
-        if (context.role === "staff") {
-          const nextDashboard = await loadStaffDashboard(context.club_id);
-          if (requestId === refreshRequestRef.current) setDashboard(nextDashboard);
-        } else {
-          const [nextDashboard, outstandingRows, nextEvents] = await Promise.all([
-            loadDashboard(context.club_id, dashboard.event.id),
-            listOutstandingPayments(context.club_id),
-            listClubEvents(context.club_id),
-          ]);
-          if (requestId === refreshRequestRef.current) {
-            setDashboard(nextDashboard);
-            setEventSummaries(nextEvents);
-            setPreviousOutstanding({
-              count: outstandingRows.length,
-              total: outstandingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
-              rows: outstandingRows,
-            });
-            setLastSyncedAt(new Date());
+  function mutate(action, successMessage, options = {}) {
+    ++refreshRequestRef.current;
+    return mutationsRef.current.enqueue(options.actionKey, async () => {
+      if (!navigator.onLine) {
+        setError("ยังไม่ได้เชื่อมต่ออินเทอร์เน็ต ข้อมูลที่กรอกยังอยู่ กรุณาเชื่อมต่อแล้วกดบันทึกอีกครั้ง");
+        return false;
+      }
+      setError("");
+      setNotice("");
+      return runMutationLifecycle({
+        action,
+        onError: (nextError) => {
+          if (options.errorMode === "alert") window.alert(nextError.message);
+          else setError(nextError.message);
+        },
+        onSaved: (auditWarning) => {
+          setNotice(successMessage || "บันทึกแล้ว");
+          if (auditWarning) setError(auditWarning);
+        },
+        onRefreshError: (nextError, auditWarning) => {
+          setError(`${auditWarning ? `${auditWarning} · ` : ""}บันทึกแล้ว แต่โหลดข้อมูลล่าสุดไม่ได้ กรุณากดโหลดข้อมูลอีกครั้ง ไม่ต้องกดบันทึกซ้ำ (${nextError.message})`);
+        },
+        refresh: async () => {
+          const { activeTab, context, dashboard } = viewRef.current;
+          if ((options.refreshQueueOnly || (activeTab === "queue" && !options.selectLatest)) && selectedEventIdRef.current) {
+            const eventId = selectedEventIdRef.current;
+            const requestId = ++refreshRequestRef.current;
+            const queueState = await loadQueueState(eventId);
+            if (requestId === refreshRequestRef.current) {
+              setDashboard((current) => current?.event?.id === eventId
+                ? { ...current, ...queueState, event: queueState.event || { ...current.event, status: queueState.queueEventStatus } }
+                : current);
+              setLoading(false);
+              setLastSyncedAt(new Date());
+            }
+          } else if (!options.selectLatest && activeTab === "players" && context?.role !== "staff" && context?.club_id && dashboard?.event?.id) {
+            const eventId = dashboard.event.id;
+            const requestId = ++refreshRequestRef.current;
+            const participantState = await loadParticipantState(context.club_id, eventId);
+            if (requestId === refreshRequestRef.current) {
+              setDashboard((current) => current?.event?.id === eventId
+                ? { ...current, ...participantState, event: participantState.event || { ...current.event, status: participantState.queueEventStatus } }
+                : current);
+              setLastSyncedAt(new Date());
+            }
+          } else if (!options.selectLatest && context?.club_id && dashboard?.event?.id) {
+            const requestId = ++refreshRequestRef.current;
+            if (context.role === "staff") {
+              const nextDashboard = await loadStaffDashboard(context.club_id);
+              if (requestId === refreshRequestRef.current) setDashboard(nextDashboard);
+            } else {
+              const [nextDashboard, outstandingRows, nextEvents] = await Promise.all([
+                loadFinanceState(context.club_id, dashboard.event.id),
+                listOutstandingPayments(context.club_id),
+                listClubEvents(context.club_id),
+              ]);
+              if (requestId === refreshRequestRef.current) {
+                setDashboard((current) => current?.event?.id === nextDashboard.event?.id ? { ...current, ...nextDashboard } : current);
+                setEventSummaries(nextEvents);
+                setPreviousOutstanding({
+                  count: outstandingRows.length,
+                  total: outstandingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+                  rows: outstandingRows,
+                });
+                setLastSyncedAt(new Date());
+              }
+            }
+          } else {
+            await refresh(false, { preferLatest: options.selectLatest, throwOnError: true });
           }
-        }
-      } else {
-        await refresh(false, { preferLatest: options.selectLatest });
-      }
-      return true;
-    } catch (nextError) {
-      if (options.errorMode === "alert") {
-        window.alert(nextError.message);
-      } else {
-        setError(nextError.message);
-      }
+        },
+      });
+    });
+  }
+
+  function canLeaveRound() {
+    if (savingRef.current) {
+      setError("กำลังบันทึก กรุณารอให้เสร็จก่อนเปลี่ยนรอบหรือออกจากระบบ");
       return false;
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
     }
+    return (!hasUnsavedQueueWork(selectedEventIdRef.current) && !hasUnsavedEditorWork(selectedEventIdRef.current))
+      || window.confirm("ยังมีข้อมูลที่แก้ไว้แต่ยังไม่บันทึก ร่างจะเก็บไว้ในเครื่องนี้ ต้องการออกจากรอบนี้ไหม?");
+  }
+
+  function changeTab(nextTab) {
+    if (nextTab === activeTab) return;
+    if ((hasUnsavedQueueWork(selectedEventIdRef.current) || hasUnsavedEditorWork(selectedEventIdRef.current))
+      && !window.confirm("ยังมีร่างที่ไม่บันทึก ร่างจะถูกเก็บไว้ให้เมื่อกลับมา ต้องการเปลี่ยนหน้าไหม?")) return;
+    setActiveTab(nextTab);
   }
 
   async function switchTestMode() {
+    if (!canLeaveRound()) return;
     const productionContext = adminContexts.find((entry) => !entry.clubs.is_test);
     if (context?.clubs.is_test) {
       if (productionContext) {
@@ -569,8 +646,8 @@ function AdminDashboard({ session }) {
             <button
               aria-label="โหลดหน้าเว็บและข้อมูลล่าสุด"
               className="badminton-icon-button"
-              onClick={() => window.location.reload()}
-              title="โหลดหน้าเว็บและข้อมูลล่าสุด"
+              onClick={() => { if (!savingRef.current) refresh(false); }}
+              title="โหลดข้อมูลล่าสุด (ไม่ล้างร่างที่กำลังแก้)"
               type="button"
             >
               <RefreshCw size={18} />
@@ -582,7 +659,7 @@ function AdminDashboard({ session }) {
             {!isStaff ? <button aria-label={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} className={`badminton-icon-button ${context.clubs.is_test ? "is-test-mode" : ""}`} onClick={switchTestMode} title={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} type="button">
               <FlaskConical size={18} />
             </button> : null}
-            <button className="badminton-secondary" onClick={() => supabase.auth.signOut()} type="button">
+            <button className="badminton-secondary" onClick={() => { if (canLeaveRound()) supabase.auth.signOut(); }} type="button">
               <LogOut size={17} /> ออกจากระบบ
             </button>
           </div>
@@ -602,7 +679,7 @@ function AdminDashboard({ session }) {
           <>
             {!isStaff ? <RoundSwitcher
               events={eventSummaries}
-              onChange={(eventId) => refresh(false, { eventId })}
+              onChange={(eventId) => { if (canLeaveRound()) refresh(false, { eventId }); }}
               onDelete={(round) => mutate(
                 () => deleteCompletedEvent(round.id),
                 round.status === "draft" ? "ลบรอบที่กำลังเตรียมแล้ว" : "ลบรอบที่ชำระเงินครบแล้ว",
@@ -612,12 +689,13 @@ function AdminDashboard({ session }) {
             /> : null}
             <nav aria-label="เมนูหลังบ้าน" className="badminton-tabs">
               {visibleTabs.map(({ id, label, icon: Icon }) => (
-                <button className={activeTab === id ? "is-active" : ""} key={id} onClick={() => setActiveTab(id)} type="button"><Icon size={18} /><span>{label}</span>{id === "payments" && appEvent.paymentSlips?.length ? <b className="badminton-tab-count" title={`${appEvent.paymentSlips.length} สลิปรอตรวจสอบ`}>{appEvent.paymentSlips.length}</b> : null}</button>
+                <button className={activeTab === id ? "is-active" : ""} key={id} onClick={() => changeTab(id)} type="button"><Icon size={18} /><span>{label}</span>{id === "payments" && appEvent.paymentSlips?.length ? <b className="badminton-tab-count" title={`${appEvent.paymentSlips.length} สลิปรอตรวจสอบ`}>{appEvent.paymentSlips.length}</b> : null}</button>
               ))}
             </nav>
 
             {!isStaff && activeTab === "round" ? <>
               <EventControlCard
+                dashboard={dashboard}
                 clubName={context.clubs.name}
                 clubSettings={context.clubs}
                 courts={dashboard.courts}
@@ -638,13 +716,14 @@ function AdminDashboard({ session }) {
             {isStaff && activeTab === "round" ? <OperatorCourtControls event={appEvent} mutate={mutate} /> : null}
 
             {activeTab === "players" ? (
-              isStaff ? <StaffParticipantsPanel dashboard={dashboard} event={appEvent} mutate={mutate} /> : <ParticipantsPanel
+              isStaff ? <StaffParticipantsPanel dashboard={dashboard} event={appEvent} mutate={mutate} pendingKeys={pendingKeys} /> : <ParticipantsPanel
                 context={context}
                 dashboard={dashboard}
                 event={appEvent}
                 mutate={mutate}
                 session={session}
                 settlement={settlement}
+                pendingKeys={pendingKeys}
               />
             ) : null}
 
@@ -665,7 +744,7 @@ function AdminDashboard({ session }) {
           />
         ) : null}
         {!isStaff && !context.clubs.is_test && staffAccessModalOpen ? <StaffAccessModal clubId={context.club_id} onClose={() => setStaffAccessModalOpen(false)} onSave={(settings) => mutate(() => configureStaffAccess({ clubId: context.club_id, ...settings }), settings.enabled ? "ตั้งค่ารหัสสตาฟแล้ว เซสชันเดิมถูกตัด" : "ปิดใช้งานรหัสสตาฟแล้ว")} saving={saving} /> : null}
-        {saving ? <div className="badminton-saving">กำลังบันทึก...</div> : null}
+        {saving ? <div className="badminton-saving" role="status">กำลังบันทึก{pendingKeys.length > 1 ? ` · ${pendingKeys.length} รายการ` : "..."}</div> : null}
       </section>
     </main>
   );
@@ -820,7 +899,7 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
         userId: session.user.id,
         action: "สร้างรอบใหม่",
       });
-    }, "สร้างรอบใหม่แล้ว", { selectLatest: true });
+    }, "สร้างรอบใหม่แล้ว", { selectLatest: true, actionKey: `round:create:${context.club_id}` });
   }
 
   return (
@@ -833,30 +912,31 @@ function CreateEventCard({ compact = false, context, defaultVenue = "", session,
   );
 }
 
-function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, mappedEvent, mutate, session, settlement, venues = [] }) {
-  const [form, setForm] = useState({
+function EventControlCard({ clubName, clubSettings, courts, dashboard, event, isTestMode, mappedEvent, mutate, session, settlement, venues = [] }) {
+  const eventEditor = usePersistentEditor(`badminton:event:${event.id}`, {
     event_date: event.event_date,
     venue: event.venue,
   });
+  const form = eventEditor.value;
+  const setForm = eventEditor.setValue;
   const [editingDetails, setEditingDetails] = useState(event.status === "draft");
   const [newCourt, setNewCourt] = useState({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
-  const [courtDrafts, setCourtDrafts] = useState({});
-
-  useEffect(() => {
-    setCourtDrafts(Object.fromEntries(courts.map((court) => [court.id, {
+  const courtEditor = usePersistentEditor(`badminton:courts:${event.id}`, Object.fromEntries(courts.map((court) => [court.id, {
       court_name: court.court_name,
       starts_at: court.starts_at.slice(0, 5),
       ends_at: court.ends_at.slice(0, 5),
     }])));
-  }, [courts, event.id]);
+  const courtDrafts = courtEditor.value;
+  const setCourtDrafts = courtEditor.setValue;
 
   async function saveEventDetails() {
+    if (eventEditor.conflict) { window.alert("รายละเอียดรอบเปลี่ยนจากเครื่องอื่น กรุณาใช้ข้อมูลล่าสุดก่อนแก้ใหม่"); return; }
     const previousWeekday = weekdayFromIsoDate(event.event_date);
     const nextWeekday = weekdayFromIsoDate(form.event_date);
     const shouldApplyPreset = event.status === "draft"
       && previousWeekday !== nextWeekday
       && [5, 6].includes(nextWeekday);
-    await mutate(async () => {
+    const saved = await mutate(async () => {
       const preset = shouldApplyPreset ? roundDefaultsForDate(form.event_date, clubSettings) : null;
       await updateEventDetails({
         clubId: event.club_id,
@@ -878,21 +958,26 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
       }
     }, shouldApplyPreset
       ? `บันทึกรายละเอียดและใช้คอร์ทตั้งต้นของวัน${nextWeekday === 5 ? "ศุกร์" : "เสาร์"}แล้ว`
-      : "บันทึกรายละเอียดรอบแล้ว");
+      : "บันทึกรายละเอียดรอบแล้ว", { actionKey: `event-details:${event.id}` });
+    if (saved) eventEditor.accept(form);
   }
 
   async function addNewCourt(submitEvent) {
     submitEvent.preventDefault();
-    await mutate(() => addCourt({
+    const saved = await mutate(() => addCourt({
       clubId: event.club_id,
       eventId: event.id,
       ...newCourt,
       courtName: `คอร์ท ${newCourt.courtNumber.trim()}`,
-    }), "เพิ่มคอร์ทแล้ว");
-    setNewCourt({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
+    }), "เพิ่มคอร์ทแล้ว", { actionKey: `court:add:${event.id}` });
+    if (saved) setNewCourt({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
   }
 
   async function saveAllCourts() {
+    if (courtEditor.conflict) {
+      window.alert("ข้อมูลคอร์ทเปลี่ยนจากเครื่องอื่น กรุณาโหลดค่าล่าสุดแล้วแก้ใหม่เพื่อไม่บันทึกทับกัน ร่างที่กรอกยังอยู่");
+      return;
+    }
     const updates = courts.map((court) => ({
       id: court.id,
       ...(courtDrafts[court.id] || {
@@ -905,7 +990,8 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
       await mutate(async () => { throw new Error("กรุณากรอกชื่อคอร์ทให้ครบทุกคอร์ท"); }, "");
       return;
     }
-    await mutate(() => updateCourts(event.id, updates), "บันทึกคอร์ททั้งหมดแล้ว");
+    const saved = await mutate(() => updateCourts(event.id, updates), "บันทึกคอร์ททั้งหมดแล้ว", { actionKey: `courts:${event.id}` });
+    if (saved) courtEditor.accept(courtDrafts);
   }
 
   function advanceRound() {
@@ -924,40 +1010,35 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
             userId: session.user.id,
             action: "เปิดลงชื่อในโหมดทดลอง",
           });
-        }, "เปิดลงชื่อทดลองแล้ว โดยไม่ได้ส่งเข้า LINE");
+        }, "เปิดลงชื่อทดลองแล้ว โดยไม่ได้ส่งเข้า LINE", { actionKey: `round:advance:${event.id}` });
       }
       if (event.line_publish_ready) return null;
       return mutate(
         () => prepareEventForLine(event.id),
         "เตรียมรอบแล้ว กรุณาพิมพ์ “เปิดลงชื่อ” ในกลุ่ม LINE",
+        { actionKey: `round:advance:${event.id}` },
       );
     }
     if (event.status === "open") {
       return mutate(async () => {
-        if (mappedEvent.billingModel === "per_round" && mappedEvent.hasPlayingGames) {
+        const freshDashboard = { ...dashboard, ...await loadFinanceState(event.club_id, event.id) };
+        const freshEvent = mapDashboardToEvent(freshDashboard);
+        if (freshEvent.status !== "open") throw new Error("รอบนี้ถูกปิดจากเครื่องอื่นแล้ว กรุณาโหลดข้อมูลล่าสุด");
+        const freshSettlement = calculateSettlement(freshEvent);
+        if (freshEvent.billingModel === "per_round" && freshEvent.hasPlayingGames) {
           throw new Error("ยังมีสนามกำลังเล่น กรุณากดจบเกมทุกสนามก่อนจบรอบและคำนวณยอดตามจำนวนรอบ");
         }
-        if (mappedEvent.billingModel === "per_round" && settlement.sharedTotalCost > 0 && settlement.totalUnits <= 0) {
+        if (freshEvent.billingModel === "per_round" && freshSettlement.sharedTotalCost > 0 && freshSettlement.totalUnits <= 0) {
           throw new Error("ยังไม่มีเกมที่จบ ระบบจึงยังหารค่าส่วนกลางตามจำนวนรอบไม่ได้");
         }
         await finishEvent({
           clubId: mappedEvent.clubId,
           eventId: event.id,
-          rows: settlement.rows,
-          shuttlecockCount: mappedEvent.shuttlecockCount,
+          rows: freshSettlement.rows,
+          shuttlecockCount: freshEvent.shuttlecockCount,
           userId: session.user.id,
         });
-        await recordAudit({
-          clubId: mappedEvent.clubId,
-          eventId: event.id,
-          userId: session.user.id,
-          action: `จบรอบและบันทึกยอดที่ต้องชำระแบบ${mappedEvent.billingModel === "per_round" ? "ตามจำนวนรอบ" : "ตามเวลา"}`,
-          details: {
-            billing_model: mappedEvent.billingModel,
-            completed_games: mappedEvent.completedGameCount,
-          },
-        });
-      }, "จบรอบแล้ว ยอดของผู้เล่นทุกคนถูกเก็บไว้");
+      }, "จบรอบแล้ว ยอดของผู้เล่นทุกคนถูกเก็บไว้", { actionKey: `round:advance:${event.id}` });
     }
     return null;
   }
@@ -984,6 +1065,7 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
       </div>
       {event.status === "draft" && event.line_publish_ready && !isTestMode ? <div className="badminton-line-command-ready"><strong>ขั้นตอนสุดท้าย</strong><span>ไปที่กลุ่ม LINE แล้วพิมพ์ <b>เปิดลงชื่อ</b> บอทจะตอบการ์ดโดยไม่หักโควตา</span></div> : null}
       {editingDetails ? <div className="badminton-event-form badminton-event-main-form">
+        {eventEditor.dirty ? <div className="editor-dirty">ยังไม่บันทึก{eventEditor.conflict ? " · มีข้อมูลใหม่จากเครื่องอื่น" : ""}<button type="button" onClick={() => { if (window.confirm("ทิ้งร่างรายละเอียดรอบและใช้ข้อมูลล่าสุด?")) eventEditor.reset(); }}>ใช้ข้อมูลล่าสุด</button></div> : null}
         <label>วันที่<input type="date" value={form.event_date} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></label>
         <label>สถานที่<input list="round-saved-venues" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} /></label>
         <datalist id="round-saved-venues">{venues.map((venue) => <option key={venue.id} value={venue.name} />)}</datalist>
@@ -996,6 +1078,7 @@ function EventControlCard({ clubName, clubSettings, courts, event, isTestMode, m
       ) : (
         <div className="badminton-courts-editor">
           <div className="badminton-courts-heading"><strong>คอร์ทที่จอง</strong></div>
+          {courtEditor.dirty ? <div className="editor-dirty">ยังไม่บันทึก{courtEditor.conflict ? " · ข้อมูลคอร์ทเปลี่ยนจากเครื่องอื่น" : " · ร่างถูกเก็บไว้ในเครื่องนี้"}<button type="button" onClick={() => { if (window.confirm("ทิ้งร่างคอร์ทและใช้ข้อมูลล่าสุด?")) courtEditor.reset(); }}>ใช้ข้อมูลล่าสุด</button></div> : null}
           {courts.map((court) => <CourtEditor key={court.id} court={court} draft={courtDrafts[court.id]} onChange={(nextDraft) => setCourtDrafts((current) => ({ ...current, [court.id]: nextDraft }))} eventId={event.id} mutate={mutate} />)}
           <form className="badminton-court-row is-new" onSubmit={addNewCourt}>
             <div className="badminton-court-number-input"><span>คอร์ท</span><input aria-label="เลขคอร์ทใหม่" inputMode="numeric" placeholder="เลข" required value={newCourt.courtNumber} onChange={(e) => setNewCourt({ ...newCourt, courtNumber: e.target.value })} /></div>
@@ -1215,7 +1298,7 @@ function LegacyQueuePanel({ dashboard, event, mutate }) {
   );
 }
 
-function ParticipantsPanel({ context, dashboard, event, mutate, session, settlement }) {
+function ParticipantsPanel({ context, dashboard, event, mutate, session, settlement, pendingKeys = [] }) {
   const [name, setName] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState(null);
   const [newMemberSkill, setNewMemberSkill] = useState({ level: "", playableLevels: [] });
@@ -1231,6 +1314,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [memberDirectoryOpen, setMemberDirectoryOpen] = useState(false);
   const [memberDirectoryQuery, setMemberDirectoryQuery] = useState("");
   const [sortMode, setSortMode] = useState(loadPlayerSortMode);
+  const [rosterQuery, setRosterQuery] = useState("");
+  const [rosterFilter, setRosterFilter] = useState("all");
   const [exemptMemberId, setExemptMemberId] = useState("");
   const [mergeSourceId, setMergeSourceId] = useState("");
   const [mergeTargetId, setMergeTargetId] = useState("");
@@ -1242,7 +1327,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       attendance: event.attendance.find((row) => row.memberId === signup.memberId),
     }))
     .filter((row) => row.member);
-  const sortedParticipants = [...participants].sort((a, b) => {
+  const sortedParticipants = filterParticipants(participants, rosterQuery, rosterFilter).sort((a, b) => {
     if (sortMode === "alphabetical") return memberName(a.member).localeCompare(memberName(b.member), "th");
     return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
   });
@@ -1320,7 +1405,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         userId: session.user.id,
         action: `${existingMember ? "เพิ่มผู้เล่นเดิม" : "สร้างและเพิ่มผู้เล่น"} ${memberName(member) || trimmedName}`,
       });
-    }, existingMember ? `เพิ่ม ${memberName(existingMember)} จากประวัติเดิมแล้ว` : "สร้างผู้เล่นใหม่และเพิ่มเข้ารอบแล้ว");
+    }, existingMember ? `เพิ่ม ${memberName(existingMember)} จากประวัติเดิมแล้ว` : "สร้างผู้เล่นใหม่และเพิ่มเข้ารอบแล้ว", { actionKey: `add-player:${event.id}:${existingMember?.id || normalizedName}` });
     if (saved) {
       setName("");
       setSelectedMemberId(null);
@@ -1331,8 +1416,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 
   async function addCatalogItem(submitEvent) {
     submitEvent.preventDefault();
-    await mutate(() => addExtraCatalogItem({ clubId: context.club_id, name: newItem.name, price: newItem.price }), "เพิ่มสินค้าแล้ว");
-    setNewItem({ name: "", price: "" });
+    const saved = await mutate(() => addExtraCatalogItem({ clubId: context.club_id, name: newItem.name, price: newItem.price }), "เพิ่มสินค้าแล้ว", { actionKey: "catalog:add" });
+    if (saved) setNewItem({ name: "", price: "" });
   }
 
   async function addPaymentExemptMember(submitEvent) {
@@ -1395,20 +1480,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         skillLevel: memberEdit.skillLevel,
         playableSkillLevels: memberEdit.playableSkillLevels,
       });
-      await updateOperatorMemberSkill({
-        eventId: event.id,
-        memberId: editingMember.id,
-        skillLevel: memberEdit.skillLevel,
-        playableSkillLevels: memberEdit.playableSkillLevels,
-      });
-      await recordAudit({
-        clubId: context.club_id,
-        eventId: event.id,
-        userId: session.user.id,
-        action: `แก้ไขชื่อผู้เล่น ${nickname}`,
-        details: { member_id: editingMember.id, payment_exempt: memberEdit.paymentExempt, skill_level: memberEdit.skillLevel },
-      });
-    }, `บันทึกชื่อ ${nickname} แล้ว`);
+    }, `บันทึกชื่อ ${nickname} แล้ว`, { actionKey: `profile:${editingMember.id}` });
     if (saved) setEditingMember(null);
   }
 
@@ -1494,15 +1566,17 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     submitEvent.preventDefault();
     const target = customChargeFor;
     if (!target) return;
-    await mutate(() => addMemberExtraCharge({
+    const saved = await mutate(() => addMemberExtraCharge({
       clubId: event.clubId,
       eventId: event.id,
       memberId: target.memberId,
       item: { name: customCharge.name.trim(), price: Number(customCharge.price) },
       userId: session.user.id,
-    }), `เพิ่ม ${customCharge.name.trim()} ให้ ${target.name} แล้ว`);
-    setCustomChargeFor(null);
-    setCustomCharge({ name: "", price: "" });
+    }), `เพิ่ม ${customCharge.name.trim()} ให้ ${target.name} แล้ว`, { actionKey: `extra:${target.memberId}` });
+    if (saved) {
+      setCustomChargeFor(null);
+      setCustomCharge({ name: "", price: "" });
+    }
   }
 
   function chooseExtra(itemId, memberId, participantName) {
@@ -1520,7 +1594,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       memberId,
       item: { name: item.name, price: Number(item.price) },
       userId: session.user.id,
-    }), `เพิ่ม ${item.name} ให้ ${participantName} แล้ว`);
+    }), `เพิ่ม ${item.name} ให้ ${participantName} แล้ว`, { actionKey: `extra:${memberId}` });
   }
 
   async function completeCheckIn(target, useSuggestedTime) {
@@ -1545,7 +1619,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       });
     }, useSuggestedTime
       ? `เช็กชื่อและปรับเวลามาของ ${target.participantName} แล้ว`
-      : `เช็กชื่อ ${target.participantName} แล้ว`);
+      : `เช็กชื่อ ${target.participantName} แล้ว`, { actionKey: `attendance:${target.memberId}` });
     if (saved) setPendingCheckIn(null);
   }
 
@@ -1617,7 +1691,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       ? event.billingModel === "per_round"
         ? `บันทึก Snapshot ของ ${pendingDeparture.participantName} แล้ว · ยังไม่สรุปยอด`
         : `บันทึกเวลากลับของ ${pendingDeparture.participantName} แล้ว · ยังไม่สรุปยอด`
-      : `บันทึกเฉพาะเวลากลับของ ${pendingDeparture.participantName} แล้ว · ลูกแบดจะหารจากยอดรวมตอนจบรอบ`);
+      : `บันทึกเฉพาะเวลากลับของ ${pendingDeparture.participantName} แล้ว · ลูกแบดจะหารจากยอดรวมตอนจบรอบ`, { actionKey: `departure:${pendingDeparture.memberId}` });
     if (saved) setPendingDeparture(null);
   }
 
@@ -1682,12 +1756,13 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           {!selectedMemberId ? <small className="badminton-member-search-hint">{context.clubs.is_test ? "รายชื่อทดลอง" : "ผู้เล่นเดิมที่บันทึกไว้"} {savedMembers.length} คน · แตะช่องหรือพิมพ์เพื่อค้นหา</small> : null}
         </div>
         <div className="badminton-new-player-skill">
-          <select aria-label="ระดับมือผู้เล่น" disabled={Boolean(selectedMemberId && newMemberSkill.level)} onChange={(changeEvent) => setNewMemberSkill({ level: changeEvent.target.value, playableLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={newMemberSkill.level}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select>
+          <select aria-label="ระดับมือผู้เล่น" disabled={Boolean(selectedMemberId && newMemberSkill.level)} onChange={(changeEvent) => setNewMemberSkill({ level: changeEvent.target.value, playableLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={newMemberSkill.level}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select>
           {!selectedMemberId ? <SkillCompatibilityPicker onChange={(playableLevels) => setNewMemberSkill({ ...newMemberSkill, playableLevels })} skillLevel={newMemberSkill.level} value={newMemberSkill.playableLevels} /> : null}
         </div>
         <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> {selectedMemberId ? "เพิ่มคนเดิม" : "เพิ่มคน"}</button>
       </form>
 
+      <ParticipantFilters rows={participants} query={rosterQuery} onQuery={setRosterQuery} filter={rosterFilter} onFilter={setRosterFilter} />
       <div className="badminton-attendance-list">
         {sortedParticipants.length ? sortedParticipants.map(({ member, attendance: row, arrivalTime, submittedByLineName, skillLevel: roundSkillLevel }, playerIndex) => {
           const participantName = memberName(member);
@@ -1705,12 +1780,13 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const isPaid = Boolean(settlementRow?.paid) && !settlementRow?.paymentExempt;
           const lineName = member.nickname && member.nickname !== member.display_name ? member.display_name : "";
           const checkedIn = Boolean(row?.checkedIn);
+          const personPending = pendingKeys.some((key) => typeof key === "string" && key.endsWith(`:${member.id}`));
 
           function updateArrival(nextArrival) {
             return mutate(async () => {
               await updateSignupArrival({ eventId: event.id, memberId: member.id, arrivalTime: nextArrival });
               await updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: checkedIn, arrived_at: checkedIn ? nextArrival : null } });
-            }, `ปรับเวลามาของ ${participantName} แล้ว`);
+            }, `ปรับเวลามาของ ${participantName} แล้ว`, { actionKey: `arrival:${member.id}` });
           }
 
           function updateDeparture(nextDeparture) {
@@ -1737,6 +1813,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                   ? `บันทึก Snapshot ของ ${participantName} แล้ว · ยังไม่สรุปยอด`
                   : `บันทึกเวลากลับของ ${participantName} แล้ว · ยังไม่สรุปยอด`
                 : `ยกเลิกเวลากลับของ ${participantName} แล้ว`,
+              { actionKey: `departure:${member.id}` },
             );
           }
 
@@ -1766,7 +1843,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                   details: { member_id: member.id, from: billingPercentage, to: percentage },
                 });
               },
-              `ปรับสัดส่วนคิดเงินของ ${participantName} เป็น ${percentage}% แล้ว`,
+              `ปรับสัดส่วนคิดเงินของ ${participantName} เป็น ${percentage}% แล้ว`, { actionKey: `percentage:${member.id}` },
             );
           }
 
@@ -1788,7 +1865,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                   memberId: member.id,
                   patch: { arrived: false, arrived_at: null, left_at: null },
                 }),
-                `ยกเลิกเช็กชื่อ ${participantName} แล้ว`,
+                `ยกเลิกเช็กชื่อ ${participantName} แล้ว`, { actionKey: `attendance:${member.id}` },
               );
             }
 
@@ -1818,12 +1895,12 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           }
 
           return (
-            <article className={`badminton-attendance-row ${checkedIn ? "is-checked-in" : ""} ${leftAt ? "has-left" : ""} ${settlementRow?.billingFinalized ? "is-billed" : ""} ${settlementRow?.paid && !settlementRow?.paymentExempt ? "is-paid" : ""}`} key={member.id}>
+            <fieldset disabled={personPending} aria-busy={personPending} className={`participant-controls-lock badminton-attendance-row ${checkedIn ? "is-checked-in" : ""} ${leftAt ? "has-left" : ""} ${settlementRow?.billingFinalized ? "is-billed" : ""} ${settlementRow?.paid && !settlementRow?.paymentExempt ? "is-paid" : ""}`} key={member.id}>
               <div className="badminton-player-identity">
                 <label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label>
                 <b className="badminton-player-index">{playerIndex + 1}.</b>
-                <div className="badminton-player-name"><strong>{participantName}</strong>{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}</div>
-                {roundSkillLevel || member.skill_level ? <em className="badminton-skill-badge">{roundSkillLevel || member.skill_level}</em> : null}
+                <div className="badminton-player-name"><strong>{participantName}</strong>{personPending ? <span className="participant-pending" role="status">กำลังบันทึก…</span> : null}{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}</div>
+                {roundSkillLevel || member.skill_level ? <em className="badminton-skill-badge">{skillLabel(roundSkillLevel || member.skill_level)}</em> : null}
                 <button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button>
                 {submittedByLineName ? <small className="badminton-signup-attribution" title={`ลงชื่อให้โดย LINE: ${submittedByLineName}`}>ลงชื่อให้โดย LINE: {submittedByLineName}</small> : null}
               </div>
@@ -1835,20 +1912,20 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                 <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={removePlayer} type="button"><Trash2 size={17} /></button>
               </div>
               {charges.length ? <div className="badminton-member-charges">{charges.map((charge) => <span key={charge.id}>{charge.item_name} {baht(Number(charge.unit_price) * Number(charge.quantity))}{!isPaid ? <button aria-label={`ลบ ${charge.item_name}`} onClick={() => mutate(() => removeMemberExtraCharge(charge.id), `ลบ ${charge.item_name} แล้ว`)} type="button">×</button> : null}</span>)}</div> : null}
-            </article>
+            </fieldset>
           );
-        }) : <div className="badminton-empty">ยังไม่มีผู้เล่น</div>}
+        }) : <div className="badminton-empty">ไม่พบผู้เล่นตามตัวกรอง</div>}
       </div>
-      {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><WalletCards size={17} /><strong>รายชื่อไม่ต้องเก็บเงิน</strong><em>{savedMembers.filter((member) => member.payment_exempt).length} คน</em></div><form className="badminton-exempt-member-form" onSubmit={addPaymentExemptMember}><select aria-label="เลือกสมาชิกที่ไม่ต้องเก็บเงิน" onChange={(changeEvent) => setExemptMemberId(changeEvent.target.value)} required value={exemptMemberId}><option value="">เลือกสมาชิกจากรายชื่อเดิม</option>{savedMembers.filter((member) => !member.payment_exempt).sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option key={member.id} value={member.id}>{paymentExemptIdentity(member)}</option>)}</select><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form><div className="badminton-exempt-member-list">{savedMembers.filter((member) => member.payment_exempt).map((member) => <span key={member.id}><span><strong>{memberName(member)}</strong><small>{member.line_user_id ? `LINE: ${member.display_name || "เชื่อมแล้ว"}` : "ยังไม่เชื่อม LINE"}</small></span><button aria-label={`นำ ${memberName(member)} ออกจากรายชื่อไม่ต้องเก็บเงิน`} onClick={() => removePaymentExemptMember(member)} type="button"><X size={14} /></button></span>)}</div><small className="badminton-settings-help">เลือกจากสมาชิกตัวจริงโดยดูชื่อ LINE ประกอบ ระบบจะไม่จับคู่ด้วยชื่อเล่น จึงแยกคนชื่อซ้ำได้ถูกต้อง</small><small className="badminton-settings-help">คนในรายชื่อนี้ยังร่วมถูกหารค่าใช้จ่าย แต่ระบบจะถือว่าชำระแล้วและไม่ใส่ในข้อความส่ง LINE</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รวมรายชื่อซ้ำ</strong><em>พบชื่อซ้ำ {duplicateMemberGroups.length} กลุ่ม</em></div>{duplicateMemberGroups.length ? <div className="badminton-duplicate-suggestions">{duplicateMemberGroups.map((group) => <button key={group.map((member) => member.id).join("-")} onClick={() => chooseDuplicateGroup(group)} type="button">{group.map((member) => memberName(member)).join(" ↔ ")}</button>)}</div> : <small className="badminton-settings-help">ไม่พบชื่อที่สะกดตรงกัน หากคนเดียวกันใช้คนละชื่อสามารถเลือกเองด้านล่าง</small>}<form className="badminton-member-merge-form" onSubmit={mergeDuplicateMember}><label><span>เก็บคนนี้ไว้</span><select aria-label="ชื่อหลักที่ต้องการเก็บ" onChange={(changeEvent) => setMergeTargetId(changeEvent.target.value)} required value={mergeTargetId}><option value="">เลือกชื่อหลัก</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeSourceId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><label><span>รวมชื่อซ้ำนี้</span><select aria-label="ชื่อซ้ำที่ต้องการรวม" onChange={(changeEvent) => setMergeSourceId(changeEvent.target.value)} required value={mergeSourceId}><option value="">เลือกชื่อซ้ำ</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeTargetId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><button className="badminton-secondary" type="submit">รวมประวัติและลบชื่อซ้ำ</button></form><small className="badminton-settings-help">ควรเก็บรายการที่มีคำว่า “เชื่อม LINE” เป็นชื่อหลัก ระบบจะย้ายประวัติ ยอดค้าง และจำชื่อเดิมไว้ค้นหาครั้งต่อไป</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => mutate(() => updateExtraCatalogItem(item.id, changeEvent.target.value), `แก้ราคา ${item.name} แล้ว`)} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
+      {settingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าผู้เล่น" aria-modal="true" className="badminton-custom-charge-modal badminton-player-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าผู้เล่น</p><h2>รายชื่อและสินค้า</h2></div><button aria-label="ปิดการตั้งค่าผู้เล่น" onClick={() => setSettingsOpen(false)} type="button"><X size={19} /></button></div><section className="badminton-settings-section"><div className="badminton-settings-section-title"><WalletCards size={17} /><strong>รายชื่อไม่ต้องเก็บเงิน</strong><em>{savedMembers.filter((member) => member.payment_exempt).length} คน</em></div><form className="badminton-exempt-member-form" onSubmit={addPaymentExemptMember}><select aria-label="เลือกสมาชิกที่ไม่ต้องเก็บเงิน" onChange={(changeEvent) => setExemptMemberId(changeEvent.target.value)} required value={exemptMemberId}><option value="">เลือกสมาชิกจากรายชื่อเดิม</option>{savedMembers.filter((member) => !member.payment_exempt).sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option key={member.id} value={member.id}>{paymentExemptIdentity(member)}</option>)}</select><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form><div className="badminton-exempt-member-list">{savedMembers.filter((member) => member.payment_exempt).map((member) => <span key={member.id}><span><strong>{memberName(member)}</strong><small>{member.line_user_id ? `LINE: ${member.display_name || "เชื่อมแล้ว"}` : "ยังไม่เชื่อม LINE"}</small></span><button aria-label={`นำ ${memberName(member)} ออกจากรายชื่อไม่ต้องเก็บเงิน`} onClick={() => removePaymentExemptMember(member)} type="button"><X size={14} /></button></span>)}</div><small className="badminton-settings-help">เลือกจากสมาชิกตัวจริงโดยดูชื่อ LINE ประกอบ ระบบจะไม่จับคู่ด้วยชื่อเล่น จึงแยกคนชื่อซ้ำได้ถูกต้อง</small><small className="badminton-settings-help">คนในรายชื่อนี้ยังร่วมถูกหารค่าใช้จ่าย แต่ระบบจะถือว่าชำระแล้วและไม่ใส่ในข้อความส่ง LINE</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รายชื่อผู้เล่นเดิม</strong><em>{savedMembers.length} คน</em></div><div className="badminton-member-directory-list">{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => { const nickname = memberName(member); const lineName = member.display_name && member.display_name !== nickname ? member.display_name : ""; return <button aria-label={`แก้ไขชื่อ ${nickname}`} key={member.id} onClick={() => openMemberEditor(member)} type="button"><span><strong>{nickname}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span><Pencil size={15} /></button>; })}</div></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><Users size={17} /><strong>รวมรายชื่อซ้ำ</strong><em>พบชื่อซ้ำ {duplicateMemberGroups.length} กลุ่ม</em></div>{duplicateMemberGroups.length ? <div className="badminton-duplicate-suggestions">{duplicateMemberGroups.map((group) => <button key={group.map((member) => member.id).join("-")} onClick={() => chooseDuplicateGroup(group)} type="button">{group.map((member) => memberName(member)).join(" ↔ ")}</button>)}</div> : <small className="badminton-settings-help">ไม่พบชื่อที่สะกดตรงกัน หากคนเดียวกันใช้คนละชื่อสามารถเลือกเองด้านล่าง</small>}<form className="badminton-member-merge-form" onSubmit={mergeDuplicateMember}><label><span>เก็บคนนี้ไว้</span><select aria-label="ชื่อหลักที่ต้องการเก็บ" onChange={(changeEvent) => setMergeTargetId(changeEvent.target.value)} required value={mergeTargetId}><option value="">เลือกชื่อหลัก</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeSourceId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><label><span>รวมชื่อซ้ำนี้</span><select aria-label="ชื่อซ้ำที่ต้องการรวม" onChange={(changeEvent) => setMergeSourceId(changeEvent.target.value)} required value={mergeSourceId}><option value="">เลือกชื่อซ้ำ</option>{[...savedMembers].sort((left, right) => memberName(left).localeCompare(memberName(right), "th")).map((member) => <option disabled={member.id === mergeTargetId} key={member.id} value={member.id}>{memberName(member)}{member.line_user_id ? " · เชื่อม LINE" : ""}</option>)}</select></label><button className="badminton-secondary" type="submit">รวมประวัติและลบชื่อซ้ำ</button></form><small className="badminton-settings-help">ควรเก็บรายการที่มีคำว่า “เชื่อม LINE” เป็นชื่อหลัก ระบบจะย้ายประวัติ ยอดค้าง และจำชื่อเดิมไว้ค้นหาครั้งต่อไป</small></section><section className="badminton-settings-section"><div className="badminton-settings-section-title"><PackagePlus size={17} /><strong>รายการสินค้า น้ำ-ขนม</strong></div><div className="badminton-catalog-list">{(dashboard.extraItems || []).map((item) => <div className="badminton-catalog-item" key={item.id}><span>{item.name}</span><input aria-label={`ราคา ${item.name}`} defaultValue={item.price} min="0" onBlur={(changeEvent) => { const value = changeEvent.target.value; mutate(() => updateExtraCatalogItem(item.id, value), `แก้ราคา ${item.name} แล้ว`, { actionKey: `catalog:price:${item.id}` }); }} type="number" /><em>บาท</em><button aria-label={`ลบสินค้า ${item.name}`} className="badminton-catalog-delete" onClick={() => { if (window.confirm(`ลบ ${item.name} ออกจากรายการสินค้า?`)) mutate(() => removeExtraCatalogItem(item.id), `ลบ ${item.name} แล้ว`); }} type="button"><Trash2 size={15} /></button></div>)}</div><form className="badminton-catalog-add" onSubmit={addCatalogItem}><input aria-label="ชื่อรายการใหม่" placeholder="ชื่อรายการ" required value={newItem.name} onChange={(changeEvent) => setNewItem({ ...newItem, name: changeEvent.target.value })} /><input aria-label="ราคารายการใหม่" min="0" placeholder="ราคา" required type="number" value={newItem.price} onChange={(changeEvent) => setNewItem({ ...newItem, price: changeEvent.target.value })} /><button className="badminton-secondary" type="submit"><Plus size={15} /> เพิ่ม</button></form></section></div></div> : null}
       {editingMember ? (
         <div className="badminton-modal-backdrop badminton-member-edit-backdrop" role="presentation">
           <form className="badminton-custom-charge-modal badminton-member-edit-modal" onSubmit={saveMember}>
             <div className="badminton-modal-title"><div><p className="badminton-kicker">ข้อมูลสมาชิกเดิม</p><h2>แก้ไขโปรไฟล์ผู้เล่น</h2></div><button aria-label="ปิดหน้าต่างแก้ไขชื่อ" onClick={() => setEditingMember(null)} type="button"><X size={19} /></button></div>
             <label>ชื่อเล่น<input autoFocus maxLength="40" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, nickname: changeEvent.target.value })} required value={memberEdit.nickname} /></label>
             <label>ชื่อ LINE<input maxLength="80" onChange={(changeEvent) => setMemberEdit({ ...memberEdit, displayName: changeEvent.target.value })} required value={memberEdit.displayName} /></label>
-            <label>ระดับมือ<select onChange={(changeEvent) => setMemberEdit({ ...memberEdit, skillLevel: changeEvent.target.value, playableSkillLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={memberEdit.skillLevel}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
+            <label>ระดับมือ<select onChange={(changeEvent) => setMemberEdit({ ...memberEdit, skillLevel: changeEvent.target.value, playableSkillLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={memberEdit.skillLevel}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select></label>
             <SkillCompatibilityPicker onChange={(playableSkillLevels) => setMemberEdit({ ...memberEdit, playableSkillLevels })} skillLevel={memberEdit.skillLevel} value={memberEdit.playableSkillLevels} />
-            <p className="badminton-member-sync-note">การแก้ระดับตรงนี้มีผลตั้งแต่รอบถัดไป หากคนนี้ลงชื่อรอบปัจจุบันแล้ว ระบบจะเก็บระดับเดิมของรอบนี้ไว้เพื่อไม่ให้คิวเปลี่ยนย้อนหลัง</p>
+            <p className="badminton-member-sync-note">บันทึกชื่อและมือในข้อมูลสมาชิก ใช้ต่อในรอบถัดไปและรอบที่ยังเปิดอยู่ โดยไม่เปลี่ยนประวัติเกมเดิม</p>
             {editingMember.line_user_id ? <p className="badminton-member-sync-note">คนนี้เชื่อมกับ LINE แล้ว ชื่อ LINE จะอัปเดตอัตโนมัติเมื่อเข้าหน้าลงชื่อครั้งถัดไป</p> : null}
             <div className="badminton-member-edit-actions">
               <button className="badminton-primary" type="submit"><Save size={17} /> บันทึกโปรไฟล์</button>
@@ -1868,7 +1945,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
             </header>
             <label className="badminton-member-directory-search">
               <Search size={18} />
-              <input autoFocus onChange={(changeEvent) => setMemberDirectoryQuery(changeEvent.target.value)} placeholder="ค้นหาชื่อเล่นหรือชื่อ LINE" value={memberDirectoryQuery} />
+              <input onChange={(changeEvent) => setMemberDirectoryQuery(changeEvent.target.value)} placeholder="ค้นหาชื่อเล่นหรือชื่อ LINE" value={memberDirectoryQuery} />
               {memberDirectoryQuery ? <button aria-label="ล้างคำค้นหา" onClick={() => setMemberDirectoryQuery("")} type="button"><X size={16} /></button> : null}
             </label>
             {duplicateMemberGroups.length ? (
@@ -1885,15 +1962,16 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
                 ))}
               </section>
             ) : null}
-            <div className="badminton-member-directory-full-list">
+            <div className="member-directory-inline-list">
               {directoryMembers.length ? directoryMembers.map((member) => {
                 const nickname = memberName(member);
                 const lineName = member.display_name && member.display_name !== nickname ? member.display_name : "";
                 return (
-                  <button key={member.id} onClick={() => openMemberEditor(member)} type="button">
-                    <span><strong>{nickname}</strong><small>{lineName ? `LINE: ${lineName}` : "ยังไม่เชื่อม LINE"}</small></span>
-                    <Pencil size={17} />
-                  </button>
+                  <MemberDirectoryRow key={member.id} member={member} onDetails={openMemberEditor} onSave={(target, patch) => mutate(() => updateClubMember(target.id, {
+                    displayName: target.display_name || patch.nickname,
+                    paymentExempt: Boolean(target.payment_exempt),
+                    ...patch,
+                  }), `บันทึกชื่อและมือของ ${patch.nickname} แล้ว`, { actionKey: `profile:${target.id}` })} />
                 );
               }) : <div className="badminton-empty">ไม่พบรายชื่อที่ค้นหา</div>}
             </div>
@@ -1912,6 +1990,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
 function PricingPanel({ event, mutate, session, settlement }) {
   const [editingCourt, setEditingCourt] = useState(false);
   const [editingShuttle, setEditingShuttle] = useState(false);
+  const [priceSaving, setPriceSaving] = useState({ court: false, shuttlecock: false });
+  const [expenseSaving, setExpenseSaving] = useState(false);
   const [shuttleBatch, setShuttleBatch] = useState("");
   const [shuttleTotalDraft, setShuttleTotalDraft] = useState(String(event.shuttlecockCount || 0));
   const [shuttleBusy, setShuttleBusy] = useState(false);
@@ -1926,6 +2006,28 @@ function PricingPanel({ event, mutate, session, settlement }) {
   const sharedCost = courtCost + shuttleCost + otherCost;
   const exemptRows = settlement.rows.filter((row) => row.paymentExempt);
   const exemptTotal = exemptRows.reduce((sum, row) => sum + Number(row.roundedDue || 0), 0);
+
+  async function savePrice(priceType, value) {
+    setPriceSaving((current) => ({ ...current, [priceType]: true }));
+    try {
+      const saved = await mutate(() => updateEventPriceAndDefault({ clubId: event.clubId, eventId: event.id, eventDate: event.date, priceType, value }),
+        priceType === "court" ? "แก้ราคาคอร์ทและบันทึกเป็นค่าเริ่มต้นของวันนี้แล้ว" : "แก้ราคาลูกแบดและบันทึกเป็นค่าเริ่มต้นแล้ว",
+        { actionKey: `price:${priceType}:${event.id}` });
+      if (saved) (priceType === "court" ? setEditingCourt : setEditingShuttle)(false);
+    } finally {
+      setPriceSaving((current) => ({ ...current, [priceType]: false }));
+    }
+  }
+
+  async function submitExpense(submitEvent) {
+    submitEvent.preventDefault();
+    if (expenseSaving) return;
+    setExpenseSaving(true);
+    try {
+      const saved = await mutate(() => addExpense({ clubId: event.clubId, eventId: event.id, userId: session.user.id, label, amount }), "เพิ่มค่าใช้จ่ายแล้ว", { actionKey: `expense:add:${event.id}` });
+      if (saved) { setLabel(""); setAmount(""); }
+    } finally { setExpenseSaving(false); }
+  }
 
   useEffect(() => {
     setShuttleTotalDraft(String(event.shuttlecockCount || 0));
@@ -2046,8 +2148,8 @@ function PricingPanel({ event, mutate, session, settlement }) {
           <div className="badminton-price-head"><span>สรุปคอร์ท</span><strong>{baht(courtCost)} บาท</strong></div>
           <div className="badminton-court-summary-list">{event.courts.map((court) => <span key={court.id}><strong>{court.name}</strong> {court.startsAt}–{court.endsAt === "00:00" ? "24:00" : court.endsAt} · {formatPlayedDuration(minutesBetween(court.startsAt, court.endsAt))}</span>)}</div>
           <div className="badminton-price-setting">
-            {editingCourt ? <input autoFocus min="0" type="number" defaultValue={event.courtHourlyRate} onBlur={(e) => { setEditingCourt(false); mutate(() => updateEventPriceAndDefault({ clubId: event.clubId, eventId: event.id, eventDate: event.date, priceType: "court", value: e.target.value }), "แก้ราคาคอร์ดและบันทึกเป็นค่าเริ่มต้นของวันนี้แล้ว"); }} /> : <span>{baht(event.courtHourlyRate)} บาท/ชม.</span>}
-            <button className="badminton-edit-price" onClick={() => setEditingCourt(true)} type="button">แก้ราคา</button>
+            {editingCourt ? <input autoFocus disabled={priceSaving.court} min="0" type="number" defaultValue={event.courtHourlyRate} onBlur={(e) => savePrice("court", e.target.value)} /> : <span>{baht(event.courtHourlyRate)} บาท/ชม.</span>}
+            <button className="badminton-edit-price" disabled={priceSaving.court} onClick={() => setEditingCourt(true)} type="button">{priceSaving.court ? "บันทึก…" : "แก้ราคา"}</button>
           </div>
         </article>
         <article className="badminton-price-box badminton-shuttle-box">
@@ -2063,8 +2165,8 @@ function PricingPanel({ event, mutate, session, settlement }) {
             <button className="badminton-edit-price" disabled={shuttleBusy || Number(shuttleTotalDraft) === Number(event.shuttlecockCount)} type="submit">บันทึก</button>
           </form>
           <div className="badminton-price-setting">
-            {editingShuttle ? <input autoFocus min="0" type="number" defaultValue={event.shuttlecockUnitPrice} onBlur={(e) => { setEditingShuttle(false); mutate(() => updateEventPriceAndDefault({ clubId: event.clubId, eventId: event.id, eventDate: event.date, priceType: "shuttlecock", value: e.target.value }), "แก้ราคาลูกแบดและบันทึกเป็นค่าเริ่มต้นแล้ว"); }} /> : <span>{baht(event.shuttlecockUnitPrice)} บาท/ลูก</span>}
-            <button className="badminton-edit-price" onClick={() => setEditingShuttle(true)} type="button">แก้ราคา</button>
+            {editingShuttle ? <input autoFocus disabled={priceSaving.shuttlecock} min="0" type="number" defaultValue={event.shuttlecockUnitPrice} onBlur={(e) => savePrice("shuttlecock", e.target.value)} /> : <span>{baht(event.shuttlecockUnitPrice)} บาท/ลูก</span>}
+            <button className="badminton-edit-price" disabled={priceSaving.shuttlecock} onClick={() => setEditingShuttle(true)} type="button">{priceSaving.shuttlecock ? "บันทึก…" : "แก้ราคา"}</button>
           </div>
         </article>
       </div>
@@ -2097,14 +2199,14 @@ function PricingPanel({ event, mutate, session, settlement }) {
         <strong>ค่าใช้จ่ายอื่น</strong>
         <div className="badminton-expense-list">
           {event.extraCosts.map((cost) => (
-            <label key={cost.id}><span>{cost.label}</span><input defaultValue={cost.amount} min="0" type="number" onBlur={(e) => mutate(() => updateExpense(cost.id, e.target.value), "อัปเดตค่าใช้จ่ายแล้ว")} /></label>
+            <label key={cost.id}><span>{cost.label}</span><input defaultValue={cost.amount} min="0" type="number" onBlur={(e) => { const value = e.target.value; mutate(() => updateExpense(cost.id, value), "อัปเดตค่าใช้จ่ายแล้ว", { actionKey: `expense:update:${cost.id}` }); }} /></label>
           ))}
         </div>
       </div>
-      <form className="badminton-inline-form" onSubmit={(e) => { e.preventDefault(); mutate(() => addExpense({ clubId: event.clubId, eventId: event.id, userId: session.user.id, label, amount }), "เพิ่มค่าใช้จ่ายแล้ว"); setLabel(""); setAmount(""); }}>
-        <input placeholder="รายการอื่น (ถ้ามี)" required value={label} onChange={(e) => setLabel(e.target.value)} />
-        <input min="0" placeholder="บาท" required type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        <button className="badminton-secondary" type="submit"><Plus size={17} /> เพิ่ม</button>
+      <form className="badminton-inline-form" onSubmit={submitExpense}>
+        <input disabled={expenseSaving} placeholder="รายการอื่น (ถ้ามี)" required value={label} onChange={(e) => setLabel(e.target.value)} />
+        <input disabled={expenseSaving} min="0" placeholder="บาท" required type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <button className="badminton-secondary" disabled={expenseSaving} type="submit"><Plus size={17} /> {expenseSaving ? "บันทึก…" : "เพิ่ม"}</button>
       </form>
       <div className="badminton-exempt-cost-summary">
         <span><strong>ค่าใช้จ่ายรวมของคนที่ไม่ต้องเก็บเงิน</strong><small>{exemptRows.length} คน · ยังคงนำไปร่วมคำนวณค่าใช้จ่ายของรอบ</small></span>
@@ -2201,10 +2303,10 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
           paid: nextPaid,
         },
       });
-    }, nextPaid ? `บันทึกรับเงิน ${row.name} แล้ว` : "ยกเลิกสถานะรับเงินแล้ว");
+    }, nextPaid ? `บันทึกรับเงิน ${row.name} แล้ว` : "ยกเลิกสถานะรับเงินแล้ว", { actionKey: `payment:${row.memberId}` });
   }
 
-  function confirmBill(submitEvent) {
+  async function confirmBill(submitEvent) {
     submitEvent.preventDefault();
     if (perRoundAwaitingClose) {
       window.alert("กรุณาจบรอบก่อนสรุปยอดตามจำนวนเกมที่เล่น");
@@ -2218,7 +2320,7 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
     }
     const row = billDraft.row;
     const previousBilledAmount = row.billingFinalized ? Number(row.billedAmount) : null;
-    mutate(async () => {
+    const saved = await mutate(async () => {
       await finalizeMemberBill({
         clubId: event.clubId,
         eventId: event.id,
@@ -2249,8 +2351,8 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
             : row.roundedDue),
         },
       });
-    }, `สรุปยอด ${row.name} เป็น ${baht(billedAmount)} บาทแล้ว`);
-    setBillDraft(null);
+    }, `สรุปยอด ${row.name} เป็น ${baht(billedAmount)} บาทแล้ว`, { actionKey: `bill:${row.memberId}` });
+    if (saved) setBillDraft(null);
   }
 
   function reviewSlip(slip, approved) {
@@ -2385,7 +2487,7 @@ function SettlementPanel({ context, event, mutate, previousOutstanding, session,
         </div>
         {collectionSummary.finalizedCount > 0 && lineSummary.trim() ? <><textarea readOnly value={lineSummary} /><button className="badminton-primary" onClick={copySummary} type="button"><Copy size={18} /> {copied ? "คัดลอกแล้ว" : "คัดลอกสรุปส่ง LINE"}</button></> : <p className="badminton-note">กด “สรุปยอด” ของผู้เล่นก่อน จึงจะมีข้อความยอดเรียกเก็บสำหรับส่ง LINE</p>}
       </div>
-      {paymentSettingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าข้อความชำระเงินใน LINE" aria-modal="true" className="badminton-custom-charge-modal badminton-payment-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าชำระเงิน</p><h2>ข้อความที่บอทส่ง</h2></div><button aria-label="ปิดการตั้งค่าชำระเงิน" onClick={() => setPaymentSettingsOpen(false)} type="button"><X size={19} /></button></div><label className="badminton-line-payment-summary-toggle"><span><strong>ส่งรายชื่อพร้อมยอดค่าใช้จ่าย</strong><small>{context.clubs.line_payment_include_summary !== false ? "เปิดอยู่ · ส่งรายชื่อพร้อมยอด แล้วตามด้วยการ์ดชำระเงิน" : "ปิดอยู่ · ส่งเฉพาะการ์ดชำระเงิน"}</small></span><input aria-label="ส่งรายชื่อและยอดค่าใช้จ่ายใน LINE" checked={context.clubs.line_payment_include_summary !== false} onChange={(changeEvent) => mutate(() => updateLinePaymentSummarySetting(context.club_id, changeEvent.target.checked), changeEvent.target.checked ? "เปิดส่งรายชื่อพร้อมยอดใน LINE แล้ว" : "ปิดส่งรายชื่อพร้อมยอดใน LINE แล้ว")} type="checkbox" /></label><p className="badminton-settings-help">ใช้กับคำสั่ง “ชำระเงิน” และ “แจ้งโอน” ใน LINE</p></div></div> : null}
+      {paymentSettingsOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="ตั้งค่าข้อความชำระเงินใน LINE" aria-modal="true" className="badminton-custom-charge-modal badminton-payment-settings-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">ตั้งค่าชำระเงิน</p><h2>ข้อความที่บอทส่ง</h2></div><button aria-label="ปิดการตั้งค่าชำระเงิน" onClick={() => setPaymentSettingsOpen(false)} type="button"><X size={19} /></button></div><label className="badminton-line-payment-summary-toggle"><span><strong>ส่งรายชื่อพร้อมยอดค่าใช้จ่าย</strong><small>{context.clubs.line_payment_include_summary !== false ? "เปิดอยู่ · ส่งรายชื่อพร้อมยอด แล้วตามด้วยการ์ดชำระเงิน" : "ปิดอยู่ · ส่งเฉพาะการ์ดชำระเงิน"}</small></span><input aria-label="ส่งรายชื่อและยอดค่าใช้จ่ายใน LINE" checked={context.clubs.line_payment_include_summary !== false} onChange={(changeEvent) => { const checked = changeEvent.target.checked; mutate(() => updateLinePaymentSummarySetting(context.club_id, checked), checked ? "เปิดส่งรายชื่อพร้อมยอดใน LINE แล้ว" : "ปิดส่งรายชื่อพร้อมยอดใน LINE แล้ว", { actionKey: `payment-summary:${context.club_id}` }); }} type="checkbox" /></label><p className="badminton-settings-help">ใช้กับคำสั่ง “ชำระเงิน” และ “แจ้งโอน” ใน LINE</p></div></div> : null}
       {billDraft ? <div className="badminton-modal-backdrop" role="presentation"><form aria-label={`สรุปยอดเรียกเก็บ ${billDraft.row.name}`} className="badminton-custom-charge-modal badminton-bill-modal" onSubmit={confirmBill}><div className="badminton-modal-title"><div><p className="badminton-kicker">ยอดเรียกเก็บรายคน</p><h2>{billDraft.row.name}</h2></div><button aria-label="ปิดหน้าต่างสรุปยอด" onClick={() => setBillDraft(null)} type="button"><X size={19} /></button></div><div className="badminton-calculated-amount"><span>ยอดที่ระบบคำนวณ</span><strong>{baht(billDraft.row.billingFinalized && billDraft.row.calculatedAmount !== null ? billDraft.row.calculatedAmount : billDraft.row.roundedDue)} บาท</strong><small>ข้อมูลนี้แสดงเฉพาะแอดมิน สมาชิกจะไม่เห็น</small></div><label>ยอดเรียกเก็บจริง<input autoFocus inputMode="decimal" min="0" onChange={(changeEvent) => setBillDraft({ ...billDraft, amount: changeEvent.target.value })} required step="1" type="number" value={billDraft.amount} /><span>บาท</span></label><p className="badminton-bill-help">เมื่อยืนยัน สมาชิกจะเห็นเฉพาะยอดเรียกเก็บจริง และระบบตรวจสลิปจะเทียบกับยอดนี้</p><button className="badminton-primary" type="submit"><Check size={17} /> ยืนยันยอดเรียกเก็บ</button></form></div> : null}
     </section>
   );

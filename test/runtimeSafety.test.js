@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-test("การบันทึกหลังบ้านหยุดเมื่อออฟไลน์และไม่ส่งคำขอซ้ำ", () => {
+test("หลังบ้านใช้คิวบันทึกแทนการทิ้งคำสั่งถัดไป และกันการบันทึกออฟไลน์", () => {
   const source = fs.readFileSync(new URL("../src/BadmintonApp.jsx", import.meta.url), "utf8");
-  assert.match(source, /if \(!navigator\.onLine\)/);
-  assert.match(source, /if \(savingRef\.current\) return false/);
+  assert.ok(source.includes("if (!navigator.onLine)"));
+  assert.ok(source.includes("mutationsRef.current.enqueue(options.actionKey"));
+  assert.ok(!source.includes("if (savingRef.current) return false"));
+  // Sequencing, duplicate taps and error recovery are behavior-tested in mutationQueue.test.js.
 });
 
 test("หน้าคิวสดแยกสถานะไม่มีรอบออกจากข้อผิดพลาด", () => {

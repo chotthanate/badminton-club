@@ -243,28 +243,29 @@ export function normalizeSlipReference(value) {
 }
 
 export async function recognizeSlip(file, onProgress = () => {}, expectedAmount = null) {
+  const progress = createSlipProgressReporter(onProgress);
+  progress.stage(1, 5);
   const optimized = await optimizeSlipImage(file);
-  const { createWorker } = await import(/* @vite-ignore */ "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/+esm");
-  const worker = await createWorker("tha+eng", 1, {
-    logger: (message) => {
-      if (message.status === "recognizing text") onProgress(Math.round(Number(message.progress || 0) * 100));
-    },
-  });
+  let worker;
+  let text = "";
+  let confidence = 0;
+  let parsed = { amount: null, date: null, reference: null };
+  let readError = false;
   try {
+    const { createWorker } = await import(/* @vite-ignore */ "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/+esm");
+    worker = await createWorker("tha+eng", 1, { logger: (message) => {
+      if (message.status === "recognizing text") progress.update(message.progress);
+    } });
+    progress.stage(10, 65);
     const result = await worker.recognize(optimized.blob);
-    let text = result.data.text || "";
-    let confidence = Number(result.data.confidence || 0);
-    let parsed = parseSlipText(text, expectedAmount);
-    const amountDoesNotMatchExpected = Number.isFinite(Number(expectedAmount))
-      && parsed.amount !== null
-      && Math.abs(Number(parsed.amount) - Number(expectedAmount)) >= 0.009;
-    const needsRetry = parsed.amount === null
-      || amountDoesNotMatchExpected
-      || parsed.date === null
-      || parsed.reference === null
-      || classifySlipRecipient(text) !== "match";
+    text = result.data.text || "";
+    confidence = Number(result.data.confidence || 0);
+    parsed = parseSlipText(text, expectedAmount);
+    // Missing amount/date have their own small crops. Re-reading the large
+    // image for either detail makes the wait much longer on phones.
+    const needsRetry = parsed.reference === null || classifySlipRecipient(text) === "unclear";
     if (needsRetry && optimized.retryBlob) {
-      onProgress(0);
+      progress.stage(65, 78);
       const retryResult = await worker.recognize(optimized.retryBlob);
       const retryText = retryResult.data.text || "";
       const retryParsed = parseSlipText(retryText, expectedAmount);
@@ -280,7 +281,7 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
       || (Number.isFinite(Number(expectedAmount))
         && Math.abs(Number(parsed.amount) - Number(expectedAmount)) >= 0.009);
     if (shouldReadAmountCrop && optimized.amountBlob) {
-      onProgress(0);
+      progress.stage(78, 86);
       await worker.setParameters({ tessedit_pageseg_mode: "6" });
       const amountResult = await worker.recognize(optimized.amountBlob);
       const amountText = amountResult.data.text || "";
@@ -290,9 +291,9 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
     }
     if (parsed.date === null && optimized.dateBlobs?.length) {
       await worker.setParameters({ tessedit_pageseg_mode: "6" });
-      for (const dateBlob of optimized.dateBlobs) {
+      for (const [index, dateBlob] of optimized.dateBlobs.entries()) {
         if (parsed.date !== null) break;
-        onProgress(0);
+        progress.stage(86 + index * 6, Math.min(98, 92 + index * 6));
         const dateResult = await worker.recognize(dateBlob);
         const dateText = dateResult.data.text || "";
         text = [text, dateText].filter(Boolean).join("\n");
@@ -301,17 +302,30 @@ export async function recognizeSlip(file, onProgress = () => {}, expectedAmount 
         parsed.reference ??= parseSlipReference(dateText);
       }
     }
-    return {
-      ...parsed,
-      confidence,
-      text,
-      dataUrl: optimized.dataUrl,
-      mimeType: optimized.blob.type,
-      hash: await sha256(optimized.blob),
-    };
+  } catch {
+    // Keep the prepared image usable for admin review when OCR/CDN is down.
+    readError = true;
+    confidence = 0;
   } finally {
-    await worker.terminate();
+    if (worker) await worker.terminate().catch(() => {});
   }
+  const hash = await sha256(optimized.blob);
+  progress.stage(100, 100);
+  return { ...parsed, confidence, text, readError, dataUrl: optimized.dataUrl, mimeType: optimized.blob.type, hash };
+}
+
+export function createSlipProgressReporter(onProgress) {
+  let start = 0;
+  let end = 0;
+  let highest = 0;
+  const report = (value) => {
+    highest = Math.max(highest, Math.min(100, Math.round(value)));
+    onProgress(highest);
+  };
+  return {
+    stage(from, to) { start = from; end = to; report(start); },
+    update(fraction) { report(start + Math.max(0, Math.min(1, Number(fraction) || 0)) * (end - start)); },
+  };
 }
 
 function chooseRecognizedAmount(currentAmount, candidateAmount, expectedAmount) {

@@ -1,5 +1,5 @@
 import React from "react";
-import { SKILL_LEVELS, normalizePlayableSkillLevels } from "./skillLevels.js";
+import { SKILL_LEVELS, normalizePlayableSkillLevels, skillLabel } from "./skillLevels.js";
 
 export default function SkillCompatibilityPicker({ skillLevel, value, onChange, className = "", language = "th" }) {
   if (!skillLevel) return null;
@@ -27,7 +27,7 @@ export default function SkillCompatibilityPicker({ skillLevel, value, onChange, 
                 onChange={(event) => toggleLevel(level, event.target.checked)}
                 type="checkbox"
               />
-              <span>{level}</span>
+              <span>{skillLabel(level)}</span>
             </label>
           );
         })}

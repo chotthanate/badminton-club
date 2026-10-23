@@ -3,10 +3,12 @@ import {
   defaultPlayableSkillLevels,
   legacyPreferencesForPlayable,
   normalizePlayableSkillLevels,
+  normalizeSkillLevel,
 } from "./skillLevels.js";
 import { buildRandomTestPlayerProfiles } from "./randomTestPlayers.js";
 import { compareCourtNames } from "../supabase/functions/_shared/paymentSummary.js";
 import { sessionBoundsFromCourts, timePositionWithinEvent } from "./badmintonLogic.js";
+import { writePostCommitAudit } from "./mutationOutcome.js";
 
 function client() {
   if (!supabase) throw new Error("ยังไม่ได้ตั้งค่า Supabase");
@@ -304,41 +306,40 @@ export async function loadDashboard(clubId, eventId = null) {
 }
 
 export async function loadQueueState(eventId) {
-  const [queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, eventResult] = await Promise.all([
-    client().from("event_queue_players").select("*").eq("event_id", eventId),
-    client().from("queue_matches").select("*").eq("event_id", eventId).order("sequence", { ascending: false }),
-    client().from("queue_match_players").select("*").eq("event_id", eventId),
-    client().from("events").select("status").eq("id", eventId).single(),
-  ]);
-  [queuePlayersResult, queueMatchesResult, queueMatchPlayersResult, eventResult]
-    .forEach((result) => throwIfError(result.error));
+  // One database snapshot keeps new Walk-ins, courts and lineups coherent.
+  const { data, error } = await client().rpc("load_queue_state", { target_event_id: eventId });
+  throwIfError(error);
   return {
-    queuePlayers: queuePlayersResult.data || [],
-    queueMatches: queueMatchesResult.data || [],
-    queueMatchPlayers: queueMatchPlayersResult.data || [],
-    queueEventStatus: eventResult.data.status,
+    ...data,
+    courts: [...(data?.courts || [])].sort(compareCourtNames),
+    queueEventStatus: data?.event?.status,
   };
 }
 
 export async function loadParticipantState(clubId, eventId) {
-  const [membersResult, signupsResult, attendanceResult, extraItemsResult, memberExtrasResult, queueState] = await Promise.all([
-    client().from("club_members").select("id, display_name, nickname, aliases, role, active, line_user_id, payment_exempt, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level, created_at").eq("club_id", clubId).order("created_at"),
-    client().from("signups").select("*").eq("event_id", eventId).order("created_at"),
-    client().from("attendance").select("*").eq("event_id", eventId),
-    client().from("extra_item_catalog").select("*").eq("club_id", clubId).eq("active", true).order("created_at"),
-    client().from("member_extra_charges").select("*").eq("event_id", eventId).order("created_at"),
-    loadQueueState(eventId),
-  ]);
-  [membersResult, signupsResult, attendanceResult, extraItemsResult, memberExtrasResult]
-    .forEach((result) => throwIfError(result.error));
-  return {
-    members: membersResult.data || [],
-    signups: signupsResult.data || [],
-    attendance: attendanceResult.data || [],
-    extraItems: extraItemsResult.data || [],
-    memberExtras: memberExtrasResult.data || [],
-    ...queueState,
-  };
+  // Departure/paid badges depend on bills and per-round snapshots as well as
+  // attendance. This RPC already includes the catalog and member extras.
+  return loadFinanceState(clubId, eventId);
+}
+
+export async function loadFinanceState(clubId, eventId) {
+  const { data, error } = await client().rpc("load_finance_state", { target_club_id: clubId, target_event_id: eventId });
+  throwIfError(error);
+  return { ...data, courts: [...(data?.courts || [])].sort(compareCourtNames) };
+}
+
+export async function loadEventControlState(clubId, eventId) {
+  const { data, error } = await client().rpc("load_event_control_state", { target_club_id: clubId, target_event_id: eventId });
+  throwIfError(error);
+  return { ...data, courts: [...(data?.courts || [])].sort(compareCourtNames) };
+}
+
+export async function loadAuditState(clubId, eventId) {
+  const { data, error } = await client().from("audit_logs").select("*")
+    .eq("club_id", clubId).eq("event_id", eventId)
+    .order("created_at", { ascending: false }).limit(100);
+  throwIfError(error);
+  return { auditLogs: data || [] };
 }
 
 export async function loadStaffDashboard(clubId) {
@@ -680,28 +681,17 @@ export async function addLineMember({ clubId, displayName, lineUserId = null, sk
 export async function updateClubMember(memberId, {
   nickname,
   displayName,
-  paymentExempt = false,
+  paymentExempt,
   skillLevel,
   playableSkillLevels,
   allowLowerLevel,
   allowHigherLevel,
 }) {
-  const { data: current, error: currentError } = await client().from("club_members")
-    .select("nickname, display_name, aliases")
-    .eq("id", memberId)
-    .single();
-  throwIfError(currentError);
-  const aliases = [...new Set([
-    ...(current.aliases || []),
-    current.nickname,
-    current.display_name,
-  ].map((value) => String(value || "").trim()).filter(Boolean))];
-  const profilePatch = {
-      nickname: nickname.trim(),
-      display_name: displayName.trim(),
-      aliases,
-      payment_exempt: Boolean(paymentExempt),
-  };
+  skillLevel = normalizeSkillLevel(skillLevel);
+  const profilePatch = {};
+  if (nickname !== undefined) profilePatch.nickname = nickname.trim();
+  if (displayName !== undefined) profilePatch.display_name = displayName.trim();
+  if (paymentExempt !== undefined) profilePatch.payment_exempt = Boolean(paymentExempt);
   if (skillLevel !== undefined) profilePatch.skill_level = skillLevel || null;
   if (skillLevel) {
     const normalizedPlayable = normalizePlayableSkillLevels(skillLevel, playableSkillLevels, {
@@ -713,10 +703,12 @@ export async function updateClubMember(memberId, {
     profilePatch.allow_lower_level = legacyPreferences.allowLowerLevel;
     profilePatch.allow_higher_level = legacyPreferences.allowHigherLevel;
   }
-  const { error } = await client().from("club_members")
-    .update(profilePatch)
-    .eq("id", memberId);
+  const { data, error } = await client().rpc("operator_update_member_profile", {
+    target_member_id: memberId,
+    profile_patch: profilePatch,
+  });
   throwIfError(error);
+  return data;
 }
 
 export async function mergeClubMembers({ sourceMemberId, targetMemberId }) {
@@ -778,6 +770,7 @@ export async function updateSignup({
   allowLowerLevel,
   allowHigherLevel,
 }) {
+  skillLevel = normalizeSkillLevel(skillLevel);
   let memberProfile = null;
   if (status === "coming" && skillLevel === undefined) {
     const { data, error } = await client().from("club_members")
@@ -800,6 +793,11 @@ export async function updateSignup({
     )
     : [];
   const legacyPreferences = legacyPreferencesForPlayable(nextSkillLevel, nextPlayableLevels);
+  // A skill explicitly changed in the player screen is a permanent profile
+  // change, not merely this round's snapshot. New rounds read the master profile.
+  if (status === "coming" && skillLevel !== undefined) {
+    await updateClubMember(memberId, { skillLevel: nextSkillLevel, playableSkillLevels: nextPlayableLevels });
+  }
   const { error } = await client().from("signups").upsert({
     club_id: clubId,
     event_id: eventId,
@@ -866,17 +864,21 @@ export async function createQueueDraftsBatch({ eventId, lineups }) {
   return data;
 }
 
-export async function createManualQueueDraft(eventId) {
-  const { data, error } = await client().rpc("create_manual_queue_draft", {
+export async function createManualQueueDraft({ eventId, memberIds, teamAIds }) {
+  const { data, error } = await client().rpc("create_manual_queue_with_players", {
     target_event_id: eventId,
+    selected_member_ids: memberIds,
+    team_a_member_ids: teamAIds || memberIds.slice(0, 2),
   });
   throwIfError(error);
   return data;
 }
 
-export async function updateQueueDraftLineup({ matchId, slots }) {
-  const { error } = await client().rpc("update_manual_queue_draft_lineup", {
+export async function saveQueueLineup({ matchId, slots, expectedVersion, approve = false }) {
+  const { data, error } = await client().rpc("save_queue_lineup", {
     target_match_id: matchId,
+    expected_revision: expectedVersion,
+    approve_after_save: Boolean(approve),
     slot_assignments: slots.map((slot) => ({
       member_id: slot.memberId,
       team: slot.team,
@@ -884,6 +886,17 @@ export async function updateQueueDraftLineup({ matchId, slots }) {
     })),
   });
   throwIfError(error);
+  return data;
+}
+
+export const updateQueueDraftLineup = saveQueueLineup;
+
+export async function approveQueueDrafts({ drafts }) {
+  const { data, error } = await client().rpc("approve_queue_drafts", {
+    requested_drafts: drafts.map(({ matchId, expectedVersion }) => ({ match_id: matchId, revision: expectedVersion })),
+  });
+  throwIfError(error);
+  return data;
 }
 
 export async function approveQueueDraft(matchId) {
@@ -929,7 +942,7 @@ export async function updateOperatorMemberSkill({ eventId, memberId, skillLevel,
   const { data, error } = await client().rpc("operator_update_member_skill", {
     target_event_id: eventId,
     target_member_id: memberId,
-    next_skill_level: skillLevel,
+    next_skill_level: normalizeSkillLevel(skillLevel),
     next_playable_skill_levels: playableSkillLevels,
   });
   throwIfError(error);
@@ -1350,51 +1363,29 @@ export async function getPaymentSlipImageUrl(storagePath) {
   return data.signedUrl;
 }
 
-export async function finishEvent({ clubId, eventId, rows, shuttlecockCount, userId }) {
-  const { data: existingPayments, error: existingError } = await client()
-    .from("payments")
-    .select("member_id, paid_at, admin_confirmed_at")
-    .eq("event_id", eventId);
-  throwIfError(existingError);
-  const lockedMemberIds = new Set((existingPayments || [])
-    .filter((payment) => payment.paid_at || payment.admin_confirmed_at)
-    .map((payment) => payment.member_id));
-  const rowsToSave = rows
-    .filter((row) => !lockedMemberIds.has(row.memberId))
-    .map((row) => ({
-      club_id: clubId,
-      event_id: eventId,
+export async function finishEvent({ eventId, rows, shuttlecockCount }) {
+  const { data, error } = await client().rpc("finish_event", {
+    target_event_id: eventId,
+    final_shuttlecock_count: Math.max(0, Number(shuttlecockCount) || 0),
+    settlement_rows: rows.map((row) => ({
       member_id: row.memberId,
       amount: Math.max(0, Number(row.roundedDue) || 0),
-      calculated_amount: Math.max(0, Number(row.roundedDue) || 0),
-      billed_at: row.paymentExempt ? new Date().toISOString() : null,
-      admin_confirmed_at: row.paymentExempt ? new Date().toISOString() : null,
-      paid_at: row.paymentExempt ? new Date().toISOString() : null,
-      payment_status: row.paymentExempt ? "paid" : "draft",
-      paid_source: row.paymentExempt ? "exempt" : null,
       shared_amount: Math.max(0, Number(row.sharedDue) || 0),
       extras_amount: Math.max(0, Number(row.extraAmount) || 0),
-      shuttlecock_count_snapshot: Math.max(0, Number(shuttlecockCount) || 0),
-      recorded_by: userId,
-    }));
-  if (rowsToSave.length) {
-    const { error: paymentError } = await client()
-      .from("payments")
-      .upsert(rowsToSave, { onConflict: "event_id,member_id" });
-    throwIfError(paymentError);
-  }
-  await updateEvent(eventId, { status: "closed" });
+    })),
+  });
+  throwIfError(error);
+  return data;
 }
 
 export async function recordAudit({ clubId, eventId = null, userId, action, details = {} }) {
-  const { error } = await client().from("audit_logs").insert({
+  return writePostCommitAudit(() => client().from("audit_logs").insert({
     club_id: clubId,
     event_id: eventId,
     actor_id: userId,
     action,
     details,
-  });
-  throwIfError(error);
+  }));
 }
 
 function normalizeStoredMemberName(value) {

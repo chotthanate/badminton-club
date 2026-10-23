@@ -4,6 +4,8 @@ import { sortBySignupOrder } from "../_shared/signupOrder.js";
 import { courtHasStarted } from "../_shared/liveQueueTime.js";
 import { reconcileSlipAmount } from "../_shared/slipAmount.js";
 import { parseSlipDateValue } from "../_shared/slipDate.js";
+import { evaluatePaymentSubmission, isSamePaymentSubmission, paymentSubmissionState } from "../_shared/paymentSubmission.js";
+import { registrationProfile, registrationSnapshot } from "../_shared/liffProfile.js";
 import { buildArrivalTimeOptionsForEvent, normalizeArrivalTimeForEvent, sessionBoundsForEvent } from "../_shared/eventSchedule.js";
 
 const defaultPaymentRecipientNames = ["ณฐกฤต อินนะใจ", "NATHAKRIT INN", "NATHAKRIT INNAJAI"];
@@ -757,7 +759,7 @@ async function handlePaymentLiffRequest(payload: any) {
       const beneficiaryIds = (clubMembers || []).map((member) => member.id);
       const { data: duePayments, error: paymentError } = beneficiaryIds.length
         ? await admin.from("payments")
-          .select("id, member_id, event_id, amount, extras_amount, events!inner(event_date, venue)")
+          .select("id, member_id, event_id, amount, extras_amount, payment_status, paid_at, events!inner(event_date, venue)")
           .eq("club_id", clubId)
           .in("member_id", beneficiaryIds)
           .not("admin_confirmed_at", "is", null)
@@ -766,6 +768,26 @@ async function handlePaymentLiffRequest(payload: any) {
           .order("created_at")
         : { data: [], error: null };
       if (paymentError) throw paymentError;
+      const duePaymentIds = (duePayments || []).map((payment: any) => payment.id);
+      const [slipsResult, paidResult] = await Promise.all([
+        duePaymentIds.length ? admin.from("payment_slips")
+          .select("id, payment_ids, status, created_at, review_reason")
+          .eq("club_id", clubId).overlaps("payment_ids", duePaymentIds).order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        submitter?.id ? admin.from("payments")
+          .select("id, event_id, amount, paid_at, events!inner(event_date, venue)")
+          .eq("club_id", clubId).eq("member_id", submitter.id).not("paid_at", "is", null)
+          .order("paid_at", { ascending: false }).limit(12)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (slipsResult.error) throw slipsResult.error;
+      if (paidResult.error) throw paidResult.error;
+      const latestSlipByPayment = new Map<string, any>();
+      for (const savedSlip of slipsResult.data || []) {
+        for (const paymentId of savedSlip.payment_ids || []) {
+          if (!latestSlipByPayment.has(paymentId)) latestSlipByPayment.set(paymentId, savedSlip);
+        }
+      }
       const dueEventIds = [...new Set((duePayments || []).map((payment: any) => payment.event_id))];
       const { data: dueExtras, error: extrasError } = dueEventIds.length
         ? await admin.from("member_extra_charges")
@@ -796,6 +818,7 @@ async function handlePaymentLiffRequest(payload: any) {
           amount: Number(payment.amount || 0),
           extrasAmount: detailedExtrasAmount || Number(payment.extras_amount || 0),
           extras,
+          ...paymentSubmissionState(payment, latestSlipByPayment.get(payment.id)),
         });
         paymentsByMember.set(payment.member_id, rows);
       }
@@ -830,6 +853,10 @@ async function handlePaymentLiffRequest(payload: any) {
         },
         beneficiaries,
         recipientNames,
+        recentPaid: (paidResult.data || []).map((payment: any) => {
+          const event = Array.isArray(payment.events) ? payment.events[0] : payment.events;
+          return { id: payment.id, eventId: payment.event_id, eventDate: event?.event_date, venue: event?.venue || "", amount: Number(payment.amount || 0), paymentStatus: "paid", paidAt: payment.paid_at };
+        }),
       });
     }
 
@@ -845,8 +872,7 @@ async function handlePaymentLiffRequest(payload: any) {
       .eq("club_id", clubId)
       .in("id", paymentIds);
     if (paymentError) throw paymentError;
-    if ((payments || []).length !== paymentIds.length
-      || (payments || []).some((payment) => payment.paid_at || !payment.admin_confirmed_at || !["awaiting", "review"].includes(payment.payment_status))) {
+    if ((payments || []).length !== paymentIds.length) {
       return json({ error: "ยอดที่เลือกมีการเปลี่ยนแปลง กรุณาเปิดหน้าแจ้งโอนใหม่" }, 409);
     }
     const beneficiaryMemberIds = [...new Set((payments || []).map((payment) => String(payment.member_id)))];
@@ -866,15 +892,16 @@ async function handlePaymentLiffRequest(payload: any) {
     const slipHash = String(slip.hash || "").trim().toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(slipHash)) return json({ error: "ข้อมูลรูปสลิปไม่ถูกต้อง" }, 400);
     const transactionReference = extractSlipReference(slip.text) || normalizeSlipReference(slip.reference);
-    const { data: hashDuplicate } = await admin.from("payment_slips")
-      .select("id, status")
+    const { data: hashDuplicate, error: hashDuplicateError } = await admin.from("payment_slips")
+      .select("id, status, payment_ids, submitted_by_member_id, created_at")
       .eq("club_id", clubId)
       .eq("slip_hash", slipHash)
       .maybeSingle();
+    if (hashDuplicateError) throw hashDuplicateError;
     let duplicate = hashDuplicate;
     if (!duplicate && transactionReference) {
       const { data: referenceDuplicate, error: referenceDuplicateError } = await admin.from("payment_slips")
-        .select("id, status")
+        .select("id, status, payment_ids, submitted_by_member_id, created_at")
         .eq("club_id", clubId)
         .eq("transaction_reference", transactionReference)
         .eq("status", "auto_paid")
@@ -883,15 +910,24 @@ async function handlePaymentLiffRequest(payload: any) {
       duplicate = referenceDuplicate;
     }
     if (duplicate) {
+      if (!isSamePaymentSubmission(duplicate, submitter.id, paymentIds)) {
+        return json({ error: "สลิปนี้ถูกใช้กับรายการอื่นแล้ว กรุณาติดต่อแอดมินเพื่อตรวจสอบ" }, 409);
+      }
       if (duplicate.status === "rejected") {
         return json({ error: "รายการโอนนี้เคยถูกตรวจสอบแล้ว กรุณาติดต่อแอดมิน" }, 409);
       }
       return json({
         status: duplicate.status,
+        slipId: duplicate.id,
+        paymentIds: duplicate.payment_ids,
+        submittedAt: duplicate.created_at,
         message: duplicate.status === "auto_paid"
           ? "รายการโอนนี้ถูกบันทึกว่าชำระแล้วก่อนหน้านี้"
           : "รายการโอนนี้อยู่ระหว่างรอแอดมินตรวจสอบ",
       });
+    }
+    if ((payments || []).some((payment) => payment.paid_at || !payment.admin_confirmed_at || !["awaiting", "review"].includes(payment.payment_status))) {
+      return json({ error: "ยอดที่เลือกมีการเปลี่ยนแปลง กรุณากดอัปเดตสถานะก่อนแจ้งโอน" }, 409);
     }
 
     const expectedAmount = (payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
@@ -901,17 +937,20 @@ async function handlePaymentLiffRequest(payload: any) {
     const transferredOn = isoDateValue(slip.transferredOn) || parseSlipDateValue(slip.text);
     const confidence = finiteNumber(slip.confidence);
     const recipientStatus = classifySlipRecipient(slip.text, recipientNames);
-    if (recipientStatus === "mismatch") {
+    const manualReviewRequested = payload.manualReviewRequested === true;
+    const submissionCheck = evaluatePaymentSubmission({ manualReviewRequested, recipientStatus, transferredAmount,
+      expectedAmount, datePasses: false, confidence, transferredOn, transactionReference });
+    if (submissionCheck.error === "recipient") {
       return json({
         error: "บัญชีผู้รับไม่ถูกต้อง กรุณาโอนไปยัง นาย ณฐกฤต อินนะใจ เท่านั้น",
       }, 422);
     }
-    if (transferredAmount !== null && transferredAmount < expectedAmount - 0.009) {
+    if (submissionCheck.error === "underpaid") {
       return json({
         error: `ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากน้อยกว่ายอดที่ต้องจ่ายจริง (ต้องชำระ ${expectedAmount} บาท แต่สลิปเป็น ${transferredAmount} บาท)`,
       }, 422);
     }
-    if (transferredAmount !== null && transferredAmount > expectedAmount + 0.009) {
+    if (submissionCheck.error === "overpaid") {
       return json({
         error: `ยอดเงินที่โอนไม่ถูกต้อง เนื่องจากมากกว่ายอดที่ต้องจ่ายจริง (ต้องชำระ ${expectedAmount} บาท แต่สลิปเป็น ${transferredAmount} บาท)`,
       }, 422);
@@ -936,15 +975,13 @@ async function handlePaymentLiffRequest(payload: any) {
       && transferredOn >= latestEventDate
       && transferredOn <= todayInBangkok,
     );
-    const ocrPasses = confidence !== null
-      && confidence >= 35
-      && Boolean(transferredOn)
-      && transferredAmount !== null
-      && recipientStatus === "match"
-      && Boolean(transactionReference);
-    const autoPaidCandidate = datePasses && ocrPasses;
+    const { autoPaidCandidate } = evaluatePaymentSubmission({ manualReviewRequested, recipientStatus,
+      transferredAmount, expectedAmount, datePasses, confidence, transferredOn, transactionReference });
     const overpaymentAmount = 0;
     const reviewReasons = [
+      manualReviewRequested ? "ผู้เล่นขอให้แอดมินตรวจรูปสลิปด้วยตนเอง" : "",
+      recipientStatus === "mismatch" ? "ชื่อผู้รับที่อ่านได้ไม่ตรงกับบัญชีที่กำหนด" : "",
+      transferredAmount !== null && Math.abs(transferredAmount - expectedAmount) >= 0.009 ? `ยอดที่อ่านได้ ${transferredAmount} บาท ไม่ตรงกับยอด ${expectedAmount} บาท` : "",
       recipientStatus === "unclear" ? "ระบบอ่านชื่อบัญชีผู้รับไม่ชัด" : "",
       transferredAmount === null ? "ระบบอ่านยอดเงินไม่ชัด" : "",
       !transferredOn ? "ระบบอ่านวันที่โอนไม่ชัด" : "",
@@ -954,6 +991,7 @@ async function handlePaymentLiffRequest(payload: any) {
       transferredOn && transferredOn > todayInBangkok ? "วันที่โอนเป็นวันอนาคต" : "",
     ].filter(Boolean);
     const slipId = crypto.randomUUID();
+    const submittedAt = new Date().toISOString();
     let storagePath: string | null = null;
 
     if (typeof slip.dataUrl === "string") {
@@ -974,6 +1012,7 @@ async function handlePaymentLiffRequest(payload: any) {
 
     const { error: slipError } = await admin.from("payment_slips").insert({
       id: slipId,
+      created_at: submittedAt,
       club_id: clubId,
       submitted_by_member_id: submitter.id,
       beneficiary_member_id: primaryBeneficiary.id,
@@ -1027,6 +1066,7 @@ async function handlePaymentLiffRequest(payload: any) {
           .is("paid_at", null);
         return json({
           status: "pending",
+          slipId, paymentIds, submittedAt,
           message: "รับสลิปแล้ว รายการอยู่ระหว่างรอตรวจสอบ",
         });
       }
@@ -1060,11 +1100,14 @@ async function handlePaymentLiffRequest(payload: any) {
         overpayment_amount: overpaymentAmount,
         transferred_on: transferredOn,
         slip_id: slipId,
+        manual_review_requested: manualReviewRequested,
       },
     });
 
     return json({
       status: autoPaid ? "auto_paid" : "pending",
+      slipId, paymentIds, submittedAt,
+      paidAt: autoPaid ? new Date().toISOString() : null,
       message: autoPaid
         ? `ระบบตรวจสลิปผ่านและปิดยอด ${paymentIds.length} รอบเรียบร้อยแล้ว`
         : "รับสลิปแล้ว รายการอยู่ระหว่างรอตรวจสอบ",
@@ -1189,19 +1232,21 @@ async function handleLiffRequest(payload: any) {
       return json({ error: payload.latest ? "ตอนนี้ยังไม่มีรอบที่เปิดให้ลงชื่อ" : "ไม่พบรอบที่ต้องการลงชื่อ" }, 404);
     }
 
-    const { data: existingMember } = await admin.from("club_members")
+    const { data: existingMember, error: existingMemberError } = await admin.from("club_members")
       .select("id, display_name, nickname, aliases, active, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level")
       .eq("club_id", clubId)
       .eq("line_user_id", identity.sub)
       .maybeSingle();
+    if (existingMemberError) throw existingMemberError;
 
-    const { data: existingSignup } = existingMember
+    const { data: existingSignup, error: existingSignupError } = existingMember
       ? await admin.from("signups")
         .select("status, arrival_time, skill_level_snapshot, playable_skill_levels_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
         .eq("event_id", event.id)
         .eq("member_id", existingMember.id)
         .maybeSingle()
-      : { data: null };
+      : { data: null, error: null };
+    if (existingSignupError) throw existingSignupError;
 
     if (payload.action === "get_liff_event") {
       return json({
@@ -1270,8 +1315,16 @@ async function handleLiffRequest(payload: any) {
         return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
       }
 
-      const guestSkill = validateSkillProfile(payload);
-      const guestMemberId = await findOrCreateGuestMember(admin, clubId, guestName, guestSkill);
+      const guest = await findOrCreateGuestMember(admin, clubId, guestName, validateSkillProfile(payload));
+      const guestMemberId = guest.memberId;
+      const [guestSignupResult, guestQueueResult] = await Promise.all([
+        admin.from("signups").select("skill_level_snapshot, playable_skill_levels_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
+          .eq("event_id", event.id).eq("member_id", guestMemberId).maybeSingle(),
+        admin.from("event_queue_players").select("status").eq("event_id", event.id).eq("member_id", guestMemberId).maybeSingle(),
+      ]);
+      if (guestSignupResult.error) throw guestSignupResult.error;
+      if (guestQueueResult.error) throw guestQueueResult.error;
+      const guestSkill = registrationSnapshot(guest.skill, guestSignupResult.data, guestQueueResult.data?.status);
       const submitterLineName = String(identity.name || existingMember.display_name || submitterName || "สมาชิก LINE").slice(0, 80);
       const { error: signupError } = await admin.from("signups").upsert({
         club_id: clubId,
@@ -1353,8 +1406,18 @@ async function handleLiffRequest(payload: any) {
       return json({ error: "กรุณาเลือกเวลาที่จะไปจากตัวเลือกที่กำหนด" }, 400);
     }
 
-    const skill = validateSkillProfile(payload);
-    const memberId = await upsertLiffMember(admin, clubId, identity.sub, displayName, nickname, existingMember, skill);
+    const currentProfile = registrationProfile(existingMember, payload);
+    const skill = validateSkillProfile(currentProfile);
+    const memberId = existingMember?.id || await upsertLiffMember(admin, clubId, identity.sub, displayName, currentProfile.nickname, existingMember, skill);
+    if (existingMember?.active === false) {
+      const { error: reactivateError } = await admin.from("club_members").update({ active: true }).eq("id", memberId).eq("club_id", clubId);
+      if (reactivateError) throw reactivateError;
+    }
+    const { data: currentQueuePlayer, error: currentQueueError } = existingSignup?.status === "coming"
+      ? await admin.from("event_queue_players").select("status").eq("event_id", event.id).eq("member_id", memberId).maybeSingle()
+      : { data: null, error: null };
+    if (currentQueueError) throw currentQueueError;
+    const signupSkill = registrationSnapshot(skill, existingSignup, currentQueuePlayer?.status);
     const { error: signupError } = await admin.from("signups").upsert({
       club_id: clubId,
       event_id: event.id,
@@ -1363,10 +1426,10 @@ async function handleLiffRequest(payload: any) {
       arrival_time: arrivalTime,
       submitted_by_line_user_id: null,
       submitted_by_line_name: null,
-      skill_level_snapshot: skill.skillLevel,
-      playable_skill_levels_snapshot: skill.playableSkillLevels,
-      allow_lower_level_snapshot: skill.allowLowerLevel,
-      allow_higher_level_snapshot: skill.allowHigherLevel,
+      skill_level_snapshot: signupSkill.skillLevel,
+      playable_skill_levels_snapshot: signupSkill.playableSkillLevels,
+      allow_lower_level_snapshot: signupSkill.allowLowerLevel,
+      allow_higher_level_snapshot: signupSkill.allowHigherLevel,
     }, { onConflict: "event_id,member_id" });
     if (signupError) throw signupError;
 
@@ -1374,10 +1437,10 @@ async function handleLiffRequest(payload: any) {
       club_id: clubId,
       event_id: event.id,
       actor_id: null,
-      action: `${nickname} ตอบ ${signupLabel(status)}${arrivalTime ? ` เวลา ${arrivalTime}` : ""}`,
+      action: `${currentProfile.nickname} ตอบ ${signupLabel(status)}${arrivalTime ? ` เวลา ${arrivalTime}` : ""}`,
       details: { line_user_id: identity.sub, line_display_name: displayName, arrival_time: arrivalTime, source: "liff" },
     });
-    return json({ ok: true, status, arrivalTime, roster: await getLiffRoster(admin, event) });
+    return json({ ok: true, status, arrivalTime, profile: currentProfile, roster: await getLiffRoster(admin, event) });
   } catch (error) {
     console.error("LIFF request failed", error);
     const message = error instanceof Error ? error.message : "ยืนยันบัญชี LINE ไม่สำเร็จ";
@@ -1401,7 +1464,7 @@ async function resolveLiffClubId(admin: any, payload: any, configuredClubId: str
 
 async function findOrCreateGuestMember(admin: any, clubId: string, guestName: string, skill: any) {
   const { data: guestMembers, error: guestError } = await admin.from("club_members")
-    .select("id, nickname, display_name, aliases, line_user_id, skill_level")
+    .select("id, nickname, display_name, aliases, line_user_id, skill_level, playable_skill_levels, allow_lower_level, allow_higher_level")
     .eq("club_id", clubId)
     .eq("active", true)
     .eq("role", "member");
@@ -1413,14 +1476,8 @@ async function findOrCreateGuestMember(admin: any, clubId: string, guestName: st
       .some((value) => normalizeMemberName(value) === normalizedGuestName)
   );
   if (exactMatches.length === 1) {
-    const { error: updateError } = await admin.from("club_members").update({
-      skill_level: skill.skillLevel,
-      playable_skill_levels: skill.playableSkillLevels,
-      allow_lower_level: skill.allowLowerLevel,
-      allow_higher_level: skill.allowHigherLevel,
-    }).eq("id", exactMatches[0].id);
-    if (updateError) throw updateError;
-    return exactMatches[0].id;
+    const matched = exactMatches[0];
+    return { memberId: matched.id, skill: validateSkillProfile(registrationProfile(matched, skill)) };
   }
 
   const { data: newGuest, error: insertError } = await admin.from("club_members").insert({
@@ -1436,7 +1493,7 @@ async function findOrCreateGuestMember(admin: any, clubId: string, guestName: st
     allow_higher_level: skill.allowHigherLevel,
   }).select("id").single();
   if (insertError) throw insertError;
-  return newGuest.id;
+  return { memberId: newGuest.id, skill };
 }
 
 function normalizeMemberName(value: unknown) {

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Check, Clock3, Edit3, LoaderCircle, MapPin, Plus, Users, X } from "lucide-react";
 import { buildArrivalTimeOptions, buildLiveQueueUrl, getEventIdFromSearch, getLiffTestContext, isLatestEventSearch, sortRosterBySignupOrder } from "./liffSignup.js";
 import SkillCompatibilityPicker from "./SkillCompatibilityPicker.jsx";
-import { defaultPlayableSkillLevels, normalizePlayableSkillLevels, SKILL_LEVELS } from "./skillLevels.js";
+import { skillLabel, defaultPlayableSkillLevels, normalizePlayableSkillLevels, SKILL_LEVELS } from "./skillLevels.js";
 import LanguageToggle from "./LanguageToggle.jsx";
 import { formatMemberDate, localizeError, pickLanguage, useLanguage } from "./language.js";
 
@@ -169,6 +169,11 @@ export default function LiffSignupApp() {
       });
       setSavedStatus("coming");
       setSavedArrivalTime(data.arrivalTime || arrivalTime);
+      if (data.profile) {
+        setNickname(data.profile.nickname || "");
+        setSkillLevel(data.profile.skillLevel || "");
+        setPlayableSkillLevels(data.profile.playableSkillLevels || defaultPlayableSkillLevels(data.profile.skillLevel));
+      }
       setRoster(data.roster || { coming: [] });
     } catch (nextError) {
       setError(localizeError(nextError.message, language, tr("ลงเวลาไม่สำเร็จ", "Unable to register your arrival time.")));
@@ -259,7 +264,7 @@ export default function LiffSignupApp() {
       <a className="liff-live-link" href={buildLiveQueueUrl({ eventId: testMode ? activeEventId : null, testClubId: testMode ? testClubId : null, language })}><Users size={17} /> {tr("ดูสนามและผู้เล่นคิวถัดไป", "View courts and upcoming queues")}</a>
 
       <section className="liff-answer-card">
-        <div className="liff-signup-as"><span>{tr("ลงชื่อเป็น", "Registering as")}</span><strong>{nickname}</strong>{skillLevel ? <em>{skillLevel}</em> : null}<button onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setPlayableSkillLevelsDraft(playableSkillLevels); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> {tr("แก้โปรไฟล์", "Edit profile")}</button></div>
+        <div className="liff-signup-as"><span>{tr("ลงชื่อเป็น", "Registering as")}</span><strong>{nickname}</strong>{skillLevel ? <em>{skillLabel(skillLevel)}</em> : null}<button onClick={() => { setNicknameDraft(nickname); setSkillDraft(skillLevel); setPlayableSkillLevelsDraft(playableSkillLevels); setShowNicknameModal(true); }} type="button"><Edit3 size={14} /> {tr("แก้โปรไฟล์", "Edit profile")}</button></div>
         {queueStatus ? <div className={`liff-queue-status is-${queueStatus.status}`}><span>{queueStatus.status === "playing" ? `${tr("กำลังเล่น", "Playing on")} ${queueStatus.courtName || tr("ในสนาม", "court")}` : queueStatus.status === "reserved" ? tr("อยู่ในคิวที่กำลังเตรียม", "Reserved in a draft queue") : queueStatus.status === "waiting" ? tr("อยู่ในคิวรอเล่น", "Waiting to play") : tr("ออกจากคิวแล้ว", "Left the queue")}</span>{queueStatus.team ? <small>{tr("ทีม", "Team")} {queueStatus.team}</small> : null}</div> : null}
         <div className="liff-answer-heading">
           <div><span>{tr("เวลาของคุณ", "Your arrival time")}</span><strong>{closed ? tr("รอบนี้ปิดรับลงเวลาแล้ว", "Registration is closed") : savedStatus === "coming" ? tr("ลงเวลาเรียบร้อยแล้ว", "Arrival time saved") : tr("เลือกเวลาที่จะไป", "Choose your arrival time")}</strong></div>
@@ -291,7 +296,7 @@ export default function LiffSignupApp() {
             placeholder={tr("ลงชื่อให้เพื่อน", "Register a friend")}
             value={guestName}
           />
-          <select aria-label={tr("ระดับมือของเพื่อน", "Friend's skill level")} onChange={(changeEvent) => { setGuestSkill(changeEvent.target.value); setGuestPlayableSkillLevels(defaultPlayableSkillLevels(changeEvent.target.value)); }} value={guestSkill}><option value="">{tr("ระดับมือ", "Skill")}</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select>
+          <select aria-label={tr("ระดับมือของเพื่อน", "Friend's skill level")} onChange={(changeEvent) => { setGuestSkill(changeEvent.target.value); setGuestPlayableSkillLevels(defaultPlayableSkillLevels(changeEvent.target.value)); }} value={guestSkill}><option value="">{tr("ระดับมือ", "Skill")}</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select>
           <select
             aria-label={tr("เวลาที่เพื่อนจะมา", "Friend's arrival time")}
             onChange={(changeEvent) => setGuestArrivalTime(changeEvent.target.value)}
@@ -316,7 +321,7 @@ export default function LiffSignupApp() {
           <form className="liff-nickname-modal" onSubmit={saveNickname}>
             <div><h2>{tr("โปรไฟล์สมาชิก", "Member profile")}</h2><p>{tr("ระบบจะจำชื่อและระดับไว้สำหรับครั้งต่อไป", "Your name and skill level will be remembered next time.")}</p></div>
             <label htmlFor="liff-nickname"><span>{tr("ชื่อเล่น", "Nickname")}</span><input autoFocus id="liff-nickname" maxLength="40" onChange={(changeEvent) => setNicknameDraft(changeEvent.target.value)} required value={nicknameDraft} /></label>
-            <label><span>{tr("ระดับมือ", "Skill level")}</span><select onChange={(changeEvent) => { setSkillDraft(changeEvent.target.value); setPlayableSkillLevelsDraft(defaultPlayableSkillLevels(changeEvent.target.value)); }} required value={skillDraft}><option value="">{tr("เลือกระดับมือ", "Select skill level")}</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
+            <label><span>{tr("ระดับมือ", "Skill level")}</span><select onChange={(changeEvent) => { setSkillDraft(changeEvent.target.value); setPlayableSkillLevelsDraft(defaultPlayableSkillLevels(changeEvent.target.value)); }} required value={skillDraft}><option value="">{tr("เลือกระดับมือ", "Select skill level")}</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select></label>
             <SkillCompatibilityPicker className="liff-skill-preferences" language={language} onChange={setPlayableSkillLevelsDraft} skillLevel={skillDraft} value={playableSkillLevelsDraft} />
             <small>{tr("ชื่อ LINE ของคุณคือ", "Your LINE name is")} {profile?.name || tr("สมาชิก LINE", "LINE member")}</small>
             {error ? <div className="liff-inline-error">{error}</div> : null}
@@ -336,7 +341,7 @@ function RosterGroup({ entries, language }) {
   const orderedEntries = sortRosterBySignupOrder(entries);
   return (
     <div className="liff-roster-group is-coming">
-      {orderedEntries.length ? <ol>{orderedEntries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${entry.signupOrder || index}`}><b>{index + 1}.</b><strong>{entry.name}</strong>{entry.skillLevel ? <em>{entry.skillLevel}</em> : null}<span>{entry.arrivalTime || tr("ยังไม่ระบุเวลา", "Time not set")}</span></li>)}</ol> : <p>{tr("ยังไม่มีคนลงเวลา", "No players have registered yet.")}</p>}
+      {orderedEntries.length ? <ol>{orderedEntries.map((entry, index) => <li key={`${entry.name}-${entry.arrivalTime}-${entry.signupOrder || index}`}><b>{index + 1}.</b><strong>{entry.name}</strong>{entry.skillLevel ? <em>{skillLabel(entry.skillLevel)}</em> : null}<span>{entry.arrivalTime || tr("ยังไม่ระบุเวลา", "Time not set")}</span></li>)}</ol> : <p>{tr("ยังไม่มีคนลงเวลา", "No players have registered yet.")}</p>}
     </div>
   );
 }

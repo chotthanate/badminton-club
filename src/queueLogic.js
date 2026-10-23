@@ -230,43 +230,43 @@ export function balanceTeams(lineup, matches = []) {
 export function proposeQueueMatch(players, matches = [], nextSequence = 1) {
   const eligible = eligibleQueuePlayers(players, nextSequence);
   if (eligible.length < 4) return null;
-  const repeatStats = buildRepeatStats(matches);
-
-  for (const anchor of eligible) {
-    const candidates = combinations(eligible.filter((player) => player.memberId !== anchor.memberId), 3)
-      .map((others) => [anchor, ...others])
-      // Automatic queues only bridge adjacent skill levels. Wider gaps remain
-      // available to an operator through the manual editor with a warning.
-      .filter((lineup) => skillDistanceKey(lineup)[0] <= 1)
-      .map((lineup) => {
-        const compatibility = lineupCompatibility(lineup, anchor);
-        return {
-          ...compatibility,
-          lineup,
-          preferencePenalty: compatibilityPreferencePenalty(lineup),
-          skillDistance: skillDistanceKey(lineup),
-          score: lineupScore(lineup, repeatStats),
-        };
-      })
-      .filter((candidate) => candidate.valid);
-    if (!candidates.length) continue;
-    // Once the oldest eligible anchor can be placed, prefer the three people
-    // who have waited longest. Skill closeness then breaks near-equal choices.
-    candidates.sort((left, right) => compareKeys(left.score, right.score)
-      || compareKeys(compatibilitySortKey(left), compatibilitySortKey(right)));
-    const selected = candidates[0];
-    const teams = balanceTeams(selected.lineup, matches);
-    return { ...teams, lineup: selected.lineup, tier: selected.tier, baseLevel: anchor.skillLevel };
-  }
-  return null;
+  const anchor = eligible[0];
+  const anchorIndex = skillIndex(anchor.skillLevel);
+  // Only two adjacent-level windows can contain the oldest player. Taking
+  // the first four in each avoids combinatorial work and preserves FIFO.
+  const candidates = [anchorIndex - 1, anchorIndex].map((minimum) => eligible
+    .filter((player) => skillIndex(player.skillLevel) >= minimum && skillIndex(player.skillLevel) <= minimum + 1)
+    .slice(0, 4)).filter((lineup) => lineup.length === 4);
+  candidates.sort((left, right) => compareKeys(left.flatMap(queueFairnessKey), right.flatMap(queueFairnessKey)));
+  const lineup = candidates[0];
+  if (!lineup) return null;
+  const tier = lineup.some((player) => skillIndex(player.skillLevel) < anchorIndex) ? 3
+    : lineup.some((player) => skillIndex(player.skillLevel) > anchorIndex) ? 2 : 1;
+  return { ...balanceTeams(lineup, matches), lineup, tier, baseLevel: anchor.skillLevel };
 }
 
-// Last resort for a busy court: keep the four longest-waiting eligible players
-// together, but leave the resulting draft for an operator to review.
+// A shortage may be filled upwards only: retain the oldest player, keep the
+// adjacent players in wait order, then take the closest higher level first.
 export function proposeFallbackQueueMatch(players, matches = [], nextSequence = 1) {
-  const lineup = eligibleQueuePlayers(players, nextSequence).slice(0, 4);
+  const eligible = eligibleQueuePlayers(players, nextSequence);
+  if (eligible.length < 4) return null;
+  const strict = proposeQueueMatch(eligible, matches, nextSequence);
+  if (strict) return strict;
+  const anchor = eligible[0];
+  const anchorIndex = skillIndex(anchor.skillLevel);
+  const adjacent = eligible.filter((player) => Math.abs(skillIndex(player.skillLevel) - anchorIndex) <= 1);
+  const higher = eligible.filter((player) => skillIndex(player.skillLevel) > anchorIndex + 1)
+    .sort((left, right) => skillIndex(left.skillLevel) - skillIndex(right.skillLevel)
+      || compareKeys(queueFairnessKey(left), queueFairnessKey(right)));
+  const lineup = [...adjacent, ...higher].slice(0, 4);
   if (lineup.length < 4) return null;
-  return { ...balanceTeams(lineup, matches), lineup, fallback: true };
+  return { ...balanceTeams(lineup, matches), lineup, fallback: true, baseLevel: anchor.skillLevel };
+}
+
+export function queueProposalFailure(players, nextSequence = 1) {
+  const eligible = eligibleQueuePlayers(players, nextSequence);
+  if (eligible.length < 4) return "ผู้เล่นที่พร้อมและมีระดับมือยังไม่ครบ 4 คน";
+  return `ยังเติมคิวของ ${eligible[0].name || "ผู้ที่รอนานที่สุด"} ไม่ครบ 4 คน: ไม่มีผู้เล่นมือใกล้เคียงหรือมือสูงกว่าเพียงพอ กรุณารอเพิ่มหรือจัดด้วยตัวเอง`;
 }
 
 function replacementCompatibility(remainingPlayers, incomingPlayer) {
