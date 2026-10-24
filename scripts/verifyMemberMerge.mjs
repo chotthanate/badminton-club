@@ -152,7 +152,12 @@ for(const status of ["draft","approved","playing"]) await check(`${status} assig
   assert.equal(await value("select member_id as value from public.queue_match_players where match_id=$1",[match]),source);
 });
 await check("stale reserved player state is rejected even without a match row",async()=>{
-  await db.query("update public.event_queue_players set status='reserved' where member_id=$1",[target]); await rejectMerge(/กำลังเล่นหรืออยู่ในคิว/);
+  // Reproduce a pre-migration stale row. New writes correctly refuse to revive
+  // closed/departed players, but merge must still defend against old leftovers.
+  await db.exec("alter table public.event_queue_players disable trigger queue_player_availability");
+  await db.query("update public.event_queue_players set status='reserved' where member_id=$1",[target]);
+  await db.exec("alter table public.event_queue_players enable trigger queue_player_availability");
+  await rejectMerge(/กำลังเล่นหรืออยู่ในคิว/);
 });
 await check("both old and new RPC names reject identities that appeared in one historical game",async()=>{
   const match=await game(source); await db.query("insert into public.queue_match_players(club_id,event_id,match_id,member_id,team,position,skill_level_snapshot) values($1,$2,$3,$4,'B',1,'N')",[club,round,match,target]);

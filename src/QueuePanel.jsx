@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ListOrdered, Pencil, Play, Plus, Save, Settings, Timer, Trash2, Users, X } from "lucide-react";
+import { Check, ListOrdered, Pencil, Play, Plus, Settings, Timer, Trash2, Users, X } from "lucide-react";
+import CourtBookingPanel from "./CourtBookingPanel.jsx";
 import {
   cancelUpcomingQueues,
   createManualQueue,
@@ -12,12 +13,11 @@ import {
   returnPlayingQueueToHead,
   startNextQueueOnCourt,
   saveQueueLineup,
-  removeOperatorCourt,
-  upsertOperatorCourt,
 } from "./clubRepository.js";
 import { balanceTeams, proposeFallbackQueueMatch, proposeQueueMatch, queueProposalFailure, queueFairnessKey, compareKeys } from "./queueLogic.js";
 import { planQueueDrafts } from "./queueBatchPlanning.js";
 import { buildQueuePlanningState } from "./queuePlanning.js";
+import { queueAttendanceStatus } from "./queueAvailability.js";
 import { queueVersionRequests, selectedUpcomingQueues } from "./queueManagement.js";
 import { saveQueueEditor } from "./queueSave.js";
 import { courtTimeStatus } from "./queueCourtTime.js";
@@ -27,7 +27,6 @@ import { normalizeMemberSearch } from "./memberSearch.js";
 import { hasUnsavedQueueWork, queueDraftConflicts, queueLineupSignature, readQueueWork, toggleQueueSelection, writeQueueWork } from "./queueDrafts.js";
 import "./queue-improvements.css";
 
-const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`);
 
 function memberName(member) {
   return member?.nickname || member?.display_name || "ไม่ทราบชื่อ";
@@ -36,6 +35,7 @@ function memberName(member) {
 export function mapQueueDashboard(dashboard) {
   const membersById = new Map((dashboard.members || []).map((member) => [member.id, member]));
   const signupsByMember = new Map((dashboard.signups || []).map((signup) => [signup.member_id, signup]));
+  const attendanceByMember = new Map((dashboard.attendance || []).map((attendance) => [attendance.member_id, attendance]));
   const players = (dashboard.queuePlayers || []).map((row) => {
     const member = membersById.get(row.member_id);
     const signup = signupsByMember.get(row.member_id);
@@ -50,7 +50,7 @@ export function mapQueueDashboard(dashboard) {
         signup?.playable_skill_levels_snapshot?.length ? signup.playable_skill_levels_snapshot : member?.playable_skill_levels,
         { allowLowerLevel: signup?.allow_lower_level_snapshot ?? member?.allow_lower_level, allowHigherLevel: signup?.allow_higher_level_snapshot ?? member?.allow_higher_level },
       ),
-      status: row.status,
+      status: queueAttendanceStatus(row, signup, attendanceByMember.get(row.member_id)),
       gamesPlayed: Number(row.games_played) || 0,
       minutesPlayed: Number(row.minutes_played) || 0,
       queuedAt: row.queued_at,
@@ -345,46 +345,6 @@ function QueueLineupEditor({ clock, eventId, isNew, match, matches, onClose, pla
   </QueueModal>;
 }
 
-function TimeSelect({ disabled = false, label, onChange, value }) {
-  return <select aria-label={label} disabled={disabled} onChange={(event) => onChange(event.target.value)} value={value}>{TIME_OPTIONS.map((time) => <option key={time}>{time}</option>)}</select>;
-}
-
-export function OperatorCourtControls({ event, mutate }) {
-  const [newCourt, setNewCourt] = useState(() => readQueueWork(event.id, "court:new") || { name: "", startsAt: event.startTime, endsAt: event.endTime });
-  const [adding, setAdding] = useState(false);
-  const addingRef = useRef(false);
-  useEffect(() => { setNewCourt(readQueueWork(event.id, "court:new") || { name: "", startsAt: event.startTime, endsAt: event.endTime }); }, [event.id]);
-  function changeNewCourt(value) { setNewCourt(value); writeQueueWork(event.id, "court:new", value); }
-  async function addCourt(eventObject) {
-    eventObject.preventDefault();
-    if (addingRef.current) return;
-    addingRef.current = true; setAdding(true);
-    try {
-      const saved = await mutate(() => upsertOperatorCourt({ eventId: event.id, courtName: newCourt.name, startsAt: newCourt.startsAt, endsAt: newCourt.endsAt }), "เพิ่มคอร์ทแล้ว", { actionKey: `court:${event.id}:new` });
-      if (saved) { writeQueueWork(event.id, "court:new", null); setNewCourt({ name: "", startsAt: event.startTime, endsAt: event.endTime }); }
-    } finally { addingRef.current = false; setAdding(false); }
-  }
-  return <article className="badminton-card badminton-operator-courts"><div className="badminton-card-title"><Settings size={20} /><div><h2>คอร์ทและเวลา</h2><p>แก้เวลา เพิ่ม หรือลดคอร์ทได้จากหน้านี้</p></div></div>{event.courts.map((court) => <OperatorCourtRow court={court} eventId={event.id} key={`${event.id}:${court.id}`} mutate={mutate} />)}<form className="badminton-court-row badminton-operator-add-court" onSubmit={addCourt}><input aria-label="ชื่อคอร์ทใหม่" disabled={adding} onChange={(eventObject) => changeNewCourt({ ...newCourt, name: eventObject.target.value })} placeholder="เช่น คอร์ท 13" required value={newCourt.name} /><TimeSelect disabled={adding} label="เวลาเริ่มคอร์ทใหม่" onChange={(value) => changeNewCourt({ ...newCourt, startsAt: value })} value={newCourt.startsAt} /><TimeSelect disabled={adding} label="เวลาจบคอร์ทใหม่" onChange={(value) => changeNewCourt({ ...newCourt, endsAt: value })} value={newCourt.endsAt} /><button className="badminton-primary" disabled={adding} type="submit"><Plus size={16} /> {adding ? "กำลังเพิ่ม…" : "เพิ่ม"}</button></form>{readQueueWork(event.id, "court:new") ? <span className="queue-dirty-badge">คอร์ทใหม่ยังไม่บันทึก</span> : null}</article>;
-}
-
-function OperatorCourtRow({ court, eventId, mutate }) {
-  const workId = `court:${court.id}`;
-  const serverForm = { name: court.name, startsAt: court.startsAt, endsAt: court.endsAt };
-  const serverSignature = JSON.stringify(serverForm);
-  const [work, setWork] = useState(() => readQueueWork(eventId, workId) || { form: serverForm, baseSignature: serverSignature });
-  const [dirty, setDirty] = useState(() => Boolean(readQueueWork(eventId, workId)));
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
-  const conflict = dirty && work.baseSignature !== serverSignature;
-  useEffect(() => { if (!dirty) setWork({ form: serverForm, baseSignature: serverSignature }); }, [serverSignature, dirty]);
-  function change(values) { if (savingRef.current) return; const next = { ...work, form: { ...work.form, ...values } }; setWork(next); setDirty(true); writeQueueWork(eventId, workId, next); }
-  async function save() {
-    if (savingRef.current || conflict) return;
-    savingRef.current = true; setSaving(true);
-    try {
-      const saved = await mutate(() => upsertOperatorCourt({ eventId, courtId: court.id, courtName: work.form.name, startsAt: work.form.startsAt, endsAt: work.form.endsAt }), `บันทึก ${work.form.name} แล้ว`, { actionKey: `court:${eventId}:${court.id}` });
-      if (saved) { writeQueueWork(eventId, workId, null); setDirty(false); }
-    } finally { savingRef.current = false; setSaving(false); }
-  }
-  return <div className="queue-court-edit"><div className="badminton-court-row"><input aria-label={`ชื่อ ${court.name}`} disabled={saving} onChange={(eventObject) => change({ name: eventObject.target.value })} value={work.form.name} /><TimeSelect disabled={saving} label={`เวลาเริ่ม ${court.name}`} onChange={(value) => change({ startsAt: value })} value={work.form.startsAt} /><TimeSelect disabled={saving} label={`เวลาจบ ${court.name}`} onChange={(value) => change({ endsAt: value })} value={work.form.endsAt} /><div className="badminton-operator-court-actions"><button aria-label={`บันทึก ${court.name}`} className="badminton-icon-button" disabled={saving || conflict} onClick={save} type="button"><Save size={16} /></button><button aria-label={`ลบ ${court.name}`} className="badminton-delete-button" disabled={saving} onClick={() => { if (window.confirm(`ลบ ${court.name} ออกจากรอบนี้ใช่ไหม?`)) mutate(() => removeOperatorCourt({ eventId, courtId: court.id }), `ลบ ${court.name} แล้ว`, { actionKey: `court:${eventId}:${court.id}` }).then((saved) => { if (saved) writeQueueWork(eventId, workId, null); }); }} type="button"><Trash2 size={16} /></button></div></div>{dirty ? <span className="queue-dirty-badge">{saving ? "กำลังบันทึก…" : "ยังไม่บันทึก"}</span> : null}{conflict ? <p className="queue-work-conflict">ข้อมูลคอร์ทเปลี่ยนจากเครื่องอื่น <button onClick={() => { if (window.confirm("ทิ้งข้อมูลที่ยังไม่บันทึกและใช้ข้อมูลคอร์ทล่าสุดใช่ไหม?")) { writeQueueWork(eventId, workId, null); setDirty(false); } }} type="button">ใช้ข้อมูลล่าสุด</button></p> : null}</div>;
+export function OperatorCourtControls(props) {
+  return <CourtBookingPanel {...props} />;
 }

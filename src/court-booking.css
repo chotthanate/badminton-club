@@ -1,0 +1,40 @@
+.court-booking-panel { display: grid; gap: 12px; width: 100%; min-width: 0; }
+.court-booking-heading { display: flex; align-items: center; gap: 9px; }
+.court-booking-heading h2 { margin: 0; font-size: 18px; }
+.court-booking-heading p { margin: 4px 0 0; color: #627366; font-size: 12px; line-height: 1.6; }
+.court-booking-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.court-booking-card { min-width: 0; padding: 14px; border: 1px solid #dce7de; border-radius: 16px; background: #fff; }
+.court-booking-card.is-playing { background: #fffcf5; }
+.court-booking-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.court-booking-card h3 { margin: 0 0 5px; font-size: 17px; }
+.court-booking-time { display: block; font-size: 14px; line-height: 1.5; color: #435b4c; }
+.court-booking-status { flex-shrink: 0; padding: 4px 7px; border-radius: 8px; background: #eff5f0; color: #4c6b56; font-size: 11px; }
+.court-booking-status.is-playing { background: #fff0cd; color: #886019; }
+.court-booking-status.is-expired { background: #f1f2f1; color: #626b66; }
+.court-booking-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.court-booking-actions button { min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px; padding: 8px 12px; }
+.court-booking-extend { background: #dff3e7; color: #126b45; }
+.court-booking-extend > span { display: grid; gap: 2px; }
+.court-booking-extend strong { font-size: 16px; }
+.court-booking-extend small { font-size: 11px; font-weight: 400; }
+.court-booking-edit-toggle { background: #f1f5f1; color: #45604e; font-size: 13px; }
+.court-booking-panel button:disabled { opacity: .5; cursor: not-allowed; }
+.court-booking-panel :is(button, select, input):focus-visible { outline: 2px solid #16845b; outline-offset: 2px; }
+.court-booking-edit, .court-booking-add { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.court-booking-edit label, .court-booking-add label { display: grid; gap: 5px; min-width: 0; color: #53665b; font-size: 12px; }
+.court-booking-edit :is(input, select), .court-booking-add :is(input, select) { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #cbd9cd; border-radius: 10px; padding: 8px; background: #fff; color: #213b2c; font-size: 16px; }
+.court-booking-name, .court-booking-edit-actions, .court-booking-delete-confirm, .court-booking-error, .court-booking-success, .court-booking-help, .court-booking-add > header, .court-booking-add > button { grid-column: 1 / -1; }
+.court-booking-edit-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.court-booking-edit-actions button, .court-booking-delete-confirm button, .court-booking-add-toggle, .court-booking-add > header button { min-height: 44px; padding: 8px 10px; border: 0; border-radius: 10px; background: #eef4ef; color: #306246; font-size: 13px; }
+.court-booking-edit-actions .badminton-primary { background: #15966a; color: #fff; }
+.court-booking-edit-actions .court-booking-delete, .court-booking-delete-confirm .court-booking-delete { margin-left: auto; background: #fff1ed; color: #a33d30; }
+.court-booking-help, .court-booking-dirty { display: block; color: #68766e; font-size: 12px; line-height: 1.6; }
+.court-booking-dirty { margin-top: 9px; color: #8a681a; }
+.court-booking-error, .court-booking-success { margin: 10px 0 0; padding: 9px 10px; border-radius: 10px; font-size: 13px; line-height: 1.6; }
+.court-booking-error { background: #fff0ec; color: #a0382a; }
+.court-booking-error button { min-height: 44px; border: 0; background: transparent; text-decoration: underline; color: inherit; }
+.court-booking-success { background: #eaf6ee; color: #216d47; }
+.court-booking-add { padding: 14px; border-radius: 16px; background: #f5f8f4; }
+.court-booking-add > header { display: flex; align-items: center; justify-content: space-between; }
+.court-booking-add-toggle { display: flex; justify-content: center; align-items: center; gap: 7px; }
+@media (max-width: 640px) { .court-booking-list { grid-template-columns: 1fr; } .court-booking-card { padding: 12px; } }

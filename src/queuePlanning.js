@@ -14,10 +14,10 @@ export function buildQueuePlanningState(players = [], upcoming = []) {
     .filter((player) => player.status === "waiting" && !upcomingMemberIds.has(player.memberId))
     .sort(compareWaiting);
   const visibleWaiting = players
-    .filter((player) => ["waiting", "reserved"].includes(player.status) || queuePositionsByMember.has(player.memberId))
+    .filter((player) => player.status !== "left" && (["waiting", "reserved"].includes(player.status) || queuePositionsByMember.has(player.memberId)))
     .sort(compareWaiting);
   const availablePlaying = players.filter((player) => player.status === "playing" && !upcomingMemberIds.has(player.memberId));
-  const proposalPlayers = players.map((player) => upcomingMemberIds.has(player.memberId) ? { ...player, status: "reserved" } : player);
+  const proposalPlayers = players.map((player) => player.status !== "left" && upcomingMemberIds.has(player.memberId) ? { ...player, status: "reserved" } : player);
 
   return {
     availablePlaying,

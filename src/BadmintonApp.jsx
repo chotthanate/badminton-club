@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import TournamentAdminApp from "./TournamentAdminApp.jsx";
 import SandboxModeBadge from "./SandboxModeBadge.jsx";
+import ParticipantPicker from "./ParticipantPicker.jsx";
+import { activeParticipantSignup, participantRemovalMessage, participantTimeLabel, participantTimeOptions, resolveParticipantMember } from "./participantControls.js";
 import {
   ArrowLeft,
   ArrowUpDown,
@@ -31,7 +33,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  addCourt,
   addExpense,
   addExtraCatalogItem,
   addLineMember,
@@ -69,10 +70,10 @@ import {
   resetTestClub,
   reviewPaymentSlip,
   prepareEventForLine,
-  removeCourt,
   removeExtraCatalogItem,
   removeMemberExtraCharge,
   removeParticipant,
+  restoreParticipant,
   removeShuttlecockCheckpoint,
   setPayment,
   setEventShuttlecockCount,
@@ -81,7 +82,6 @@ import {
   startNextQueueOnCourt,
   updateAttendance,
   updateClubMember,
-  updateCourts,
   updateEvent,
   updateEventDetails,
   updateEventVenue,
@@ -95,7 +95,6 @@ import {
   updateOperatorAttendance,
   updateOperatorMemberSkill,
   updateOperatorSignupArrival,
-  upsertOperatorCourt,
   moveUpcomingQueue,
   upsertShuttlecockCheckpoint,
 } from "./clubRepository.js";
@@ -120,7 +119,7 @@ import {
   timePositionWithinEvent,
   totalCourtHours,
 } from "./badmintonLogic.js";
-import { normalizeMemberSearch, rankMemberSuggestions } from "./memberSearch.js";
+import { normalizeMemberSearch } from "./memberSearch.js";
 import { buildLiveQueueUrl, buildTestPaymentLiffUrl, buildTestSignupLiffUrl } from "./liffSignup.js";
 import { proposeQueueMatch, SKILL_LEVELS } from "./queueLogic.js";
 import { randomTestPlayerCount } from "./randomTestPlayers.js";
@@ -145,7 +144,7 @@ import { buildOutstandingLineMessage, filterAndSortOutstanding, outstandingAgeIn
 import AdminSettingsPanel from "./AdminSettingsPanel.jsx";
 import PaymentRow from "./PaymentRow.jsx";
 import { adminNavigationTabs } from "./adminNavigation.js";
-import { modifiedCourtUpdates, roundDetailsPatch } from "./roundControls.js";
+import { roundDetailsPatch } from "./roundControls.js";
 import "./round-controls.css";
 import "./admin-navigation.css";
 
@@ -727,7 +726,7 @@ function AdminDashboard({ session }) {
                 : null}
             </> : null}
 
-            {isStaff && activeTab === "round" ? <OperatorCourtControls event={appEvent} mutate={mutate} /> : null}
+            {isStaff && activeTab === "round" ? <OperatorCourtControls dashboard={dashboard} event={appEvent} isStaff isTestMode={context.clubs.is_test} mutate={mutate} /> : null}
 
             {activeTab === "players" ? (
               isStaff ? <StaffParticipantsPanel dashboard={dashboard} event={appEvent} mutate={mutate} pendingKeys={pendingKeys} /> : <ParticipantsPanel
@@ -952,19 +951,9 @@ function EventControlCard({ clubName, clubSettings, courts, dashboard, event, is
   const [roundSettingsError, setRoundSettingsError] = useState("");
   const [republishPending, setRepublishPending] = useState(false);
   const [courtsSaving, setCourtsSaving] = useState(false);
+  const [courtsDirty, setCourtsDirty] = useState(false);
   const detailsSavingRef = useRef(false);
   const republishPendingRef = useRef(false);
-  const courtsSavingRef = useRef(false);
-  const [newCourt, setNewCourt] = useState({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
-  const courtEditor = usePersistentEditor(`badminton:courts:${event.id}`, Object.fromEntries(courts.map((court) => [court.id, {
-      court_name: court.court_name,
-      starts_at: court.starts_at.slice(0, 5),
-      ends_at: court.ends_at.slice(0, 5),
-    }])));
-  const courtDrafts = courtEditor.value;
-  const setCourtDrafts = courtEditor.setValue;
-  const playingCourtIds = new Set((dashboard.queueMatches || []).filter((match) => match.status === "playing").map((match) => match.court_id));
-
   async function saveEventDetails() {
     if (detailsSavingRef.current) return;
     if (eventEditor.conflict) { setRoundSettingsError("รายละเอียดรอบเปลี่ยนจากเครื่องอื่น กรุณาใช้ข้อมูลล่าสุดก่อนแก้ใหม่"); return; }
@@ -990,7 +979,7 @@ function EventControlCard({ clubName, clubSettings, courts, dashboard, event, is
 
   async function prepareOpenRoundForLine() {
     if (republishPendingRef.current || event.status !== "open" || isTestMode) return;
-    if (eventEditor.dirty || courtEditor.dirty) { setRoundSettingsError("กรุณาบันทึกสถานที่และคอร์ทที่แก้ก่อนเตรียมส่งข้อมูลเข้า LINE"); return; }
+    if (eventEditor.dirty || courtsDirty) { setRoundSettingsError("กรุณาบันทึกสถานที่และคอร์ทที่แก้ก่อนเตรียมส่งข้อมูลเข้า LINE"); return; }
     republishPendingRef.current = true; setRepublishPending(true); setRoundSettingsError("");
     let reported = false;
     try {
@@ -1001,42 +990,6 @@ function EventControlCard({ clubName, clubSettings, courts, dashboard, event, is
       if (!saved && !reported) setRoundSettingsError("เตรียมส่งข้อมูลไม่สำเร็จ กรุณาลองอีกครั้ง รอบและรายชื่อเดิมไม่ถูกเปลี่ยน");
     } catch (error) { setRoundSettingsError(error.message); }
     finally { republishPendingRef.current = false; setRepublishPending(false); }
-  }
-
-  async function addNewCourt(submitEvent) {
-    submitEvent.preventDefault();
-    const saved = await mutate(() => addCourt({
-      clubId: event.club_id,
-      eventId: event.id,
-      ...newCourt,
-      courtName: `คอร์ท ${newCourt.courtNumber.trim()}`,
-    }), "เพิ่มคอร์ทแล้ว", { actionKey: `court:add:${event.id}` });
-    if (saved) setNewCourt({ courtNumber: "", startsAt: event.starts_at.slice(0, 5), endsAt: event.ends_at.slice(0, 5) });
-  }
-
-  async function saveAllCourts() {
-    if (courtsSavingRef.current) return;
-    if (courtEditor.conflict) {
-      window.alert("ข้อมูลคอร์ทเปลี่ยนจากเครื่องอื่น กรุณาโหลดค่าล่าสุดแล้วแก้ใหม่เพื่อไม่บันทึกทับกัน ร่างที่กรอกยังอยู่");
-      return;
-    }
-    const updates = modifiedCourtUpdates(courts, courtDrafts);
-    if (!updates.length) { courtEditor.reset(); return; }
-    if (updates.some((court) => playingCourtIds.has(court.id))) { setRoundSettingsError("มีคอร์ทที่กำลังเล่น กรุณาจบเกมบนคอร์ทนั้นก่อนแก้ไข"); return; }
-    if (updates.some((court) => !court.court_name.trim())) {
-      await mutate(async () => { throw new Error("กรุณากรอกชื่อคอร์ทให้ครบทุกคอร์ท"); }, "");
-      return;
-    }
-    courtsSavingRef.current = true; setCourtsSaving(true);
-    try {
-      const saved = await mutate(() => updateCourts(event.id, updates), "บันทึกคอร์ทที่แก้ไขแล้ว", { actionKey: `courts:${event.id}`, onError: (error) => setRoundSettingsError(error.message) });
-      if (saved) {
-        const submitted = { ...courtDrafts };
-        updates.forEach(({ id, ...patch }) => { submitted[id] = patch; });
-        courtEditor.setValue(submitted); courtEditor.accept(submitted);
-      }
-    } catch (error) { setRoundSettingsError(error.message); }
-    finally { courtsSavingRef.current = false; setCourtsSaving(false); }
   }
 
   function advanceRound() {
@@ -1119,47 +1072,9 @@ function EventControlCard({ clubName, clubSettings, courts, dashboard, event, is
         <button className="badminton-secondary" disabled={detailsSaving || !eventEditor.dirty} onClick={saveEventDetails} type="button"><Save size={17} /> {detailsSaving ? "กำลังบันทึก…" : event.status === "open" ? "บันทึกสถานที่" : "บันทึก"}</button>
         <small className="badminton-round-preserve-note">แก้ข้อมูลในรอบเดิม ไม่เปลี่ยนรายชื่อ เวลาเข้า–ออก คิว หรือยอดเงิน และไม่แทนที่คอร์ทเดิม</small>
       </div> : null}
-      {event.status === "closed" ? (
-        <div className="badminton-closed-courts">
-          {courts.map((court) => <span key={court.id}><strong>{court.court_name}</strong> : {court.starts_at.slice(0, 5)}–{court.ends_at.slice(0, 5) === "00:00" ? "24:00" : court.ends_at.slice(0, 5)}</span>)}
-        </div>
-      ) : (
-        <div className="badminton-courts-editor">
-          <div className="badminton-courts-heading"><strong>คอร์ทที่จอง</strong></div>
-          {courtEditor.dirty ? <div className="editor-dirty">ยังไม่บันทึก{courtEditor.conflict ? " · ข้อมูลคอร์ทเปลี่ยนจากเครื่องอื่น" : " · ร่างถูกเก็บไว้ในเครื่องนี้"}<button type="button" onClick={() => { if (window.confirm("ทิ้งร่างคอร์ทและใช้ข้อมูลล่าสุด?")) courtEditor.reset(); }}>ใช้ข้อมูลล่าสุด</button></div> : null}
-          {courts.map((court) => <CourtEditor key={court.id} court={court} disabled={courtsSaving || playingCourtIds.has(court.id)} draft={courtDrafts[court.id]} onChange={(nextDraft) => setCourtDrafts((current) => ({ ...current, [court.id]: nextDraft }))} eventId={event.id} mutate={mutate} />)}
-          {playingCourtIds.size ? <small className="badminton-round-preserve-note">คอร์ทที่กำลังเล่นจะแก้หรือลบไม่ได้จนกว่าจะจบเกม แต่แก้ชื่อสถานที่ได้ตามปกติ</small> : null}
-          <form className="badminton-court-row is-new" onSubmit={addNewCourt}>
-            <div className="badminton-court-number-input"><span>คอร์ท</span><input aria-label="เลขคอร์ทใหม่" inputMode="numeric" placeholder="เลข" required value={newCourt.courtNumber} onChange={(e) => setNewCourt({ ...newCourt, courtNumber: e.target.value })} /></div>
-            <HalfHourSelect ariaLabel="เวลาเริ่มคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, startsAt: value })} value={newCourt.startsAt} />
-            <HalfHourSelect ariaLabel="เวลาจบคอร์ทใหม่" onChange={(value) => setNewCourt({ ...newCourt, endsAt: value })} value={newCourt.endsAt} />
-            <button aria-label="เพิ่มคอร์ท" className="badminton-secondary badminton-court-add" type="submit"><Plus size={16} /><span>เพิ่ม</span></button>
-          </form>
-          {courts.length ? <button className="badminton-secondary badminton-courts-save-all" disabled={courtsSaving || !courtEditor.dirty} onClick={saveAllCourts} type="button"><Save size={17} /> {courtsSaving ? "กำลังบันทึก…" : "บันทึกคอร์ทที่แก้ไข"}</button> : null}
-        </div>
-      )}
+      <OperatorCourtControls dashboard={dashboard} event={mappedEvent} isTestMode={isTestMode} mutate={mutate} onBusyChange={setCourtsSaving} onDirtyChange={setCourtsDirty} />
     </section>
   );
-}
-
-function CourtEditor({ court, draft, eventId, mutate, onChange, disabled = false }) {
-  const form = draft || {
-    court_name: court.court_name,
-    starts_at: court.starts_at.slice(0, 5),
-    ends_at: court.ends_at.slice(0, 5),
-  };
-  return (
-    <div className="badminton-court-row">
-      <input aria-label={`ชื่อ ${court.court_name}`} disabled={disabled} value={form.court_name} onChange={(e) => onChange({ ...form, court_name: e.target.value })} />
-      <HalfHourSelect ariaLabel={`เวลาเริ่ม ${court.court_name}`} disabled={disabled} onChange={(value) => onChange({ ...form, starts_at: value })} value={form.starts_at} />
-      <HalfHourSelect ariaLabel={`เวลาจบ ${court.court_name}`} disabled={disabled} onChange={(value) => onChange({ ...form, ends_at: value })} value={form.ends_at} />
-      <button aria-label={`ลบ ${court.court_name}`} className="badminton-delete-button" disabled={disabled} onClick={() => mutate(() => removeCourt(court.id, eventId), `ลบ ${court.court_name} แล้ว`, { actionKey: `court:remove:${court.id}` })} type="button"><Trash2 size={16} /></button>
-    </div>
-  );
-}
-
-function HalfHourSelect({ ariaLabel, onChange, value, disabled = false }) {
-  return <select aria-label={ariaLabel} disabled={disabled} onChange={(event) => onChange(event.target.value)} value={value}>{HALF_HOUR_OPTIONS.map((time) => <option key={time} value={time}>{time}</option>)}</select>;
 }
 
 function mapQueueDashboard(dashboard) {
@@ -1351,7 +1266,6 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [name, setName] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState(null);
   const [newMemberSkill, setNewMemberSkill] = useState({ level: "", playableLevels: [] });
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [newItem, setNewItem] = useState({ name: "", price: "" });
   const [customChargeFor, setCustomChargeFor] = useState(null);
   const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
@@ -1366,7 +1280,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [rosterFilter, setRosterFilter] = useState("all");
   const [exemptMemberId, setExemptMemberId] = useState("");
   const participants = event.signups
-    .filter((signup) => signup.status === "coming")
+    .filter(activeParticipantSignup)
     .map((signup) => ({
       ...signup,
       member: dashboard.members.find((member) => member.id === signup.memberId),
@@ -1377,14 +1291,12 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     if (sortMode === "alphabetical") return memberName(a.member).localeCompare(memberName(b.member), "th");
     return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
   });
-  const timeOptions = useMemo(() => buildTimeOptions(event.startTime, event.endTime), [event.startTime, event.endTime]);
   const settlementByMember = new Map(settlement.rows.map((row) => [row.memberId, row]));
   const participantIds = new Set(participants.map((participant) => participant.member.id));
   const savedMembers = dashboard.members.filter((member) => member.role === "member" && member.active !== false);
-  const memberSuggestions = rankMemberSuggestions(
-    savedMembers,
-    name,
-  ).slice(0, 8);
+  const removedMemberIds = new Set(event.signups.filter((signup) => signup.removedAt || signup.removed_at).map((signup) => signup.memberId));
+  const selectableMembers = event.status === "closed" ? savedMembers.filter((member) => removedMemberIds.has(member.id)) : savedMembers;
+  const addingPlayer = pendingKeys.some((key) => key.startsWith(`add-player:${event.id}:`));
 
   function changeSortMode(nextMode) {
     setSortMode(nextMode);
@@ -1395,14 +1307,16 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     eventObject.preventDefault();
     const trimmedName = name.trim();
     const normalizedName = normalizeMemberSearch(trimmedName);
-    const exactMember = savedMembers.find((member) =>
-      member.role === "member"
-      && normalizedName
-      && [member.nickname, member.display_name, ...(member.aliases || [])]
-        .some((value) => normalizeMemberSearch(value) === normalizedName));
-    const existingMember = savedMembers.find((member) => member.id === selectedMemberId) || exactMember;
+    let existingMember = savedMembers.find((member) => member.id === selectedMemberId);
     const saved = await mutate(async () => {
       if (!trimmedName) throw new Error("กรุณาพิมพ์ชื่อเล่นหรือชื่อ LINE");
+      existingMember = resolveParticipantMember(savedMembers, trimmedName, selectedMemberId);
+      if (existingMember && participantIds.has(existingMember.id)) throw new Error("ผู้เล่นคนนี้อยู่ในรอบแล้ว");
+      if (event.status === "closed" && (!existingMember || !removedMemberIds.has(existingMember.id))) throw new Error("รอบปิดแล้ว เพิ่มกลับได้เฉพาะชื่อที่เคยนำออกจากรอบนี้");
+      if (existingMember && event.signups.some((signup) => signup.memberId === existingMember.id && (signup.removedAt || signup.removed_at))) {
+        await restoreParticipant({ eventId: event.id, memberId: existingMember.id });
+        return;
+      }
       const selectedSkill = existingMember?.skill_level || newMemberSkill.level;
       if (!selectedSkill) throw new Error("กรุณาเลือกระดับมือของผู้เล่น");
       const playableSkillLevels = normalizePlayableSkillLevels(
@@ -1448,7 +1362,6 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       setName("");
       setSelectedMemberId(null);
       setNewMemberSkill({ level: "", playableLevels: [] });
-      setSuggestionsOpen(false);
     }
   }
 
@@ -1671,78 +1584,22 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     <section className="badminton-card badminton-participants-card">
       <div className="badminton-card-title badminton-player-card-title"><Users size={20} /><div><h2>ผู้เล่น</h2><p>{participants.length} คน</p></div><div className="badminton-player-title-actions"><label className="badminton-player-sort-icon" title={sortMode === "signup" ? "เรียงตามลำดับการลงชื่อ" : "เรียงตามตัวอักษร"}><ArrowUpDown size={18} /><select aria-label="เรียงลำดับผู้เล่น" onChange={(changeEvent) => changeSortMode(changeEvent.target.value)} value={sortMode}><option value="signup">ลำดับการลงชื่อ</option><option value="alphabetical">ตามตัวอักษร</option></select></label><button aria-label="เปิดรายชื่อผู้เล่นทั้งหมด" className="badminton-player-settings-button" onClick={() => setMemberDirectoryOpen(true)} title="รายชื่อผู้เล่นทั้งหมด" type="button"><Users size={18} /></button><button aria-label="ตั้งค่ารายชื่อและสินค้า" className="badminton-player-settings-button" onClick={() => setSettingsOpen(true)} title="ตั้งค่ารายชื่อและสินค้า" type="button"><Settings size={18} /></button></div></div>
       <form className="badminton-inline-form" onSubmit={addMember}>
-        <div className="badminton-member-search">
-          <input
-            aria-autocomplete="list"
-            aria-controls="member-suggestions"
-            aria-expanded={suggestionsOpen}
-            aria-label="ค้นหาชื่อเล่นหรือชื่อ LINE"
-            autoComplete="off"
-            onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
-            onChange={(changeEvent) => {
-              setName(changeEvent.target.value);
-              setSelectedMemberId(null);
-              setNewMemberSkill({ level: "", playableLevels: [] });
-              setSuggestionsOpen(true);
-            }}
-            onFocus={() => setSuggestionsOpen(true)}
-            placeholder="ค้นหาชื่อเล่นหรือชื่อ LINE"
-            required
-            value={name}
-          />
-          {suggestionsOpen && memberSuggestions.length ? (
-            <div className="badminton-member-suggestions" id="member-suggestions" role="listbox">
-              {memberSuggestions.map((member) => {
-                const displayName = memberName(member);
-                const lineName = member.display_name && member.display_name !== displayName ? member.display_name : "";
-                const inRound = participantIds.has(member.id);
-                return (
-                  <button
-                    aria-selected={selectedMemberId === member.id}
-                    className={selectedMemberId === member.id ? "is-selected" : ""}
-                    key={member.id}
-                    onMouseDown={(mouseEvent) => mouseEvent.preventDefault()}
-                    onClick={() => {
-                      setName(displayName);
-                      setSelectedMemberId(member.id);
-                      setNewMemberSkill({
-                        level: member.skill_level || "",
-                        playableLevels: normalizePlayableSkillLevels(member.skill_level, member.playable_skill_levels, {
-                          allowLowerLevel: member.allow_lower_level,
-                          allowHigherLevel: member.allow_higher_level,
-                        }),
-                      });
-                      setSuggestionsOpen(false);
-                    }}
-                    role="option"
-                    type="button"
-                  >
-                    <span><strong>{displayName}</strong>{lineName ? <small>LINE: {lineName}</small> : null}</span>
-                    <em>{inRound ? "อยู่ในรอบแล้ว" : "ใช้ประวัติเดิม"}</em>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {selectedMemberId ? <small className="badminton-selected-member-note">เลือกคนเดิมแล้ว ประวัติและยอดค้างจะต่อเนื่อง</small> : null}
-          {!selectedMemberId ? <small className="badminton-member-search-hint">{context.clubs.is_test ? "รายชื่อทดลอง" : "ผู้เล่นเดิมที่บันทึกไว้"} {savedMembers.length} คน · แตะช่องหรือพิมพ์เพื่อค้นหา</small> : null}
-        </div>
-        <div className="badminton-new-player-skill">
-          <select aria-label="ระดับมือผู้เล่น" disabled={Boolean(selectedMemberId && newMemberSkill.level)} onChange={(changeEvent) => setNewMemberSkill({ level: changeEvent.target.value, playableLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={newMemberSkill.level}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select>
+        <ParticipantPicker allowCreate={event.status !== "closed"} disabled={addingPlayer} members={selectableMembers} participantIds={participantIds} value={name} selectedId={selectedMemberId} onQuery={(value) => { setName(value); setSelectedMemberId(null); setNewMemberSkill({ level: "", playableLevels: [] }); }} onSelect={(member) => { setName(memberName(member)); setSelectedMemberId(member.id); setNewMemberSkill({ level: member.skill_level || "", playableLevels: normalizePlayableSkillLevels(member.skill_level, member.playable_skill_levels, { allowLowerLevel: member.allow_lower_level, allowHigherLevel: member.allow_higher_level }) }); }} />
+        {event.status === "closed" ? <small>รอบปิดแล้ว เลือกได้เฉพาะชื่อที่เคยนำออกจากรอบนี้</small> : <fieldset className="badminton-new-player-skill participant-add-skills" disabled={addingPlayer}>
+          <select aria-label="ระดับมือผู้เล่น" disabled={Boolean(savedMembers.find((member) => member.id === selectedMemberId)?.skill_level)} onChange={(changeEvent) => setNewMemberSkill({ level: changeEvent.target.value, playableLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={newMemberSkill.level}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select>
           {!selectedMemberId ? <SkillCompatibilityPicker onChange={(playableLevels) => setNewMemberSkill({ ...newMemberSkill, playableLevels })} skillLevel={newMemberSkill.level} value={newMemberSkill.playableLevels} /> : null}
-        </div>
-        <button className="badminton-primary badminton-add-player" type="submit"><UserPlus size={17} /> {selectedMemberId ? "เพิ่มคนเดิม" : "เพิ่มคน"}</button>
+        </fieldset>}
+        <button className="badminton-primary badminton-add-player" disabled={addingPlayer} type="submit"><UserPlus size={17} /> {addingPlayer ? "กำลังเพิ่ม…" : "เพิ่มผู้เล่น"}</button>
       </form>
 
       <ParticipantFilters rows={participants} query={rosterQuery} onQuery={setRosterQuery} filter={rosterFilter} onFilter={setRosterFilter} />
       <div className="badminton-attendance-list">
         {sortedParticipants.length ? sortedParticipants.map(({ member, attendance: row, arrivalTime, submittedByLineName, skillLevel: roundSkillLevel }, playerIndex) => {
           const participantName = memberName(member);
-          const rawPlannedArrival = arrivalTime || event.startTime;
-          const plannedArrival = timeOptions.slice(0, -1).includes(rawPlannedArrival)
-            ? rawPlannedArrival
-            : event.startTime;
+          const plannedArrival = (arrivalTime || event.startTime).slice(0, 5);
           const leftAt = row?.leftAt || "";
+          const arrivalOptions = participantTimeOptions({ startTime: event.startTime, endTime: event.endTime, current: plannedArrival, before: leftAt || null, includeEnd: false });
+          const departureOptions = participantTimeOptions({ startTime: event.startTime, endTime: event.endTime, current: leftAt, after: plannedArrival });
           const playedMinutes = playedMinutesWithinEvent(event.startTime, event.endTime, plannedArrival, leftAt);
           const billingPercentage = Number(row?.billingPercentage ?? 100);
           const charges = (dashboard.memberExtras || []).filter((charge) => charge.member_id === member.id);
@@ -1755,10 +1612,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const personPending = pendingKeys.some((key) => typeof key === "string" && key.endsWith(`:${member.id}`));
 
           function updateArrival(nextArrival) {
-            return mutate(async () => {
-              await updateSignupArrival({ eventId: event.id, memberId: member.id, arrivalTime: nextArrival });
-              await updateAttendance({ clubId: event.clubId, eventId: event.id, memberId: member.id, patch: { arrived: checkedIn, arrived_at: checkedIn ? nextArrival : null } });
-            }, `ปรับเวลามาของ ${participantName} แล้ว`, { actionKey: `arrival:${member.id}` });
+            return mutate(() => updateSignupArrival({ eventId: event.id, memberId: member.id, arrivalTime: nextArrival }), `ปรับเวลามาของ ${participantName} แล้ว`, { actionKey: `arrival:${member.id}` });
           }
 
           function updateDeparture(nextDeparture) {
@@ -1820,11 +1674,11 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           }
 
           function removePlayer() {
-            if (!window.confirm(`ลบ ${participantName} ออกจากรอบนี้ใช่ไหม?`)) return null;
+            if (!window.confirm(participantRemovalMessage(participantName))) return null;
             return mutate(
               () => removeParticipant({ eventId: event.id, memberId: member.id }),
-              `ลบ ${participantName} ออกจากรอบแล้ว`,
-              { errorMode: "alert" },
+              `นำ ${participantName} ออกจากรายชื่อรอบแล้ว ประวัติยังอยู่`,
+              { errorMode: "alert", actionKey: `player:remove:${member.id}` },
             );
           }
 
@@ -1878,8 +1732,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
               </div>
               <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span>กลับ {leftAt}</span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}>{event.billingModel === "per_round" ? <span className="badminton-round-count">{settlementRow?.roundsPlayed || 0} รอบ</span> : <select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>}<small>{event.billingModel === "per_round" ? "คิดตามเกมที่จบ" : formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `สรุปแล้ว ${baht(due)}` : `ยังไม่สรุป · ≈ ${baht(due)}`} บาท</strong></div></div>
               <div className="badminton-player-controls">
-                <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{timeOptions.slice(0, -1).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
-                <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{timeOptions.filter((time) => timePositionWithinEvent(time, event.startTime, event.endTime) > timePositionWithinEvent(plannedArrival, event.startTime, event.endTime)).map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
+                <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{arrivalOptions.map((time) => <option key={time} value={time}>{participantTimeLabel(time, event.startTime, event.endTime)}</option>)}</select></label>
+                <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{departureOptions.map((time) => <option key={time} value={time}>{participantTimeLabel(time, event.startTime, event.endTime)}</option>)}</select></label>
                 <label className="badminton-extra-select-wrap"><span>น้ำ/ขนม</span><select aria-label={`เพิ่มน้ำหรือขนมให้ ${participantName}`} disabled={isPaid} onChange={(changeEvent) => chooseExtra(changeEvent.target.value, member.id, participantName)} title={isPaid ? "ยกเลิกรับเงินก่อนแก้สินค้า" : "เลือกน้ำหรือขนม"} value=""><option value="">+ น้ำ/ขนม{extraTotal ? ` ${baht(extraTotal)}` : ""}</option>{(dashboard.extraItems || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {baht(item.price)} บาท</option>)}<option value="custom">กรอกค่าใช้จ่ายเอง…</option></select></label>
                 <button aria-label={`ลบ ${participantName}`} className="badminton-delete-button" onClick={removePlayer} type="button"><Trash2 size={17} /></button>
               </div>
@@ -2548,6 +2402,8 @@ function mapDashboardToEvent(dashboard) {
       .map((charge) => ({ id: charge.id, name: charge.item_name, unitPrice: Number(charge.unit_price), quantity: Number(charge.quantity) }));
     return {
       memberId: signup.member_id,
+      removedAt: signup.removed_at || null,
+      removedBy: signup.removed_by || null,
       name: memberName(member) || "ไม่ทราบชื่อ",
       signupOrder: signupIndex + 1,
       arrived: true,

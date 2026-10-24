@@ -1,8 +1,8 @@
-import migration from "../../supabase/migrations/20261024102852_zero_billing_and_safe_member_archive.sql?raw";
+import migration from "../../supabase/migrations/20261024195328_live_departures_court_extensions_and_withdrawals.sql?raw";
 import lineBot from "../../supabase/functions/line-bot/index.ts?raw";
 
 const files = [
-  ["migration", "20261024102852_zero_billing_and_safe_member_archive.sql", migration],
+  ["migration", "20261024195328_live_departures_court_extensions_and_withdrawals.sql", migration],
   ["line-bot", "line-bot/index.ts", lineBot],
 ];
 const container = document.getElementById("source-files");

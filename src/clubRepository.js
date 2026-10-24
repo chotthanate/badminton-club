@@ -739,12 +739,20 @@ export async function removeParticipant({ eventId, memberId }) {
   throwIfError(error);
 }
 
+export async function restoreParticipant({ eventId, memberId }) {
+  const { error } = await client().rpc("restore_event_participant", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+  });
+  throwIfError(error);
+}
+
 export async function updateSignupArrival({ eventId, memberId, arrivalTime }) {
-  const { error } = await client().from("signups")
-    .update({ arrival_time: arrivalTime })
-    .eq("event_id", eventId)
-    .eq("member_id", memberId)
-    .eq("status", "coming");
+  const { error } = await client().rpc("operator_update_signup_arrival", {
+    target_event_id: eventId,
+    target_member_id: memberId,
+    next_arrival: arrivalTime,
+  });
   throwIfError(error);
 }
 
@@ -984,6 +992,16 @@ export async function upsertOperatorCourt({ eventId, courtId = null, courtName, 
     next_court_name: courtName,
     next_starts_at: startsAt,
     next_ends_at: endsAt,
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function extendCourtBooking({ eventId, courtId, minutes = 30 }) {
+  const { data, error } = await client().rpc("extend_court_booking", {
+    target_event_id: eventId,
+    target_court_id: courtId,
+    additional_minutes: minutes,
   });
   throwIfError(error);
   return data;

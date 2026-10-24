@@ -29,13 +29,13 @@ await db.exec(`
   -- exercise cryptography. Core UUID bytes suffice for this local-only stub.
   create function public.gen_random_bytes(integer) returns bytea language sql volatile as $$ select decode(substr(repeat(replace(gen_random_uuid()::text, '-', ''), ($1+15)/16), 1, $1*2), 'hex') $$;
 `);
-let safetyMigration;
+const safetyMigrations = [];
 for (const filename of (await readdir(`${repo}supabase/migrations`)).filter((file) => file.endsWith(".sql")).sort()) {
   const sql = (await readFile(`${repo}supabase/migrations/${filename}`, "utf8"))
     .replace("create extension if not exists pgcrypto;", "-- gen_random_uuid is built into this PostgreSQL engine");
   // Apply the current safety migration to populated fixtures, not just an empty
   // schema, and prove that every existing row survives byte-for-byte below.
-  if (filename === "20261024102852_zero_billing_and_safe_member_archive.sql") { safetyMigration = sql; continue; }
+  if (filename >= "20261024102852_zero_billing_and_safe_member_archive.sql") { safetyMigrations.push(sql); continue; }
   try { await db.exec(sql); } catch (error) { throw new Error(`Migration ${filename}: ${error.message} (position ${error.position || error.internalPosition || "unknown"})`); }
 }
 
@@ -60,13 +60,21 @@ for (const [index, id] of ids.entries()) {
   await db.query("insert into public.attendance(club_id,event_id,member_id,arrived,arrived_at) values($1,$2,$3,true,'18:00')", [club, event, id]);
   await db.query("update public.event_queue_players set queued_at = '2026-10-24T11:00:00Z'::timestamptz + $1 * interval '1 minute' where event_id=$2 and member_id=$3", [index, event, id]);
 }
-assert.ok(safetyMigration, "the zero billing/archive safety migration is present");
+assert.ok(safetyMigrations.length, "the zero billing/archive safety migration is present");
 const historicalBill = await value("insert into public.payments(club_id,event_id,member_id,amount,recorded_by,paid_at,payment_status,shared_amount,extras_amount) values($1,$2,$3,77,$4,now(),'paid',67,10) returning id as value",[club,closedEvent,ids[0],owner]);
 const protectedTables = ['clubs','events','club_members','signups','attendance','event_queue_players','queue_matches','queue_match_players','payments'];
 const beforeMigration = [];
 for(const table of protectedTables) beforeMigration.push(await value(`select coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb) as value from public.${table} t`));
-await db.exec(safetyMigration);
-for(const [index,table] of protectedTables.entries()) assert.deepEqual(await value(`select coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb) as value from public.${table} t`),beforeMigration[index],`${table} rows are unchanged by safety migration`);
+for (const migration of safetyMigrations) await db.exec(migration);
+for(const [index,table] of protectedTables.entries()) {
+  const after = await value(`select coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb) as value from public.${table} t`);
+  // New nullable metadata columns are allowed; all previously stored fields,
+  // row identities and counts must remain unchanged by every migration.
+  assert.equal(after.length,beforeMigration[index].length,`${table} row count unchanged`);
+  for(const [rowIndex,before] of beforeMigration[index].entries()) {
+    for(const [key,field] of Object.entries(before)) assert.deepEqual(after[rowIndex][key],field,`${table}.${key} unchanged`);
+  }
+}
 await db.query("delete from public.payments where id=$1",[historicalBill]);
 console.log("PASS safety migration preserves every populated fixture row and paid bill exactly");
 let passed = 1;
@@ -668,6 +676,186 @@ await check("venue, saved venue and audit roll back together after late failure"
   await db.exec("savepoint venue_audit"); await assert.rejects(changeVenue('Venue rollback'),/test venue audit rejected/); await db.exec("rollback to venue_audit");
   assert.deepEqual(await value("select to_jsonb(e) as value from public.events e where id=$1",[event]),before);
   assert.equal(await value("select count(*)::int as value from public.club_venues where club_id=$1 and name='Venue rollback'",[club]),0);
+});
+const withdraw = (memberId=ids[0],eventId=event) => value("select public.operator_remove_event_participant($1,$2) as value",[eventId,memberId]);
+const extendCourt = (courtId,minutes=30,eventId=event) => value("select public.extend_court_booking($1,$2,$3) as value",[eventId,courtId,minutes]);
+const courtUpsert = (courtId,start,end,eventId=event) => value("select public.operator_upsert_event_court($1,$2,'Night court',$3::time,$4::time) as value",[eventId,courtId,start,end]);
+const tableRows = async (table,eventId=event) => value(`select coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb) as value from public.${table} t where event_id=$1`,[eventId]);
+async function seedPreservedSnapshot(eventId,matchId) {
+  const snapshot=await value("insert into public.per_round_billing_snapshots(club_id,event_id,checkpoint_time,checkpoint_at,court_cost_cumulative,shuttlecock_count_cumulative,shuttle_cost_cumulative,other_cost_cumulative,shared_cost_cumulative,available_shared_cost,allocated_shared_cost,deferred_shared_cost,included_match_count,included_player_rounds,created_by) values($1,$2,'23:00',now(),100,1,20,0,120,120,67,53,1,4,$3) returning id as value",[club,eventId,owner]);
+  await db.query("insert into public.per_round_snapshot_allocations(snapshot_id,club_id,event_id,member_id,round_units,allocated_shared_amount) values($1,$2,$3,$4,1,67)",[snapshot,club,eventId,ids[0]]);
+  await db.query("insert into public.per_round_snapshot_matches(snapshot_id,event_id,match_id) values($1,$2,$3)",[snapshot,eventId,matchId]);
+}
+const snapshotRows = eventId => value("select jsonb_build_object('snapshots',(select jsonb_agg(to_jsonb(s) order by id) from public.per_round_billing_snapshots s where event_id=$1),'links',(select jsonb_agg(to_jsonb(l) order by match_id) from public.per_round_snapshot_matches l where event_id=$1),'allocations',(select jsonb_agg(to_jsonb(a) order by member_id) from public.per_round_snapshot_allocations a where event_id=$1)) as value",[eventId]);
+await check("departed players cannot be revived by legacy waiting or reserved writes", async()=>{
+  await db.query("update public.attendance set left_at='21:00' where event_id=$1 and member_id=$2",[event,ids[0]]);
+  for(const status of ['waiting','reserved']) {
+    await db.query("update public.event_queue_players set status=$1 where event_id=$2 and member_id=$3",[status,event,ids[0]]);
+    assert.equal(await value("select status as value from public.event_queue_players where event_id=$1 and member_id=$2",[event,ids[0]]),'left');
+  }
+  await db.query("update public.attendance set left_at=null where event_id=$1 and member_id=$2",[event,ids[0]]);
+  assert.equal(await value("select status as value from public.event_queue_players where event_id=$1 and member_id=$2",[event,ids[0]]),'waiting');
+});
+await check("finishing a stale playing row with a recorded departure keeps left and counts its historical game", async()=>{
+  const match=await createManual(ids.slice(0,4)); await makePlaying(match,ids.slice(0,4));
+  await db.query("update public.attendance set left_at='21:00' where event_id=$1 and member_id=$2",[event,ids[0]]);
+  // Exercise the real-club legacy implementation as well as the test wrapper.
+  await value("select public.queue_finish_legacy($1) as value",[match]);
+  const player=(await db.query("select status,games_played from public.event_queue_players where event_id=$1 and member_id=$2",[event,ids[0]])).rows[0];
+  assert.equal(player.status,'left'); assert.equal(player.games_played,1);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[match]),'completed');
+});
+await check("withdrawal after playing preserves completed game, attendance, extras and paid/confirmed money exactly", async()=>{
+  const completed=await createManual(ids.slice(0,4)); await makePlaying(completed,ids.slice(0,4)); await value("select public.finish_queue_match($1) as value",[completed]);
+  await seedPreservedSnapshot(event,completed); const snapshotsBefore=await snapshotRows(event);
+  const upcoming=await createApproved(ids.slice(0,4));
+  await db.query("insert into public.payments(club_id,event_id,member_id,amount,recorded_by,admin_confirmed_at,paid_at,payment_status) values($1,$2,$3,95,$4,now(),now(),'paid')",[club,event,ids[0],owner]);
+  await db.query("insert into public.member_extra_charges(club_id,event_id,member_id,item_name,unit_price,created_by) values($1,$2,$3,'Water',10,$4)",[club,event,ids[0],owner]);
+  const before={}; for(const table of ['attendance','payments','member_extra_charges','queue_match_players']) before[table]=await tableRows(table);
+  const matchBefore=await value("select to_jsonb(m) as value from public.queue_matches m where id=$1",[completed]);
+  await withdraw();
+  assert.deepEqual(await snapshotRows(event),snapshotsBefore);
+  for(const table of Object.keys(before)) assert.deepEqual(await tableRows(table),before[table],table);
+  assert.deepEqual(await value("select to_jsonb(m) as value from public.queue_matches m where id=$1",[completed]),matchBefore);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1",[upcoming]),'cancelled');
+  assert.equal(await value("select status as value from public.event_queue_players where event_id=$1 and member_id=$2",[event,ids[0]]),'left');
+  const signup=(await db.query("select status,removed_at,removed_by from public.signups where event_id=$1 and member_id=$2",[event,ids[0]])).rows[0];
+  assert.equal(signup.status,'coming'); assert.ok(signup.removed_at); assert.equal(signup.removed_by,owner);
+  assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and member_id=any($2::uuid[]) and status='waiting'",[event,ids.slice(1,4)]),3);
+  assert.ok(!(await value("select public.next_automatic_queue_members($1) as value",[event])).includes(ids[0]));
+  await withdraw(); assert.equal(await value("select count(*)::int as value from public.audit_logs where event_id=$1 and action='นำผู้เล่นออกจากรายชื่อรอบโดยเก็บประวัติและยอดเงิน'",[event]),1);
+});
+await check("playing withdrawal and late audit failure leave all participants and queues unchanged", async()=>{
+  const match=await createManual(ids.slice(0,4)); await makePlaying(match,ids.slice(0,4));
+  const before=await tableRows('signups'); await db.exec('savepoint playing_withdraw');
+  await assert.rejects(withdraw(),/จบเกมก่อน/); await db.exec('rollback to playing_withdraw'); assert.deepEqual(await tableRows('signups'),before);
+  await value("select public.finish_queue_match($1) as value",[match]); await createApproved(ids.slice(0,4));
+  const signupBeforeAudit=await tableRows('signups'); const queueBefore=await tableRows('queue_matches'); const playersBefore=await tableRows('event_queue_players');
+  await db.exec(`create function pg_temp.reject_withdraw_audit() returns trigger language plpgsql as $$ begin if new.action='นำผู้เล่นออกจากรายชื่อรอบโดยเก็บประวัติและยอดเงิน' then raise exception 'withdraw audit rejected'; end if; return new; end; $$;
+    create trigger test_reject_withdraw before insert on public.audit_logs for each row execute function pg_temp.reject_withdraw_audit();`);
+  await db.exec('savepoint withdraw_audit'); await assert.rejects(withdraw(),/withdraw audit rejected/); await db.exec('rollback to withdraw_audit');
+  assert.deepEqual(await tableRows('signups'),signupBeforeAudit); assert.deepEqual(await tableRows('queue_matches'),queueBefore); assert.deepEqual(await tableRows('event_queue_players'),playersBefore);
+});
+await check("explicit restore reuses the same signup and never erases departure or bills", async()=>{
+  await db.query("update public.attendance set left_at='00:15' where event_id=$1 and member_id=$2",[event,ids[0]]);
+  const attendanceBefore=await tableRows('attendance'); const signupId=await value("select id as value from public.signups where event_id=$1 and member_id=$2",[event,ids[0]]);
+  await withdraw(); await value("select public.operator_add_event_participant($1,$2,null,null) as value",[event,ids[0]]);
+  assert.equal(await value("select id as value from public.signups where event_id=$1 and member_id=$2",[event,ids[0]]),signupId);
+  assert.equal(await value("select removed_at as value from public.signups where id=$1",[signupId]),null);
+  assert.deepEqual(await tableRows('attendance'),attendanceBefore);
+  assert.equal(await value("select status as value from public.event_queue_players where event_id=$1 and member_id=$2",[event,ids[0]]),'left');
+});
+await check("overnight extension is additive from latest end, retains playing court and never rewrites arrivals", async()=>{
+  const court=await courtUpsert(null,'21:00','00:00');
+  const match=await createApproved(ids.slice(0,4));
+  await db.query("update public.queue_matches set status='playing',court_id=$1,queue_position=null,started_at=now()-interval '15 minutes' where id=$2",[court,match]);
+  await db.query("update public.event_queue_players set status='playing' where event_id=$1 and member_id=any($2::uuid[])",[event,ids.slice(0,4)]);
+  const before={}; for(const table of ['signups','attendance','queue_matches','queue_match_players','event_queue_players']) before[table]=await tableRows(table);
+  assert.equal((await extendCourt(court)).ends_at,'00:30:00'); assert.equal((await extendCourt(court)).ends_at,'01:00:00');
+  assert.equal(await value("select ends_at::text as value from public.events where id=$1",[event]),'01:00:00');
+  assert.equal(await value("select status as value from public.events where id=$1",[event]),'open');
+  for(const table of Object.keys(before)) assert.deepEqual(await tableRows(table),before[table],table);
+  for(const [start,end] of [['20:00','01:30'],['21:00','00:30']]) {
+    await db.exec('savepoint unsafe_court'); await assert.rejects(courtUpsert(court,start,end),/คอร์ทกำลังเล่นอยู่/); await db.exec('rollback to unsafe_court');
+  }
+});
+await check("closed expired court correction preserves paid, confirmed and pending-slip bills without reopening", async()=>{
+  const court=await courtUpsert(null,'21:00','00:00',closedEvent);
+  const completed=await value("insert into public.queue_matches(club_id,event_id,court_id,sequence,status,started_at,ended_at) values($1,$2,$3,1,'completed',now()-interval '2 hours',now()-interval '1 hour') returning id as value",[club,closedEvent,court]);
+  await seedPreservedSnapshot(closedEvent,completed); const snapshotsBefore=await snapshotRows(closedEvent);
+  for(const [i,status] of ['paid','awaiting','review'].entries()) await db.query("insert into public.payments(club_id,event_id,member_id,amount,recorded_by,admin_confirmed_at,paid_at,payment_status) values($1,$2,$3,$4,$5,now(),case when $6='paid' then now() else null end,$6)",[club,closedEvent,ids[i],95+i,owner,status]);
+  const paymentId=await value("select id as value from public.payments where event_id=$1 and member_id=$2",[closedEvent,ids[2]]);
+  await db.query("insert into public.payment_slips(club_id,submitted_by_member_id,beneficiary_member_id,beneficiary_member_ids,payment_ids,expected_amount,status,slip_hash,storage_path) values($1,$2,$2,array[$2]::uuid[],$3::uuid[],97,'pending','local-court-fixture','local-fixture.png')",[club,ids[2],[paymentId]]);
+  const before=await tableRows('payments',closedEvent); const slipBefore=await value("select jsonb_agg(to_jsonb(s) order by id) as value from public.payment_slips s");
+  assert.equal((await extendCourt(court,30,closedEvent)).ends_at,'00:30:00');
+  assert.equal(await value("select status as value from public.events where id=$1",[closedEvent]),'closed');
+  assert.deepEqual(await tableRows('payments',closedEvent),before);
+  assert.deepEqual(await snapshotRows(closedEvent),snapshotsBefore);
+  assert.deepEqual(await value("select jsonb_agg(to_jsonb(s) order by id) as value from public.payment_slips s"),slipBefore);
+});
+await check("court extension validation, wrong event and audit failure roll back the whole booking", async()=>{
+  const court=await courtUpsert(null,'21:00','00:00'); const before=await tableRows('event_courts');
+  for(const minutes of [0,-30,181,null]) {
+    await db.exec('savepoint bad_extension'); await assert.rejects(extendCourt(court,minutes),/1–180/); await db.exec('rollback to bad_extension');
+  }
+  await db.exec('savepoint wrong_extension'); await assert.rejects(extendCourt(court,30,closedEvent),/ไม่พบคอร์ท/); await db.exec('rollback to wrong_extension');
+  await db.exec(`create function pg_temp.reject_court_audit() returns trigger language plpgsql as $$ begin if new.action='แก้เวลาคอร์ทในรอบเดิม' then raise exception 'court audit rejected'; end if; return new; end; $$;
+    create trigger test_reject_court before insert on public.audit_logs for each row execute function pg_temp.reject_court_audit();`);
+  const eventBefore=await value("select to_jsonb(e) as value from public.events e where id=$1",[event]);
+  await db.exec('savepoint court_audit'); await assert.rejects(extendCourt(court),/court audit rejected/); await db.exec('rollback to court_audit');
+  assert.deepEqual(await tableRows('event_courts'),before); assert.deepEqual(await value("select to_jsonb(e) as value from public.events e where id=$1",[event]),eventBefore);
+});
+await check("staff can correct latest closed booking and time but cannot read financial settings", async()=>{
+  await db.query("update public.events set status='closed' where id=$1",[event]);
+  const court=await courtUpsert(null,'21:00','00:00');
+  const staff='10000000-0000-0000-0000-000000000006'; await db.query('insert into auth.users(id) values($1)',[staff]);
+  await db.query("insert into public.club_members(club_id,profile_id,display_name,role) values($1,$2,'Live operations staff','staff')",[club,staff]);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[staff]);
+  assert.equal((await extendCourt(court)).ends_at,'00:30:00');
+  await value("select public.operator_update_signup_arrival($1,$2,'00:10'::time) as value",[event,ids[0]]);
+  assert.equal(await value("select arrived_at::text as value from public.attendance where event_id=$1 and member_id=$2",[event,ids[0]]),'00:10:00');
+  const snapshot=await value("select public.load_staff_dashboard($1) as value",[club]);
+  assert.equal(snapshot.event.id,event); assert.equal(snapshot.event.status,'closed'); assert.equal(snapshot.event.court_hourly_rate,undefined); assert.equal(snapshot.payments,undefined);
+  assert.ok(snapshot.signups.every(s=>'removed_at' in s));
+  for(const rpc of ['extend_court_booking(uuid,uuid,integer)','restore_event_participant(uuid,uuid)','operator_add_event_participant_legacy(uuid,uuid,text,text)']) assert.equal(await value(`select has_function_privilege('anon','public.${rpc}','execute') as value`),false);
+  assert.equal(await value("select has_function_privilege('authenticated','public.operator_add_event_participant_legacy(uuid,uuid,text,text)','execute') as value"),false);
+});
+await check("arrival correction is one transaction even when attendance rejects after signup update", async()=>{
+  const before=await tableRows('signups');
+  await db.exec(`create function pg_temp.reject_arrival() returns trigger language plpgsql as $$ begin raise exception 'arrival rejected'; end; $$;
+    create trigger test_reject_arrival before update of arrived_at on public.attendance for each row execute function pg_temp.reject_arrival();`);
+  await db.exec('savepoint arrival_atomic'); await assert.rejects(value("select public.operator_update_signup_arrival($1,$2,'00:10'::time) as value",[event,ids[0]]),/arrival rejected/); await db.exec('rollback to arrival_atomic');
+  assert.deepEqual(await tableRows('signups'),before);
+});
+await check("late signup writes cannot erase withdrawal, while permanent skills and explicit closed undo remain safe", async()=>{
+  await withdraw(); const removed=await value("select to_jsonb(s) as value from public.signups s where event_id=$1 and member_id=$2",[event,ids[0]]);
+  for(const sql of [
+    "delete from public.signups where event_id=$1 and member_id=$2",
+    "update public.signups set arrival_time='00:20' where event_id=$1 and member_id=$2",
+    "update public.signups set removed_at=null,removed_by=null where event_id=$1 and member_id=$2",
+  ]) {
+    await db.exec('savepoint stale_signup'); await assert.rejects(db.query(sql,[event,ids[0]]),/เพิ่มกลับ|นำออก|เพิ่มผู้เล่นกลับ/); await db.exec('rollback to stale_signup');
+    assert.deepEqual(await value("select to_jsonb(s) as value from public.signups s where event_id=$1 and member_id=$2",[event,ids[0]]),removed);
+  }
+  await value("select public.operator_update_member_profile($1,'{\"skill_level\":\"N\"}'::jsonb) as value",[ids[0]]);
+  assert.equal(await value('select skill_level as value from public.club_members where id=$1',[ids[0]]),'N');
+  assert.deepEqual(await value("select to_jsonb(s) as value from public.signups s where event_id=$1 and member_id=$2",[event,ids[0]]),removed);
+  await db.query("update public.events set status='closed' where id=$1",[event]);
+  const attendanceBefore=await tableRows('attendance');
+  await value("select public.restore_event_participant($1,$2) as value",[event,ids[0]]);
+  assert.equal(await value("select removed_at as value from public.signups where event_id=$1 and member_id=$2",[event,ids[0]]),null);
+  assert.deepEqual(await tableRows('attendance'),attendanceBefore);
+  assert.equal(await value("select status as value from public.events where id=$1",[event]),'closed');
+  assert.equal(await value("select status as value from public.event_queue_players where event_id=$1 and member_id=$2",[event,ids[0]]),'left');
+});
+await check("staff may not correct older history or any closed round while a round is open", async()=>{
+  const oldCourt=await courtUpsert(null,'21:00','00:00',closedEvent);
+  const staff='10000000-0000-0000-0000-000000000007'; await db.query('insert into auth.users(id) values($1)',[staff]);
+  await db.query("insert into public.club_members(club_id,profile_id,display_name,role) values($1,$2,'Scoped staff','staff')",[club,staff]);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[staff]);
+  for(const closedOpenStatus of ['open','closed']) {
+    await db.query("update public.events set status=$1 where id=$2",[closedOpenStatus,event]);
+    const calls=[()=>extendCourt(oldCourt,30,closedEvent),
+      ()=>value("select public.operator_update_signup_arrival($1,$2,'22:00'::time) as value",[closedEvent,ids[0]]),
+      ()=>value("select public.operator_update_attendance($1,$2,true,'21:00'::time,'22:00'::time) as value",[closedEvent,ids[0]])];
+    for(const call of calls) {await db.exec('savepoint old_staff'); await assert.rejects(call(),/ไม่มีสิทธิ์/); await db.exec('rollback to old_staff');}
+  }
+  await db.query("select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000099',true)");
+  await db.exec('savepoint outsider_extend'); await assert.rejects(extendCourt(oldCourt,30,closedEvent),/ไม่มีสิทธิ์/); await db.exec('rollback to outsider_extend');
+});
+await check("mixed evening and midnight-only courts retain evening event anchor after extension", async()=>{
+  await courtUpsert(null,'21:00','01:00');
+  const midnight=await value("select public.operator_upsert_event_court($1,null,'Midnight court','00:00'::time,'00:30'::time) as value",[event]);
+  await value("select public.operator_upsert_event_court($1,null,'Late court','22:00'::time,'00:00'::time) as value",[event]);
+  assert.equal(await value("select starts_at::text as value from public.events where id=$1",[event]),'21:00:00');
+  assert.equal((await extendCourt(midnight)).ends_at,'01:00:00');
+  assert.equal(await value("select starts_at::text as value from public.events where id=$1",[event]),'21:00:00');
+  assert.equal(await value("select event_date::text as value from public.events where id=$1",[event]),await value("select (now() at time zone 'Asia/Bangkok')::date::text as value"));
+});
+await check("a booking cannot wrap through a full extra day", async()=>{
+  const court=await courtUpsert(null,'21:00','20:45');
+  await db.exec('savepoint full_day'); await assert.rejects(extendCourt(court),/น้อยกว่า 24/); await db.exec('rollback to full_day');
+  assert.equal(await value("select ends_at::text as value from public.event_courts where id=$1",[court]),'20:45:00');
 });
 console.log(`Database behavioral checks: ${passed} passed`);
 await db.close();

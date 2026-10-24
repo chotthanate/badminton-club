@@ -11,7 +11,8 @@ const date = new Date().toLocaleDateString("sv-SE");
 const event = { id: "fixture-queue-only", date, startTime: "00:00", endTime: "23:30", status: "open", courts: [{ id: "fixture-court", name: "คอร์ททดสอบ", startsAt: "00:00", endsAt: "23:30" }] };
 const initial = {
   members,
-  signups: [],
+  signups: members.map((member) => ({ member_id: member.id, event_id: event.id, status: "coming", arrival_time: "00:00", skill_level_snapshot: member.skill_level })),
+  attendance: members.map((member) => ({ member_id: member.id, event_id: event.id, arrived: true, arrived_at: "00:00", left_at: null })),
   queuePlayers: members.map((member, index) => ({ member_id: member.id, status: index < 8 ? "reserved" : index < 12 ? "playing" : "waiting", games_played: index % 4, queued_at: new Date(now - ((40 - index) * 60000)).toISOString() })),
   queueMatches: [{ id: "fixture-draft", status: "draft", queue_position: 1, sequence: 1, revision: 1 }, { id: "fixture-approved", status: "approved", queue_position: 2, sequence: 2, revision: 1 }, { id: "fixture-playing", status: "playing", court_id: "fixture-court", sequence: 3, started_at: new Date(now - 420000).toISOString(), revision: 1 }],
   queueMatchPlayers: members.slice(0, 12).map((member, index) => ({ match_id: index < 4 ? "fixture-draft" : index < 8 ? "fixture-approved" : "fixture-playing", member_id: member.id, skill_level_snapshot: member.skill_level, team: index % 4 < 2 ? "A" : "B", position: (index % 2) + 1 })),

@@ -29,7 +29,7 @@ function harness({ status = "open", dirty = false, conflict = false, courtDirty 
   const event = { id: "same-round", club_id: "same-club", event_date: "2026-10-24", status };
   const eventEditor = { conflict, dirty, setValue: (value) => effects.push(["setValue", value]), accept: (value) => effects.push(["accept", value]) };
   const env = {
-    event, form, eventEditor, courtEditor: { dirty: courtDirty }, isTestMode,
+    event, form, eventEditor, courtsDirty: courtDirty, isTestMode,
     detailsSavingRef: { current: false }, republishPendingRef: { current: false }, roundDetailsPatch,
     setRoundSettingsError: (value) => effects.push(["error", value]),
     setDetailsSaving: (value) => effects.push(["detailsSaving", value]),
@@ -46,7 +46,7 @@ function harness({ status = "open", dirty = false, conflict = false, courtDirty 
     },
   };
   const start = app.indexOf("  async function saveEventDetails()");
-  const end = app.indexOf("  async function addNewCourt", start);
+  const end = app.indexOf("  function advanceRound", start);
   assert.ok(start >= 0 && end > start);
   const handlers = new Function(...Object.keys(env), `${app.slice(start, end)}; return { saveEventDetails, prepareOpenRoundForLine };`)(...Object.values(env));
   return { ...handlers, effects };
@@ -64,7 +64,7 @@ test("draft detail handler does not replace courts or apply new financial defaul
   const { saveEventDetails, effects } = harness({ status: "draft" });
   await saveEventDetails();
   assert.deepEqual(effects.find(([key]) => key === "details"), ["details", { clubId: "same-club", eventId: "same-round", patch: { event_date: "2099-01-01", venue: "สนามใหม่" } }]);
-  assert.doesNotMatch(app.slice(app.indexOf("function EventControlCard"), app.indexOf("function CourtEditor")), /replaceEventCourts|roundDefaultsForDate/);
+  assert.doesNotMatch(app.slice(app.indexOf("function EventControlCard"), app.indexOf("function ParticipantsPanel")), /replaceEventCourts|roundDefaultsForDate/);
 });
 test("failed venue save preserves editor values and leaves form open with inline error", async () => {
   const { saveEventDetails, effects } = harness({ fails: true });
@@ -91,12 +91,12 @@ test("LINE republish prepares the same open ID and never mutates status or creat
     assert.ok(!blocked.effects.some(([key]) => key === "prepare"));
   }
 });
-test("round UI shows venue-only form when open, LINE instructions, and disables active court editing", () => {
+test("round UI shows venue-only form when open, LINE instructions, and shared safe court controls", () => {
   assert.match(app, /event.status === "draft" \? <label>วันที่/);
   assert.match(app, /event.status === "open" \? "แก้ไขสถานที่"/);
   assert.match(app, /ส่งข้อมูลลงชื่อเข้า LINE อีกครั้ง/);
-  assert.match(app, /disabled=\{courtsSaving \|\| playingCourtIds.has\(court.id\)\}/);
-  assert.match(app, /updates.some\(\(court\) => playingCourtIds.has\(court.id\)\)/);
+  assert.match(app, /OperatorCourtControls dashboard=\{dashboard\} event=\{mappedEvent\}/);
+  assert.doesNotMatch(app, /updates.some\(\(court\) => playingCourtIds.has\(court.id\)\)/);
   assert.match(app, /roundSettingsError \? <p[^>]*role="alert"/);
 });
 

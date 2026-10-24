@@ -1,0 +1,17 @@
+.participant-picker { position: relative; min-width: 0; flex: 1 1 240px; }
+.participant-add-skills { margin: 0; padding: 0; border: 0; min-width: 0; }
+.participant-picker-input { position: relative; display: flex; align-items: stretch; }
+.participant-picker-input input { width: 100%; min-width: 0; min-height: 48px; padding-right: 44px; font-size: 16px; }
+.participant-picker-input > button { position: absolute; right: 2px; top: 2px; bottom: 2px; min-width: 42px; padding: 6px; border: 0; background: transparent; color: #127657; }
+.participant-picker-menu { position: absolute; z-index: 80; top: calc(100% - 16px); left: 0; right: 0; min-width: 0; max-height: min(340px, 44dvh); overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; border: 1px solid #a6cabc; border-radius: 12px; box-shadow: 0 10px 28px #16372b24; background: white; }
+.participant-picker-menu > button { display: flex; justify-content: space-between; gap: 12px; width: 100%; min-height: 52px; padding: 10px 12px; text-align: left; background: white; border: 0; border-bottom: 1px solid #e3ece6; color: #26372e; white-space: normal; }
+.participant-picker-menu > button > span { display: grid; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
+.participant-picker-menu > button > span:last-child { text-align: right; flex-shrink: 0; }
+.participant-picker-menu small { font-size: 11px; color: #6a776e; }
+.participant-picker-menu > button[aria-disabled="true"] { opacity: .55; }
+.participant-picker-menu > button:hover, .participant-picker-menu > button.is-highlighted { background: #edf8f1; }
+.participant-picker-menu > p { padding: 14px; margin: 0; font-size: 13px; line-height: 1.6; }
+.participant-picker-hint { display: block; margin-top: 4px; color: #6a776e; font-size: 11px; line-height: 1.5; }
+.badminton-staff-add-player .participant-picker-menu button { white-space: normal; }
+.badminton-staff-add-player .participant-picker-input > button { min-height: 0; }
+.participant-time-note { margin: 5px 0 0; color: #69796d; font-size: 12px; }

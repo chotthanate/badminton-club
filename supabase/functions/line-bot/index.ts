@@ -291,6 +291,16 @@ async function receiveLineWebhook(request: Request, rawBody: string) {
       .eq("line_user_id", event.source.userId)
       .maybeSingle();
 
+    if (existingMember?.id) {
+      const { data: priorSignup, error: priorSignupError } = await admin.from("signups").select("removed_at")
+        .eq("event_id", eventId).eq("member_id", existingMember.id).maybeSingle();
+      if (priorSignupError) throw priorSignupError;
+      if (priorSignup?.removed_at) {
+        await replyLine(event.replyToken, "แอดมินนำชื่อนี้ออกจากรอบแล้ว ประวัติยังเก็บไว้ หากต้องการแก้ไขกรุณาแจ้งแอดมิน", lineToken);
+        continue;
+      }
+    }
+
     let memberId = existingMember?.id;
     if (!memberId) {
       const { data: newMember, error } = await admin.from("club_members").insert({
@@ -1158,21 +1168,23 @@ async function handleLiveQueueRequest(payload: any) {
     if (eventError) throw eventError;
     if (!event) return json({ serverNow: new Date().toISOString(), isTestMode: isTestClub, event: null, courts: [], upcoming: [], waiting: [], profile: null });
 
-    const [courtsResult, membersResult, signupsResult, queuePlayersResult, matchesResult] = await Promise.all([
+    const [courtsResult, membersResult, signupsResult, queuePlayersResult, matchesResult, attendanceResult] = await Promise.all([
       admin.from("event_courts").select("id, court_name, starts_at, ends_at, position").eq("event_id", event.id).order("position"),
       admin.from("club_members").select("id, nickname, skill_level, playable_skill_levels").eq("club_id", clubId).eq("role", "member").eq("active", true),
-      admin.from("signups").select("member_id, status, skill_level_snapshot, playable_skill_levels_snapshot").eq("event_id", event.id).eq("status", "coming"),
+      admin.from("signups").select("member_id, status, removed_at, skill_level_snapshot, playable_skill_levels_snapshot").eq("event_id", event.id).eq("status", "coming").is("removed_at", null),
       admin.from("event_queue_players").select("member_id, status").eq("event_id", event.id),
       admin.from("queue_matches").select("id, court_id, status, queue_position, started_at").eq("event_id", event.id).in("status", ["approved", "playing"]).order("queue_position"),
+      admin.from("attendance").select("member_id, arrived, left_at").eq("event_id", event.id),
     ]);
-    for (const result of [courtsResult, membersResult, signupsResult, queuePlayersResult, matchesResult]) if (result.error) throw result.error;
+    for (const result of [courtsResult, membersResult, signupsResult, queuePlayersResult, matchesResult, attendanceResult]) if (result.error) throw result.error;
     const matchIds = (matchesResult.data || []).map((match: any) => match.id);
     const { data: matchPlayers, error: matchPlayersError } = matchIds.length
       ? await admin.from("queue_match_players").select("match_id, member_id, team, position, skill_level_snapshot").in("match_id", matchIds)
       : { data: [], error: null };
     if (matchPlayersError) throw matchPlayersError;
     const membersById = new Map((membersResult.data || []).map((member: any) => [member.id, member]));
-    const signupsById = new Map((signupsResult.data || []).map((signup: any) => [signup.member_id, signup]));
+    const signupsById = new Map((signupsResult.data || []).filter((signup: any) => !signup.removed_at).map((signup: any) => [signup.member_id, signup]));
+    const attendanceById = new Map((attendanceResult.data || []).map((row: any) => [row.member_id, row]));
     const safePlayer = (memberId: string, skillSnapshot?: string | null) => {
       const member: any = membersById.get(memberId);
       return { nickname: String(member?.nickname || "สมาชิก").slice(0, 40), skillLevel: skillSnapshot || (signupsById.get(memberId) as any)?.skill_level_snapshot || member?.skill_level || "-" };
@@ -1191,7 +1203,10 @@ async function handleLiveQueueRequest(payload: any) {
       return { id: court.id, name: court.court_name, startsAt: shortTime(court.starts_at), playing: Boolean(match), startedAt: match?.started_at || null, players: match ? (playersByMatch.get(match.id) || []) : [] };
     });
     const upcoming = (matchesResult.data || []).filter((match: any) => match.status === "approved").sort((a: any, b: any) => a.queue_position - b.queue_position).map((match: any) => ({ id: match.id, position: match.queue_position, players: playersByMatch.get(match.id) || [] }));
-    const waitingRows = (queuePlayersResult.data || []).filter((row: any) => row.status === "waiting");
+    const waitingRows = (queuePlayersResult.data || []).filter((row: any) => {
+      const attendance: any = attendanceById.get(row.member_id);
+      return row.status === "waiting" && signupsById.has(row.member_id) && membersById.has(row.member_id) && attendance?.arrived === true && !attendance.left_at;
+    });
     const levels = ["Rookie-", "Rookie", "BG", "N", "S", "P"];
     const waiting = levels.map((skillLevel) => {
       const players = waitingRows.map((row: any) => ({ memberId: row.member_id, ...safePlayer(row.member_id) })).filter((player: any) => player.skillLevel === skillLevel).map(({ memberId: _memberId, ...player }: any) => player);
@@ -1252,7 +1267,7 @@ async function handleLiffRequest(payload: any) {
 
     const { data: existingSignup, error: existingSignupError } = existingMember
       ? await admin.from("signups")
-        .select("status, arrival_time, skill_level_snapshot, playable_skill_levels_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
+        .select("status, removed_at, arrival_time, skill_level_snapshot, playable_skill_levels_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
         .eq("event_id", event.id)
         .eq("member_id", existingMember.id)
         .maybeSingle()
@@ -1271,14 +1286,15 @@ async function handleLiffRequest(payload: any) {
           allowHigherLevel: Boolean(existingMember?.allow_higher_level),
           picture: identity.picture || null,
         },
-        currentStatus: existingSignup?.status === "coming" ? "coming" : null,
-        currentArrivalTime: existingSignup?.status === "coming" ? normalizeArrivalTimeForEvent(event, existingSignup?.arrival_time) : null,
+        currentStatus: existingSignup?.status === "coming" && !existingSignup.removed_at ? "coming" : null,
+        currentArrivalTime: existingSignup?.status === "coming" && !existingSignup.removed_at ? normalizeArrivalTimeForEvent(event, existingSignup?.arrival_time) : null,
         roster: await getLiffRoster(admin, event),
-        queue: existingMember?.id ? await getLiffQueueStatus(admin, event.id, existingMember.id) : null,
+        queue: existingMember?.id && !existingSignup?.removed_at ? await getLiffQueueStatus(admin, event.id, existingMember.id) : null,
       });
     }
 
     if (payload.action === "cancel_liff_signup") {
+      if (existingSignup?.removed_at) return json({ error: "แอดมินนำชื่อนี้ออกจากรอบแล้ว ประวัติยังเก็บไว้ หากต้องการกลับเข้ารอบกรุณาแจ้งแอดมิน" }, 409);
       if (existingMember?.id) {
         if (hasBadmintonStarted(event)) {
           return json({ error: "ถึงเวลาเริ่มตีแบดแล้ว กรุณาแจ้งแอดมินให้ยกเลิก" }, 409);
@@ -1300,7 +1316,8 @@ async function handleLiffRequest(payload: any) {
         const { error: deleteError } = await admin.from("signups")
           .delete()
           .eq("event_id", event.id)
-          .eq("member_id", existingMember.id);
+          .eq("member_id", existingMember.id)
+          .is("removed_at", null);
         if (deleteError) throw deleteError;
         await admin.from("audit_logs").insert({
           club_id: clubId,
@@ -1335,12 +1352,13 @@ async function handleLiffRequest(payload: any) {
       const guest = await findOrCreateGuestMember(admin, clubId, guestName, validateSkillProfile(payload));
       const guestMemberId = guest.memberId;
       const [guestSignupResult, guestQueueResult] = await Promise.all([
-        admin.from("signups").select("skill_level_snapshot, playable_skill_levels_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
+        admin.from("signups").select("removed_at, skill_level_snapshot, playable_skill_levels_snapshot, allow_lower_level_snapshot, allow_higher_level_snapshot")
           .eq("event_id", event.id).eq("member_id", guestMemberId).maybeSingle(),
         admin.from("event_queue_players").select("status").eq("event_id", event.id).eq("member_id", guestMemberId).maybeSingle(),
       ]);
       if (guestSignupResult.error) throw guestSignupResult.error;
       if (guestQueueResult.error) throw guestQueueResult.error;
+      if (guestSignupResult.data?.removed_at) return json({ error: "แอดมินนำผู้เล่นชื่อนี้ออกจากรอบแล้ว กรุณาแจ้งแอดมินให้นำกลับเข้ารอบ เพื่อรักษาประวัติและยอดเงินเดิม" }, 409);
       const guestSkill = registrationSnapshot(guest.skill, guestSignupResult.data, guestQueueResult.data?.status);
       const submitterLineName = String(identity.name || existingMember.display_name || submitterName || "สมาชิก LINE").slice(0, 80);
       const { error: signupError } = await admin.from("signups").upsert({
@@ -1399,19 +1417,20 @@ async function handleLiffRequest(payload: any) {
         .eq("member_id", memberId)
         .maybeSingle();
       const snapshotCanChange = !queuePlayer || ["waiting", "left"].includes(queuePlayer.status);
-      if (existingSignup?.status === "coming" && skill.skillLevel && snapshotCanChange) {
+      if (existingSignup?.status === "coming" && !existingSignup.removed_at && skill.skillLevel && snapshotCanChange) {
         const { error: snapshotError } = await admin.from("signups").update({
           skill_level_snapshot: skill.skillLevel,
           playable_skill_levels_snapshot: skill.playableSkillLevels,
           allow_lower_level_snapshot: skill.allowLowerLevel,
           allow_higher_level_snapshot: skill.allowHigherLevel,
-        }).eq("event_id", event.id).eq("member_id", memberId);
+        }).eq("event_id", event.id).eq("member_id", memberId).is("removed_at", null);
         if (snapshotError) throw snapshotError;
       }
       return json({ ok: true, nickname, ...skill, appliesAfterCurrentQueue: Boolean(queuePlayer && ["reserved", "playing"].includes(queuePlayer.status)) });
     }
 
     const status = String(payload.status || "");
+    if (existingSignup?.removed_at) return json({ error: "แอดมินนำชื่อคุณออกจากรอบแล้ว กรุณาแจ้งแอดมินให้นำกลับเข้ารอบ เพื่อรักษาประวัติและยอดเงินเดิม" }, 409);
     if (status !== "coming") {
       return json({ error: "คำตอบไม่ถูกต้อง" }, 400);
     }
@@ -1426,6 +1445,14 @@ async function handleLiffRequest(payload: any) {
     const currentProfile = registrationProfile(existingMember, payload);
     const skill = validateSkillProfile(currentProfile);
     const memberId = existingMember?.id || await upsertLiffMember(admin, clubId, identity.sub, displayName, currentProfile.nickname, existingMember, skill);
+    if (!existingMember?.id) {
+      // A newly linked LINE account may resolve to an old walk-in identity.
+      // Linking the account is not permission to restore its removed signup.
+      const { data: linkedSignup, error: linkedSignupError } = await admin.from("signups").select("removed_at")
+        .eq("event_id", event.id).eq("member_id", memberId).maybeSingle();
+      if (linkedSignupError) throw linkedSignupError;
+      if (linkedSignup?.removed_at) return json({ error: "แอดมินนำชื่อนี้ออกจากรอบแล้ว กรุณาแจ้งแอดมินให้นำกลับเข้ารอบ เพื่อรักษาประวัติและยอดเงินเดิม" }, 409);
+    }
     if (existingMember?.active === false) {
       const { error: reactivateError } = await admin.from("club_members").update({ active: true }).eq("id", memberId).eq("club_id", clubId);
       if (reactivateError) throw reactivateError;
@@ -1571,13 +1598,14 @@ async function upsertLiffMember(
 
 async function getLiffRoster(admin: any, event: any) {
   const { data: signups, error: signupError } = await admin.from("signups")
-    .select("id, member_id, status, arrival_time, skill_level_snapshot, created_at")
+    .select("id, member_id, status, removed_at, arrival_time, skill_level_snapshot, created_at")
     .eq("event_id", event.id)
     .eq("status", "coming")
+    .is("removed_at", null)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
   if (signupError) throw signupError;
-  const orderedSignups = sortBySignupOrder(signups || []);
+  const orderedSignups = sortBySignupOrder((signups || []).filter((signup: any) => !signup.removed_at));
   const memberIds = [...new Set(orderedSignups.map((row: any) => row.member_id))];
   if (!memberIds.length) return { coming: [] };
 
