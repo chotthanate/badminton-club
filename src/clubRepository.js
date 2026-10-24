@@ -107,6 +107,12 @@ export async function createTestClub({ ownerId }) {
 }
 
 export async function resetTestClub(clubId) {
+  const { data: club, error: clubError } = await client().from("clubs")
+    .select("id, is_test").eq("id", clubId).single();
+  throwIfError(clubError);
+  if (!club || club.id !== clubId || club.is_test !== true) {
+    throw new Error("รีเซ็ตได้เฉพาะกลุ่มทดลองเท่านั้น ข้อมูลจริงจะไม่ถูกลบ");
+  }
   const { error: eventError } = await client().from("events").delete().eq("club_id", clubId);
   throwIfError(eventError);
   const { error: memberError } = await client().from("club_members")
@@ -393,8 +399,30 @@ export async function updateEvent(eventId, patch) {
 }
 
 export async function updateEventDetails({ clubId, eventId, patch }) {
-  await updateEvent(eventId, patch);
-  if (patch.venue) await rememberVenue(clubId, patch.venue);
+  // A draft editor may remain open while another device opens that round.
+  // Re-check the status in the UPDATE itself so its date cannot be changed by
+  // the stale editor, and never accept unrelated fields from a form object.
+  const venue = String(patch.venue || "").trim();
+  const { data, error } = await client().from("events")
+    .update({ event_date: patch.event_date, venue })
+    .eq("id", eventId)
+    .eq("club_id", clubId)
+    .eq("status", "draft")
+    .select("id")
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) throw new Error("รอบนี้ถูกเปิดหรือเปลี่ยนแปลงจากอีกเครื่องแล้ว กรุณาโหลดข้อมูลล่าสุดก่อนแก้ไข");
+  if (venue) await rememberVenue(clubId, venue);
+}
+
+export async function updateEventVenue({ clubId, eventId, venue }) {
+  const { data, error } = await client().rpc("update_event_venue", {
+    target_club_id: clubId,
+    target_event_id: eventId,
+    next_venue: String(venue || "").trim(),
+  });
+  throwIfError(error);
+  return data;
 }
 
 export async function replaceEventCourts({ clubId, eventId, courts }) {
@@ -685,12 +713,9 @@ export async function mergeClubMembers({ sourceMemberId, targetMemberId }) {
 }
 
 export async function archiveClubMember(memberId) {
-  const { error } = await client()
-    .from("club_members")
-    .update({ active: false })
-    .eq("id", memberId)
-    .eq("role", "member");
+  const { data, error } = await client().rpc("archive_club_member", { target_member_id: memberId });
   throwIfError(error);
+  return data;
 }
 
 export async function dismissDuplicateMemberSuggestion({ clubId, signature }) {

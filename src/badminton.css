@@ -3277,15 +3277,27 @@
 .badminton-pay-person {
   min-width: 0;
   display: flex !important;
-  align-items: center;
-  gap: 7px !important;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px !important;
+  white-space: normal;
 }
 
-.badminton-pay-person > strong,
 .badminton-pay-person > span,
 .badminton-pay-person > small {
   flex: 0 0 auto;
+}
+
+.badminton-pay-person > strong {
+  flex: 1 0 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.badminton-pay-person > small {
+  flex-shrink: 1;
+  overflow-wrap: anywhere;
 }
 
 .badminton-pay-person > span,
@@ -3432,25 +3444,22 @@
   }
 
   .badminton-pay-row {
-    grid-template-columns: minmax(0, 1fr) auto 78px;
+    grid-template-columns: minmax(0, 1fr) auto;
     min-height: 54px;
-    gap: 5px;
-    padding: 6px;
+    gap: 6px 8px;
+    padding: 9px;
   }
 
-  .badminton-pay-row > div,
-  .badminton-pay-row > button {
-    grid-column: auto;
+  .badminton-pay-row > .badminton-pay-person {
+    grid-column: 1 / -1;
   }
 
   .badminton-pay-person {
-    gap: 5px !important;
+    gap: 4px 8px !important;
   }
 
   .badminton-pay-person > strong {
-    max-width: 68px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    max-width: none;
   }
 
   .badminton-pay-person > .badminton-pay-duration {
@@ -3458,18 +3467,43 @@
   }
 
   .badminton-pay-person > small {
-    display: none;
+    display: inline;
+  }
+
+  .badminton-pay-extras {
+    flex: 1 1 100%;
+  }
+
+  .badminton-pay-extras summary {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .badminton-pay-extras > div {
+    position: static;
+    min-width: 0;
+    max-width: 100%;
+    margin-top: 5px;
+    overflow-wrap: anywhere;
   }
 
   .badminton-pay-amount {
+    grid-column: 1;
+    min-width: 0;
+    flex-wrap: wrap;
     font-size: 14px;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 
   .badminton-pay-row > button {
-    width: 78px;
-    min-height: 42px;
+    grid-column: 2;
+    justify-self: end;
+    width: auto;
+    min-width: 96px;
+    min-height: 44px;
     gap: 4px;
-    padding: 0 5px;
+    padding: 0 9px;
   }
 }
 
@@ -4325,6 +4359,13 @@
   border-radius: 7px;
   background: #fff;
   color: #765a08;
+}
+
+.badminton-pay-amount > .badminton-edit-bill {
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
 }
 
 .badminton-bill-modal {

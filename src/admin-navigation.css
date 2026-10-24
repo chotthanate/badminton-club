@@ -63,13 +63,27 @@
 }
 
 .badminton-admin-layout .badminton-admin-mode.is-test {
-  padding: 2px 7px;
-  border-radius: 7px;
+  min-height: 36px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 12px;
   background: #fff0ce;
   color: #80520c;
   font-size: 11px;
   font-weight: 600;
 }
+
+.badminton-admin-layout button.badminton-admin-mode.is-test:focus-visible {
+  outline: 2px solid #80520c;
+  outline-offset: 2px;
+}
+
+.badminton-sandbox-exit-backdrop { z-index: 10010; }
+.badminton-modal.badminton-sandbox-exit { width: min(420px, calc(100vw - 24px)); padding: 24px; border-radius: 24px; }
+.badminton-sandbox-exit h2 { margin: 0 0 12px; font-size: 20px; }
+.badminton-sandbox-exit p { line-height: 1.6; }
+.badminton-sandbox-exit-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.badminton-sandbox-exit-actions button { min-height: 44px; }
 
 .badminton-admin-layout .badminton-admin-current-round {
   min-width: 0;

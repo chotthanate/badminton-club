@@ -134,7 +134,7 @@ export function isPaymentAdminConfirmed(payment) {
 
 export function billableHours(playedMinutes, billingPercentage = 100) {
   const minutes = Math.max(0, Number(playedMinutes) || 0);
-  const percentage = clamp(Number(billingPercentage) || 100, 0, 100);
+  const percentage = normalizedBillingPercentage(billingPercentage);
   return (minutes / 60) * (percentage / 100);
 }
 
@@ -147,7 +147,8 @@ export function calculateSettlement(event) {
   }
 
   const sharedTotalCost = event.costs.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const billableRows = event.attendance.filter((row) => row.arrived && billingUnits(row) > 0);
+  const billableRows = event.attendance.filter((row) => row.arrived
+    && (billingUnits(row) > 0 || normalizedBillingPercentage(row.billingPercentage) === 0));
   const totalHours = billableRows.reduce((sum, row) => sum + billingUnits(row), 0);
   const preparedRows = billableRows.map((row) => {
     const hours = billingUnits(row);
@@ -209,8 +210,8 @@ export function calculateSettlement(event) {
     };
   });
 
-  const lastOpenIndex = rows.findLastIndex((row) => !row.locked);
-  const delta = Math.round(remainingSharedCost) - roundedOpenSharedTotal;
+  const lastOpenIndex = rows.findLastIndex((row) => !row.locked && row.hours > 0);
+  const delta = openHours > 0 ? Math.round(remainingSharedCost) - roundedOpenSharedTotal : 0;
   if (lastOpenIndex >= 0 && delta !== 0) {
     rows[lastOpenIndex] = {
       ...rows[lastOpenIndex],
@@ -232,6 +233,7 @@ export function calculateSettlement(event) {
     unitPrice,
     lockedSharedTotal,
     remainingSharedCost,
+    unallocatedSharedCost: openHours > 0 ? 0 : Math.round(remainingSharedCost),
     rows,
   };
 }
@@ -364,7 +366,8 @@ export function completedRoundsByMember(queueMatches = [], queueMatchPlayers = [
 }
 
 export function calculateTimeSegmentedSettlement(event) {
-  const billableRows = event.attendance.filter((row) => row.arrived && billingUnits(row) > 0);
+  const billableRows = event.attendance.filter((row) => row.arrived
+    && (billingUnits(row) > 0 || normalizedBillingPercentage(row.billingPercentage) === 0));
   const preparedRows = billableRows.map((row) => prepareSettlementRow(row));
   const shares = new Map(preparedRows.map((row) => [row.memberId, {
     court: 0,
@@ -571,7 +574,7 @@ function distributeByPresence(rows, shares, intervalStart, intervalEnd, amount, 
       ? timelinePoint(row.leftAt, startTime, arrival)
       : eventEnd;
     const overlap = Math.max(0, Math.min(intervalEnd, departure, eventEnd) - Math.max(intervalStart, arrival));
-    const weight = overlap * (Math.max(0, Number(row.billingPercentage) || 100) / 100);
+    const weight = overlap * (normalizedBillingPercentage(row.billingPercentage) / 100);
     return { row, weight };
   }).filter((entry) => entry.weight > 0);
   const totalWeight = active.reduce((sum, entry) => sum + entry.weight, 0);
@@ -868,9 +871,17 @@ function localIsoDate(date) {
 }
 
 function billingUnits(row) {
+  // A cached positive hours/weight must not undo an explicit zero share.
+  if (normalizedBillingPercentage(row.billingPercentage) === 0) return 0;
   if (Number.isFinite(Number(row.hours)) && Number(row.hours) > 0) return Number(row.hours);
   if (Number.isFinite(Number(row.playedMinutes)) && Number(row.playedMinutes) > 0) {
     return billableHours(row.playedMinutes, row.billingPercentage ?? 100);
   }
   return Number(row.weight || 0);
+}
+
+function normalizedBillingPercentage(value) {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return 100;
+  const percentage = Number(value);
+  return Number.isFinite(percentage) ? clamp(percentage, 0, 100) : 100;
 }

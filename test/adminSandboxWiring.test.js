@@ -19,7 +19,7 @@ test("entering sandbox prepares the test round then loads that exact club and ro
   const enter = section("async function switchTestMode()", "async function resetDemo()");
   assert.match(enter, /enqueue\("sandbox:switch"/);
   assert.match(enter, /existingTestContext\?\.club_id \|\| \(await createTestClub/);
-  assert.match(enter, /const eventId = await prepareTestRound\(\{ clubId \}\);\s*await refresh\(false, \{ clubId, eventId, throwOnError: true \}\)/);
+  assert.match(enter, /const eventId = await prepareTestRound\(\{ clubId \}\);\s*(?:const refreshed = )?await refresh\(false, \{ clubId, eventId, throwOnError: true \}\)/);
   assert.match(enter, /setActiveTab\("queue"\)/);
   const returningToReal = enter.slice(enter.indexOf("if (context?.clubs.is_test)"), enter.indexOf("} else {"));
   assert.doesNotMatch(returningToReal, /prepareTestRound|createTestClub/);
@@ -67,9 +67,10 @@ test("live sandbox link tracks the current test club instead of freezing an even
 });
 
 test("directory duplicates and editable members share one keyboard-accessible scroll region", () => {
-  const directory = section("{memberDirectoryOpen ? (", "{pendingCheckIn ?");
+  const directory = readFileSync(new URL("../src/MemberDirectoryModal.jsx", import.meta.url), "utf8");
+  assert.match(app, /memberDirectoryOpen \? <MemberDirectoryModal/);
   assert.match(directory, /className="member-directory-scroll" role="region" aria-label="รายการสมาชิกและรายชื่อซ้ำ" tabIndex=\{0\}/);
-  assert.match(directory, /className="member-directory-scroll"[\s\S]*className="badminton-member-directory-duplicates"[\s\S]*className="member-directory-inline-list"[\s\S]*<MemberDirectoryRow[\s\S]*<\/div>\s*<\/div>/);
+  assert.match(directory, /className="member-directory-scroll"[\s\S]*className="badminton-member-directory-duplicates"[\s\S]*className="member-directory-inline-list"[\s\S]*<MemberDirectoryRow/);
   assert.equal((directory.match(/className="member-directory-scroll"/g) || []).length, 1);
   assert.ok(directory.indexOf('className="badminton-member-directory-search"') < directory.indexOf('className="member-directory-scroll"'));
 });

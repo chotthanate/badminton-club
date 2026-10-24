@@ -120,21 +120,25 @@ async function publishFromAdmin(request: Request, rawBody: string, authorization
   if (!club?.line_group_id) {
     return json({ error: "ยังไม่พบกลุ่ม LINE กรุณาเชิญบอทเข้ากลุ่มและพิมพ์ข้อความ 1 ครั้ง" }, 409);
   }
-  if (event.status !== "draft") return json({ error: "รอบนี้ไม่ได้อยู่ในสถานะเตรียมรอบ" }, 409);
+  if (!["draft", "open"].includes(event.status)) return json({ error: "ส่งการ์ดลงชื่อได้เฉพาะรอบที่ยังไม่จบ" }, 409);
 
-  const { error: readyError } = await userClient.from("events")
+  const { data: preparedEvent, error: readyError } = await userClient.from("events")
     .update({ line_publish_ready: true })
     .eq("id", event.id)
-    .eq("status", "draft");
+    .eq("club_id", event.club_id)
+    .eq("status", event.status)
+    .select("id, status")
+    .maybeSingle();
   if (readyError) return json({ error: "เตรียมเปิดลงชื่อไม่สำเร็จ" }, 500);
+  if (!preparedEvent) return json({ error: "รอบเปลี่ยนสถานะแล้ว กรุณาโหลดข้อมูลล่าสุด" }, 409);
 
   await userClient.from("audit_logs").insert({
     club_id: event.club_id,
     event_id: event.id,
     actor_id: authData.user.id,
-    action: "เตรียมรอบสำหรับคำสั่งเปิดลงชื่อใน LINE",
+    action: event.status === "open" ? "เตรียมส่งการ์ดลงชื่อของรอบเดิมอีกครั้ง" : "เตรียมรอบสำหรับคำสั่งเปิดลงชื่อใน LINE",
   });
-  return json({ ok: true, command: "เปิดลงชื่อ" });
+  return json({ ok: true, command: "เปิดลงชื่อ", eventId: preparedEvent.id, status: preparedEvent.status, republish: preparedEvent.status === "open" });
 }
 
 function staffEmail(clubId: string) {
@@ -397,11 +401,12 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
     return;
   }
 
-  const readyEvent = await latestEvent(admin, club.id, eventFields, "draft", true);
+  const readyEvent = await latestEvent(admin, club.id, eventFields, "open", true)
+    || await latestEvent(admin, club.id, eventFields, "draft", true);
   if (!readyEvent) {
     const currentEvent = await latestEvent(admin, club.id, eventFields, "open");
     const message = currentEvent
-      ? "รอบล่าสุดเปิดลงชื่ออยู่แล้ว"
+      ? "รอบล่าสุดเปิดลงชื่ออยู่แล้ว พิมพ์ ลงชื่อ เพื่อส่งการ์ดล่าสุด หรือกดเตรียมส่งซ้ำจากเว็บไซต์"
       : "ยังไม่มีรอบที่แอดมินกดเตรียมเปิดลงชื่อจากเว็บไซต์";
     await replyLine(event.replyToken, message, lineToken);
     return;
@@ -412,11 +417,12 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
   }
 
   const { data: claimedEvent, error: claimError } = await admin.from("events")
-    .update({ status: "open", line_publish_ready: false })
+    .update({ ...(readyEvent.status === "draft" ? { status: "open" } : {}), line_publish_ready: false })
     .eq("id", readyEvent.id)
-    .eq("status", "draft")
+    .eq("club_id", club.id)
+    .eq("status", readyEvent.status)
     .eq("line_publish_ready", true)
-    .select("id")
+    .select(eventFields)
     .maybeSingle();
   if (claimError || !claimedEvent) {
     await replyLine(event.replyToken, "รอบนี้ถูกเปิดลงชื่อไปแล้ว", lineToken);
@@ -425,22 +431,25 @@ async function handleSignupCommand({ admin, club, command, event, lineToken }: {
 
   try {
     await replyLineMessages(event.replyToken, [
-      buildSignupMessage(readyEvent, liffId),
+      buildSignupMessage(claimedEvent, liffId),
     ], lineToken);
-    await admin.from("audit_logs").insert({
-      club_id: club.id,
-      event_id: readyEvent.id,
-      actor_id: null,
-      action: "เปิดลงชื่อด้วย Reply API จากกลุ่ม LINE",
-      details: { line_user_id: event.source?.userId, source: "line_command" },
-    });
   } catch (error) {
+    // A failed reply must never undo a live round: players may already have
+    // registered or started playing since this request claimed the card.
     await admin.from("events")
-      .update({ status: "draft", line_publish_ready: true })
+      .update({ line_publish_ready: true })
       .eq("id", readyEvent.id)
+      .eq("club_id", club.id)
       .eq("status", "open");
     throw error;
   }
+  await admin.from("audit_logs").insert({
+    club_id: club.id,
+    event_id: readyEvent.id,
+    actor_id: null,
+    action: readyEvent.status === "open" ? "ส่งการ์ดลงชื่อของรอบเดิมอีกครั้ง" : "เปิดลงชื่อด้วย Reply API จากกลุ่ม LINE",
+    details: { line_user_id: event.source?.userId, source: "line_command" },
+  });
 }
 
 async function latestEvent(admin: any, clubId: string, fields: string, status: string, readyOnly = false) {
@@ -634,6 +643,7 @@ function buildRosterText(event: any, players: Array<{ name: string; arrivalTime:
 
   return [
     `รายชื่อตีแบด ${thaiLongDate(event.event_date)}`,
+    `สถานที่: ${String(event.venue || "").trim() || "ยังไม่ได้ระบุสถานที่"}`,
     ...courts,
     ...playerLines,
     "🏸 ใครสนใจลงชื่อเพิ่มเติมสามารถคลิกที่ประกาศด้านบนได้เลยนะครับ",

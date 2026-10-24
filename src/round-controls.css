@@ -1,0 +1,11 @@
+.badminton-admin-layout .badminton-round-republish { width: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.badminton-admin-layout .badminton-round-republish > button { min-height: 44px; font-size: 13px; }
+.badminton-admin-layout .badminton-round-republish > small,
+.badminton-admin-layout .badminton-round-preserve-note { color: #627366; font-size: 12px; line-height: 1.6; }
+.badminton-admin-layout .badminton-round-republish > .badminton-line-command-ready { width: 100%; }
+.badminton-admin-layout .badminton-event-main-form > .badminton-round-preserve-note { grid-column: 1 / -1; }
+.badminton-admin-layout .badminton-event > .badminton-form-message { width: 100%; margin: 4px 0; }
+@media (max-width: 640px) {
+  .badminton-admin-layout .badminton-round-republish { align-items: flex-start; flex-direction: column; }
+  .badminton-admin-layout .badminton-round-republish > button { width: 100%; }
+}

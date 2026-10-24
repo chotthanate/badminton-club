@@ -5,7 +5,14 @@ const parameters = new URLSearchParams(window.location.search);
 const sandbox = parameters.has("sandbox");
 const staff = parameters.get("staff") === "1";
 const empty = parameters.get("empty") === "1";
+const directory = parameters.get("directory") === "1";
 const members = Array.from({ length: 18 }, (_, index) => ({ id: `local-member-${index + 1}`, club_id: clubId, role: "member", active: true, nickname: `ทดสอบ ${String(index + 1).padStart(2, "0")}`, display_name: `Player ${index + 1}`, skill_level: index === 0 ? "Rookie-" : index % 2 ? "N" : "BG", playable_skill_levels: ["BG", "N"], created_at: `2026-01-01T00:${String(index).padStart(2, "0")}:00Z` }));
+if (directory) {
+  Object.assign(members[6], { nickname: "สมชาย", display_name: "Somchai LINE", line_user_id: "local-line-somchai" });
+  Object.assign(members[7], { nickname: "สมชาย", display_name: "Somchai Walk-in" });
+  Object.assign(members[8], { nickname: "มด", display_name: "Mod One", line_user_id: "local-line-mod-one" });
+  Object.assign(members[9], { nickname: "มด", display_name: "Mod Two", line_user_id: "local-line-mod-two" });
+}
 const event = { id: eventId, club_id: clubId, title: "รอบทดสอบในเครื่อง", venue: "Local court", event_date: "2000-01-01", starts_at: "18:00:00", ends_at: "22:00:00", status: "open", billing_model: "legacy", court_hourly_rate: 200, shuttlecock_count: 4, shuttlecock_unit_price: 95 };
 const closedEvent = { ...event, id: "local-admin-fixture-closed-event", title: "รอบปิดทดสอบในเครื่อง", event_date: "1999-12-31", status: "closed" };
 const auditLogs = [
@@ -25,7 +32,7 @@ let data = {
 if (sandbox) Object.assign(event, { event_date: "2099-01-01", status: "draft", starts_at: "21:00:00" });
 const contexts = [{ club_id: clubId, role: staff ? "staff" : "owner", clubs: { id: clubId, name: "สโมสรทดสอบเฉพาะในเครื่อง", is_test: sandbox } }];
 let hasEvent = !empty;
-export const fixture = { scenario: { sandbox, staff, empty }, inFlight: 0, maxParallelWrites: 0, writes: [], failures: [], reads: [], readDetails: [], failWrite: false, failRead: false, slowFullRead: false };
+export const fixture = { scenario: { sandbox, staff, empty, directory }, inFlight: 0, maxParallelWrites: 0, writes: [], failures: [], reads: [], readDetails: [], failWrite: false, failRead: false, slowFullRead: false };
 let version = 0;
 const listeners = new Set();
 const changed = () => { version += 1; listeners.forEach((listener) => listener()); };
@@ -76,7 +83,32 @@ export async function fixtureCall(name, args) {
     if (fixture.failWrite) { fixture.failWrite = false; fixture.failures.push(`${name}:simulated write failure`); changed(); throw new Error("จำลองบันทึกล้มเหลว"); }
     const input = args[0];
     let result = input;
-    if (name === "prepareTestRound") {
+    if (name === "updateEventVenue") {
+      if (input.eventId !== eventId || event.status !== "open") throw new Error("เลือกรอบเปิดทดสอบเดิมเท่านั้น");
+      event.venue = input.venue.trim();
+      result = event;
+    } else if (name === "prepareEventForLine") {
+      if (input !== eventId || sandbox) throw new Error("เตรียมได้เฉพาะรอบหลักทดสอบเดิม");
+      event.line_publish_ready = true;
+      result = { ok: true, eventId, status: event.status, republish: event.status === "open", command: "เปิดลงชื่อ" };
+    } else if (directory && name === "archiveClubMember") {
+      const target = data.members.find((member) => member.id === input);
+      if (!target) throw new Error("ไม่พบสมาชิกทดสอบ");
+      if (data.signups.some((row) => row.member_id === input && row.status === "coming")) throw new Error("ผู้เล่นยังอยู่ในรอบที่ใช้งานอยู่");
+      target.active = false;
+      result = target.id;
+    } else if (directory && name === "mergeClubMembers") {
+      const source = data.members.find((member) => member.id === input.sourceMemberId);
+      const target = data.members.find((member) => member.id === input.targetMemberId);
+      if (!source || !target || source.id === target.id) throw new Error("เลือกรายชื่อทดสอบสองคน");
+      if (source.line_user_id && target.line_user_id && source.line_user_id !== target.line_user_id) throw new Error("คนละบัญชี LINE จึงรวมไม่ได้");
+      target.aliases = [...new Set([...(target.aliases || []), source.nickname, source.display_name])];
+      target.line_user_id ||= source.line_user_id;
+      data.members = data.members.filter((member) => member.id !== source.id);
+      result = target.id;
+    } else if (directory && name === "dismissDuplicateMemberSuggestion") {
+      data.duplicateDismissals.push({ signature: input.signature });
+    } else if (name === "prepareTestRound") {
       if (!sandbox) throw new Error("Not a sandbox fixture");
       hasEvent = true;
       event.status = "open";

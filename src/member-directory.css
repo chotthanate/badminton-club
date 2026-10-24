@@ -1,0 +1,59 @@
+.badminton-member-directory-modal.member-directory-v2 { width: min(800px, 100%); gap: 10px; outline: 0; }
+.member-directory-v2 .badminton-member-directory-header { grid-template-columns: 44px minmax(0, 1fr) auto; }
+.member-directory-v2 .badminton-member-directory-header > button { width: 44px; height: 44px; }
+.member-directory-v2 .badminton-member-directory-header h2 { font-size: 20px; }
+.member-directory-v2 .badminton-member-directory-header em { font-size: 13px; }
+.member-directory-v2 .badminton-member-directory-search input { min-height: 44px; font-size: 16px; }
+.member-directory-v2 .badminton-member-directory-search button { min-width: 44px; min-height: 44px; }
+.member-directory-v2 .member-directory-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.member-directory-v2 .member-directory-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
+.member-directory-v2 .member-directory-toolbar > span { color: #66766b; font-size: 12px; }
+.member-directory-v2 .member-directory-toolbar button,
+.member-directory-v2 .badminton-member-directory-duplicates button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 10px; border: 0; border-radius: 10px; background: #edf6ef; color: #176d49; font-size: 12px; font-weight: 600; }
+.member-directory-v2 .member-directory-toolbar button[aria-pressed="true"] { background: #ddede2; }
+.member-directory-v2 .badminton-member-directory-duplicates { display: block; margin-bottom: 10px; padding: 8px 10px; border: 0; background: #fff8e6; }
+.member-directory-v2 .badminton-member-directory-duplicates summary { min-height: 44px; align-content: center; cursor: pointer; color: #755619; font-size: 13px; font-weight: 600; }
+.member-directory-v2 .badminton-member-directory-duplicates p { margin: 3px 0 8px; color: #75674e; font-size: 12px; }
+.member-directory-v2 .badminton-member-directory-duplicates article { padding-block: 5px; }
+.member-directory-v2 .badminton-member-directory-duplicates article > span { white-space: normal; font-weight: 600; }
+.member-directory-v2 .member-directory-entry { padding: 5px 0 9px; border-bottom: 1px solid #e1e9e2; }
+.member-directory-v2 .member-directory-edit-row { padding: 7px 0 0; border: 0; grid-template-columns: minmax(0, 1fr) minmax(84px, .38fr) auto; }
+.member-directory-v2 .member-directory-edit-row label { font-size: 12px; }
+.member-directory-v2 .member-directory-edit-row input,
+.member-directory-v2 .member-directory-edit-row select { min-height: 44px; padding: 8px; font-size: 16px; }
+.member-directory-v2 .member-directory-edit-row > button { padding: 8px; }
+.member-directory-v2 .member-directory-edit-row .directory-details { min-height: 44px; padding: 6px; }
+.member-directory-v2 .member-directory-edit-row > small { overflow-wrap: anywhere; }
+.member-directory-v2 .member-directory-archive { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 8px 2px; border: 0; background: transparent; color: #a33f34; font-size: 12px; }
+.member-directory-v2 .member-directory-select,
+.member-directory-v2 .member-directory-confirm { min-height: 44px; display: flex; align-items: center; gap: 10px; font-size: 14px; line-height: 1.6; cursor: pointer; }
+.member-directory-v2 .member-directory-select input,
+.member-directory-v2 .member-directory-confirm input,
+.member-directory-v2 .member-directory-target input { width: 20px; height: 20px; flex: 0 0 20px; accent-color: #16845b; }
+.member-directory-v2 .member-directory-help { color: #63766a; font-size: 13px; line-height: 1.6; }
+.member-directory-v2 .member-directory-review { padding: 4px 3px 12px; }
+.member-directory-v2 .member-directory-review h3 { margin: 5px 0 10px; font-size: 18px; }
+.member-directory-v2 .member-directory-review p { font-size: 14px; line-height: 1.7; }
+.member-directory-v2 .member-directory-target { display: flex; align-items: center; gap: 12px; margin: 10px 0; padding: 14px; border-radius: 12px; background: #f2f5f2; cursor: pointer; }
+.member-directory-v2 .member-directory-target.is-selected { background: #e5f4e9; }
+.member-directory-v2 .member-directory-target > span { display: grid; gap: 4px; min-width: 0; }
+.member-directory-v2 .member-directory-target small { color: #536b5c; font-size: 12px; overflow-wrap: anywhere; }
+.member-directory-v2 .member-directory-warning { padding: 10px 12px; border-radius: 10px; background: #fff3dc; color: #805617; }
+.member-directory-v2 .member-directory-footer { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; flex-wrap: wrap; gap: 8px; padding-top: 10px; padding-bottom: env(safe-area-inset-bottom, 0px); border-top: 1px solid #e1e9e2; }
+.member-directory-v2 .member-directory-footer > button { min-height: 44px; font-size: 13px; }
+.member-directory-v2 .member-directory-footer > small { color: #65766b; font-size: 12px; line-height: 1.5; }
+.member-directory-v2 .member-directory-error,
+.member-directory-v2 .member-directory-success { flex: 1 0 100%; grid-column: 1 / -1; margin: 0; padding: 9px 11px; border-radius: 9px; font-size: 13px; line-height: 1.5; }
+.member-directory-v2 .member-directory-error { background: #fff1ee; color: #a0332a; }
+.member-directory-v2 .member-directory-success { background: #eaf6ee; color: #186846; }
+.member-directory-v2 button:disabled { opacity: .5; cursor: not-allowed; }
+.member-directory-v2 :is(button, summary):focus-visible { outline: 2px solid #16845b; outline-offset: 2px; }
+@media (max-width: 640px) {
+  .badminton-member-directory-modal.member-directory-v2 { height: 100dvh; padding: max(10px, env(safe-area-inset-top, 0px)) 10px 10px; }
+  .member-directory-v2 .badminton-member-directory-header { gap: 6px; }
+  .member-directory-v2 .badminton-member-directory-header h2 { font-size: 17px; }
+  .member-directory-v2 .member-directory-toolbar { align-items: stretch; }
+  .member-directory-v2 .member-directory-toolbar > span { align-self: center; max-width: 45%; }
+  .member-directory-v2 .member-directory-footer > button { flex: 1; padding: 9px; }
+  .member-directory-v2 .member-directory-edit-row { gap: 6px; }
+}
