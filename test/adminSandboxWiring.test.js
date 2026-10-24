@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const app = readFileSync(new URL("../src/BadmintonApp.jsx", import.meta.url), "utf8");
+const settings = readFileSync(new URL("../src/AdminSettingsPanel.jsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/admin-improvements.css", import.meta.url), "utf8");
 const baseStyles = readFileSync(new URL("../src/badminton.css", import.meta.url), "utf8");
 function section(start, end) {
@@ -40,10 +41,13 @@ test("adding demo players prepares a playable round instead of trusting a closed
   assert.match(add, /addRandomTestPlayers\(\{\s*clubId: context.club_id,\s*eventId: preparedEventId,/);
   assert.match(add, /actionKey: "sandbox:add-players", selectEventId: \(\) => preparedEventId/);
   assert.doesNotMatch(add, /dashboard\.event.*status|eventId: dashboard\.event/);
-  const addButton = app.match(/<button\b[^>]*onClick=\{addDemoQueuePlayers\}[^>]*>/)?.[0];
-  assert.ok(addButton, "the demo-player action remains available in the banner");
-  assert.match(addButton, /disabled=\{saving\}/);
-  assert.doesNotMatch(addButton, /status|dashboard\.event/);
+  const settingsPanel = app.match(/<AdminSettingsPanel\b[\s\S]*?\n\s*\/>/)?.[0];
+  assert.ok(settingsPanel, "settings component remains connected");
+  assert.match(settingsPanel, /onAddTestPlayers=\{addDemoQueuePlayers\}/);
+  const addButton = settings.match(/<SettingsRow\b[^>]*onClick=\{onAddTestPlayers\}[^>]*\/>/)?.[0];
+  assert.ok(addButton, "the demo-player action remains available in settings");
+  assert.match(addButton, /disabled=\{busy\}/);
+  assert.doesNotMatch(addButton, /status|hasEvent|dashboard\.event/);
 });
 
 test("creating a sandbox round reuses the prepare RPC and bypasses only the normal create form", () => {

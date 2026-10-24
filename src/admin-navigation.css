@@ -1,0 +1,411 @@
+/* Admin-only navigation. Keep tournament and public/LIFF layouts unchanged. */
+.badminton-app.badminton-admin-layout {
+  --admin-nav-height: 72px;
+  display: block;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.badminton-admin-layout > .badminton-shell {
+  min-width: 0;
+  padding-bottom: calc(var(--admin-nav-height) + env(safe-area-inset-bottom, 0px) + 24px);
+}
+
+.badminton-admin-layout .badminton-admin-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin: -20px -20px 16px;
+  padding: max(12px, env(safe-area-inset-top, 0px)) 20px 12px;
+  border-bottom: 1px solid #dfe7df;
+  background: rgba(246, 249, 245, .97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.badminton-admin-layout .badminton-admin-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  color: #526359;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.badminton-admin-layout .badminton-admin-identity strong,
+.badminton-admin-layout .badminton-admin-identity h1 {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: #203e2e;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badminton-admin-layout .badminton-admin-identity p {
+  margin: 0;
+}
+
+.badminton-admin-layout .badminton-admin-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.badminton-admin-layout .badminton-admin-mode.is-test {
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: #fff0ce;
+  color: #80520c;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badminton-admin-layout .badminton-admin-current-round {
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #294b38;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.badminton-admin-layout .badminton-admin-current-round > svg {
+  flex-shrink: 0;
+}
+
+.badminton-admin-layout .badminton-admin-topbar .badminton-round-switcher {
+  flex: 1 1 420px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.badminton-admin-layout .badminton-admin-topbar .badminton-round-switcher label {
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badminton-admin-layout .badminton-admin-topbar .badminton-round-switcher select {
+  min-width: 0;
+  min-height: 44px;
+  border-color: #cddbd0;
+  border-radius: 12px;
+  background-color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.badminton-admin-layout .badminton-admin-topbar .badminton-round-switcher small {
+  display: none;
+}
+
+.badminton-admin-layout .badminton-admin-topbar .badminton-round-switcher-controls {
+  grid-template-columns: minmax(0, 1fr) 44px;
+}
+
+.badminton-admin-layout .badminton-admin-topbar .badminton-round-switcher-controls > :only-child {
+  grid-column: 1 / -1;
+}
+
+.badminton-admin-layout .badminton-admin-topbar .badminton-round-danger > summary {
+  width: 44px;
+  min-height: 44px;
+  border-radius: 12px;
+}
+
+.badminton-admin-layout .badminton-admin-content {
+  min-width: 0;
+}
+
+.badminton-admin-layout .badminton-tabs.badminton-bottom-nav {
+  position: fixed;
+  z-index: 20;
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1180px, 100%);
+  min-height: calc(var(--admin-nav-height) + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  grid-template-columns: repeat(var(--admin-tab-count, 6), minmax(0, 1fr));
+  gap: 2px;
+  margin: 0;
+  padding: 8px max(8px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  border: 1px solid #dce5de;
+  border-bottom: 0;
+  border-radius: 18px 18px 0 0;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 -5px 24px rgba(29, 58, 40, .08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.badminton-admin-layout .badminton-tabs.badminton-bottom-nav button {
+  min-width: 0;
+  min-height: 56px;
+  gap: 4px;
+  padding: 5px 1px;
+  border-radius: 12px;
+  color: #56665c;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  touch-action: manipulation;
+}
+
+.badminton-admin-layout .badminton-bottom-nav button > svg {
+  width: 21px;
+  height: 21px;
+  flex-shrink: 0;
+}
+
+.badminton-admin-layout .badminton-bottom-nav button > span {
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.badminton-admin-layout .badminton-tabs.badminton-bottom-nav button.is-active {
+  background: #e7f4eb;
+  color: #107a51;
+  font-weight: 700;
+}
+
+.badminton-admin-layout .badminton-tabs.badminton-bottom-nav button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.badminton-admin-layout .badminton-bottom-nav .badminton-tab-count {
+  top: 2px;
+  right: max(2px, calc(50% - 23px));
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  font-size: 9px;
+}
+
+.badminton-admin-layout .badminton-saving {
+  z-index: 25;
+  right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: calc(var(--admin-nav-height) + env(safe-area-inset-bottom, 0px) + 12px);
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+}
+
+.badminton-admin-layout .badminton-admin-settings {
+  display: grid;
+  gap: 18px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.badminton-admin-layout .badminton-settings-intro h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.4;
+}
+
+.badminton-admin-layout .badminton-settings-intro p {
+  margin: 5px 0 0;
+  color: #64736a;
+  font-size: 13px;
+}
+
+.badminton-admin-layout .badminton-settings-group {
+  min-width: 0;
+}
+
+.badminton-admin-layout .badminton-settings-group-title {
+  margin: 0 0 7px;
+  padding-inline: 3px;
+  color: #53665b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.badminton-admin-layout .badminton-settings-rows {
+  overflow: hidden;
+  border: 1px solid #dfe7df;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.badminton-admin-layout .badminton-settings-row {
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 13px 15px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #294b38;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.badminton-admin-layout .badminton-settings-row + .badminton-settings-row {
+  border-top: 1px solid #edf1ed;
+}
+
+.badminton-admin-layout .badminton-settings-row-icon,
+.badminton-admin-layout .badminton-settings-row-trailing {
+  display: grid;
+  place-items: center;
+}
+
+.badminton-admin-layout .badminton-settings-row-trailing {
+  color: #87958c;
+}
+
+.badminton-admin-layout .badminton-settings-row-icon .is-spinning {
+  animation: badminton-spin 1s linear infinite;
+}
+
+.badminton-admin-layout .badminton-settings-row-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.badminton-admin-layout .badminton-settings-row-label {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.badminton-admin-layout .badminton-settings-row-description {
+  color: #68796d;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.badminton-admin-layout .badminton-settings-row.is-danger {
+  color: #af342c;
+}
+
+.badminton-admin-layout .badminton-settings-row.is-test-mode {
+  color: #80520c;
+  background: #fff9eb;
+}
+
+.badminton-admin-layout .badminton-settings-row:disabled,
+.badminton-admin-layout .badminton-settings-row[aria-disabled="true"] {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.badminton-admin-layout .badminton-settings-history > button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #e7f3eb;
+  color: #176747;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.badminton-admin-layout .badminton-settings-history > .badminton-card-title {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.badminton-admin-layout .badminton-settings-history > .badminton-card-title h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.badminton-admin-layout .badminton-settings-history > .badminton-card-title p {
+  margin: 4px 0 0;
+  color: #64736a;
+  font-size: 13px;
+}
+
+.badminton-admin-layout .badminton-bottom-nav button:focus-visible,
+.badminton-admin-layout .badminton-settings-row:focus-visible,
+.badminton-admin-layout .badminton-settings-history > button:focus-visible {
+  outline: 2px solid #16845b;
+  outline-offset: -3px;
+}
+
+@media (hover: hover) {
+  .badminton-admin-layout .badminton-settings-row:not(:disabled):not([aria-disabled="true"]):hover {
+    background: #f2f7f3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badminton-admin-layout .badminton-settings-row-icon .is-spinning {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .badminton-admin-layout .badminton-admin-topbar {
+    display: grid;
+    gap: 5px;
+    margin: -10px -10px 12px;
+    padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) 8px max(10px, env(safe-area-inset-left, 0px));
+  }
+
+  .badminton-admin-layout .badminton-admin-identity {
+    flex-wrap: nowrap;
+    font-size: 11px;
+  }
+
+  .badminton-admin-layout .badminton-admin-identity strong,
+  .badminton-admin-layout .badminton-admin-identity h1 {
+    flex: 1;
+    font-size: 13px;
+  }
+
+  .badminton-admin-layout .badminton-admin-identity > span {
+    flex-shrink: 0;
+  }
+
+  .badminton-admin-layout .badminton-tabs.badminton-bottom-nav button {
+    font-size: 10px;
+  }
+
+  .badminton-admin-layout .badminton-admin-settings {
+    gap: 16px;
+  }
+
+  .badminton-admin-layout .badminton-settings-row {
+    gap: 10px;
+    padding: 12px;
+  }
+}

@@ -13,7 +13,6 @@ import {
   Image,
   ListOrdered,
   LogIn,
-  LogOut,
   PackagePlus,
   Pencil,
   Plus,
@@ -26,7 +25,6 @@ import {
   ShieldCheck,
   Trash2,
   Timer,
-  Trophy,
   UserPlus,
   Users,
   WalletCards,
@@ -147,6 +145,9 @@ import { selectStaffWorkspace } from "./staffWorkspace.js";
 import { isSupabaseConfigured, supabase } from "./supabase.js";
 import NetworkStatus, { useOnlineStatus } from "./NetworkStatus.jsx";
 import { buildOutstandingLineMessage, filterAndSortOutstanding, outstandingAgeInDays } from "./outstandingPayments.js";
+import AdminSettingsPanel from "./AdminSettingsPanel.jsx";
+import { adminNavigationTabs } from "./adminNavigation.js";
+import "./admin-navigation.css";
 
 const EVENT_STATUS_LABELS = {
   draft: "เตรียมรอบ",
@@ -177,14 +178,7 @@ async function copyTextToClipboard(value) {
   if (!copied) throw new Error("คัดลอกไม่สำเร็จ กรุณาลองเปิดผ่าน Safari");
 }
 
-const ADMIN_TABS = [
-  { id: "round", label: "รอบ", icon: CalendarDays },
-  { id: "players", label: "ผู้เล่น", icon: Users },
-  { id: "queue", label: "คิว", icon: ListOrdered },
-  { id: "costs", label: "ค่าใช้จ่าย", icon: Calculator },
-  { id: "payments", label: "ชำระเงิน", icon: WalletCards },
-  { id: "history", label: "ประวัติ", icon: History },
-];
+const ADMIN_TAB_ICONS = { round: CalendarDays, players: Users, queue: ListOrdered, costs: Calculator, payments: WalletCards, settings: Settings };
 
 const HALF_HOUR_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   const hour = Math.floor(index / 2);
@@ -283,6 +277,7 @@ function AdminDashboard({ session }) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("round");
+  const [settingsPage, setSettingsPage] = useState("menu");
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [staffAccessModalOpen, setStaffAccessModalOpen] = useState(false);
   const [eventSummaries, setEventSummaries] = useState([]);
@@ -300,7 +295,7 @@ function AdminDashboard({ session }) {
   const fullRefreshCountRef = useRef(0);
   const latestFullRefreshRef = useRef(0);
   const viewRef = useRef(null);
-  viewRef.current = { activeTab, context, dashboard };
+  viewRef.current = { activeTab, settingsPage, context, dashboard };
   const mutationsRef = useRef(null);
   if (!mutationsRef.current) mutationsRef.current = createMutationQueue((keys) => {
     savingRef.current = keys.length > 0;
@@ -369,7 +364,7 @@ function AdminDashboard({ session }) {
       setDashboard(nextDashboard);
       setPreviousOutstanding(nextOutstanding);
       setLastSyncedAt(new Date());
-      if (isStaffContext) setActiveTab((current) => ["round", "queue", "players"].includes(current) ? current : "queue");
+      if (isStaffContext) setActiveTab((current) => ["round", "queue", "players", "settings"].includes(current) ? current : "queue");
       return true;
     } catch (nextError) {
       if (requestId === refreshRequestRef.current) setError(nextError.message);
@@ -394,7 +389,8 @@ function AdminDashboard({ session }) {
   }, []);
 
   useEffect(() => {
-    if (!dashboard?.event || dashboard.event.status !== "open") return undefined;
+    const viewingHistory = activeTab === "settings" && settingsPage === "history" && context?.role !== "staff";
+    if (!dashboard?.event || (dashboard.event.status !== "open" && !viewingHistory) || (activeTab === "settings" && !viewingHistory)) return undefined;
     let cancelled = false;
     const poll = async () => {
       if (cancelled || savingRef.current || fullRefreshCountRef.current || pollInFlightRef.current || document.hidden || !navigator.onLine || !selectedEventIdRef.current) return;
@@ -410,7 +406,7 @@ function AdminDashboard({ session }) {
             ? await loadStaffDashboard(context.club_id)
             : activeTab === "round"
               ? await loadFinanceState(context.club_id, eventId)
-              : activeTab === "history"
+              : viewingHistory
                 ? await loadAuditState(context.club_id, eventId)
                 : await loadFinanceState(context.club_id, eventId);
         if (!cancelled && requestId === refreshRequestRef.current) {
@@ -439,11 +435,15 @@ function AdminDashboard({ session }) {
       window.removeEventListener("focus", poll);
       cancelled = true;
     };
-  }, [dashboard?.event?.id, dashboard?.event?.status, activeTab, context?.club_id, context?.role]);
+  }, [dashboard?.event?.id, dashboard?.event?.status, activeTab, settingsPage, context?.club_id, context?.role]);
 
   useEffect(() => {
-    if (dashboard?.event?.status === "open") setActiveTab("queue");
+    if (dashboard?.event?.status === "open") setActiveTab((current) => current === "settings" ? current : "queue");
   }, [dashboard?.event?.id, dashboard?.event?.status]);
+
+  useEffect(() => {
+    if (dashboard && !dashboard.event) setActiveTab((current) => current === "settings" ? current : "round");
+  }, [dashboard?.event?.id]);
 
   function mutate(action, successMessage, options = {}) {
     ++refreshRequestRef.current;
@@ -538,10 +538,15 @@ function AdminDashboard({ session }) {
   }
 
   function changeTab(nextTab) {
-    if (nextTab === activeTab) return;
+    if (nextTab === activeTab) {
+      if (nextTab === "settings") { setSettingsPage("menu"); window.scrollTo(0, 0); }
+      return;
+    }
     if ((hasUnsavedQueueWork(selectedEventIdRef.current) || hasUnsavedEditorWork(selectedEventIdRef.current))
       && !window.confirm("ยังมีร่างที่ไม่บันทึก ร่างจะถูกเก็บไว้ให้เมื่อกลับมา ต้องการเปลี่ยนหน้าไหม?")) return;
+    if (nextTab === "settings") setSettingsPage("menu");
     setActiveTab(nextTab);
+    window.scrollTo(0, 0);
   }
 
   async function switchTestMode() {
@@ -632,69 +637,65 @@ function AdminDashboard({ session }) {
   const appEvent = dashboard.event ? mapDashboardToEvent(dashboard) : null;
   const settlement = appEvent && !isStaff ? calculateSettlement(appEvent) : null;
   const hasUnfinishedRound = eventSummaries.some((round) => ["draft", "open"].includes(round.status));
-  const visibleTabs = isStaff ? ADMIN_TABS.filter((tab) => ["round", "players", "queue"].includes(tab.id)) : ADMIN_TABS;
+  const visibleTabs = adminNavigationTabs(isStaff, Boolean(appEvent));
 
   return (
-    <main className={`badminton-app ${dashboard.event?.status === "open" ? "is-game-mode" : ""}`}>
+    <main className={`badminton-app badminton-admin-layout ${dashboard.event?.status === "open" ? "is-game-mode" : ""}`}>
       <section className="badminton-shell">
-        <header className="badminton-header">
-          <div>
-            <p className="badminton-kicker">{isStaff ? "โหมดสตาฟ" : "หลังบ้าน"}</p>
-            <h1>จัดการรอบแบด</h1>
-            <p>{context.clubs.name}</p>
+        <header className="badminton-admin-topbar">
+          <div className="badminton-admin-identity">
+            <h1>{context.clubs.name}</h1>
+            {context.clubs.is_test ? <span className="badminton-admin-mode is-test"><FlaskConical size={14} /> โหมดทดลอง</span> : isStaff ? <span className="badminton-admin-mode">โหมดสตาฟ</span> : null}
           </div>
-          <div className="badminton-header-actions">
-            <a aria-label="จัดการแข่งขัน" className="badminton-icon-button" href={`${import.meta.env.BASE_URL}?app=tournament`} title="จัดการแข่งขัน"><Trophy size={18} /></a>
-            <button
-              aria-label="โหลดหน้าเว็บและข้อมูลล่าสุด"
-              className="badminton-icon-button"
-              onClick={() => { if (!savingRef.current) refresh(false); }}
-              title="โหลดข้อมูลล่าสุด (ไม่ล้างร่างที่กำลังแก้)"
-              type="button"
-            >
-              <RefreshCw size={18} />
-            </button>
-            {!isStaff ? <button aria-label="เปลี่ยนรหัสเข้าเว็บ" className="badminton-icon-button" onClick={() => setPasswordModalOpen(true)} title="เปลี่ยนรหัสเข้าเว็บ" type="button">
-              <ShieldCheck size={18} />
-            </button> : null}
-            {!isStaff && !context.clubs.is_test ? <button aria-label="ตั้งค่ารหัสสตาฟ" className="badminton-icon-button" onClick={() => setStaffAccessModalOpen(true)} title="ตั้งค่ารหัสสตาฟ" type="button"><Users size={18} /></button> : null}
-            {!isStaff ? <button aria-label={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} className={`badminton-icon-button ${context.clubs.is_test ? "is-test-mode" : ""}`} onClick={switchTestMode} title={context.clubs.is_test ? "กลับข้อมูลจริง" : "เข้าโหมดทดลอง"} type="button">
-              <FlaskConical size={18} />
-            </button> : null}
-            <button className="badminton-secondary" onClick={() => { if (canLeaveRound()) supabase.auth.signOut(); }} type="button">
-              <LogOut size={17} /> ออกจากระบบ
-            </button>
-          </div>
+          {!isStaff ? <RoundSwitcher
+            disabled={saving || loading}
+            events={eventSummaries}
+            onChange={(eventId) => { if (canLeaveRound()) refresh(false, { eventId }); }}
+            onDelete={(round) => mutate(
+              () => deleteCompletedEvent(round.id),
+              round.status === "draft" ? "ลบรอบที่กำลังเตรียมแล้ว" : "ลบรอบที่ชำระเงินครบแล้ว",
+              { selectLatest: true, errorMode: "alert" },
+            )}
+            selectedEventId={selectedEventId}
+          /> : <p className="badminton-admin-current-round"><CalendarDays size={17} /> {dashboard.event ? `${formatRoundOption(dashboard.event.event_date)} · ${EVENT_STATUS_LABELS[dashboard.event.status] || dashboard.event.status}` : "ยังไม่มีรอบที่เปิดอยู่"}</p>}
         </header>
 
-        <NetworkStatus lastSyncedAt={lastSyncedAt} online={online} />
+        {!online ? <NetworkStatus lastSyncedAt={lastSyncedAt} online={online} /> : null}
 
         {notice ? <div className="badminton-alert is-success"><span>{notice}</span><button aria-label="ปิดข้อความแจ้งเตือน" onClick={() => setNotice("")} type="button"><X size={17} /></button></div> : null}
         {error ? <div className="badminton-alert is-error"><span>{error}</span><button aria-label="ปิดข้อความผิดพลาด" onClick={() => setError("")} type="button"><X size={17} /></button></div> : null}
-        {!isStaff && context.clubs.is_test ? <div className="badminton-test-banner"><div><FlaskConical size={18} /><span><strong>โหมดทดลอง</strong> ทุกคอร์ทพร้อมทดลอง ไม่อิงเวลาจองจริง ข้อมูลแยกจากรอบจริงและไม่ส่งเข้า LINE</span></div><div className="badminton-test-actions"><button disabled={saving} onClick={addDemoQueuePlayers} title="เตรียมรอบและเพิ่มผู้เล่นสุ่ม พร้อมเช็กชื่อเข้าคิวทันที" type="button"><Users size={15} /> เพิ่มผู้เล่นสุ่ม 23–40 คน</button><button disabled={saving || dashboard.event?.status !== "open"} onClick={() => copyTestLink("signup")} type="button"><Copy size={15} /> ลิงก์ลงชื่อทดลอง</button><button disabled={saving} onClick={() => copyTestLink("payment")} type="button"><Copy size={15} /> ลิงก์ชำระเงินทดลอง</button><button disabled={saving || !dashboard.event} onClick={() => copyTestLink("live")} type="button"><Copy size={15} /> ลิงก์สนามและคิวทดลอง</button><button disabled={saving} onClick={resetDemo} type="button">รีเซ็ตข้อมูลทดลอง</button></div></div> : null}
-
-        {!dashboard.event && !isStaff ? (
+        <div className="badminton-admin-content">
+        {activeTab === "settings" ? <>
+          {online ? <NetworkStatus lastSyncedAt={lastSyncedAt} online={online} /> : null}
+          {!isStaff && settingsPage === "history" && appEvent ? <section className="badminton-settings-history">
+            <button className="badminton-secondary" onClick={() => { setSettingsPage("menu"); window.scrollTo(0, 0); }} type="button"><ArrowLeft size={17} /> กลับหน้าตั้งค่า</button>
+            <div className="badminton-card-title"><History size={20} /><div><h2>ประวัติของรอบที่เลือก</h2><p>{formatRoundOption(dashboard.event.event_date)}</p></div></div>
+            <AuditPanel actions={appEvent.actions} />
+          </section> : <AdminSettingsPanel
+            busy={saving}
+            refreshing={loading}
+            clubName={context.clubs.name}
+            isStaff={isStaff}
+            isTestMode={Boolean(context.clubs.is_test)}
+            eventStatus={dashboard.event?.status}
+            hasEvent={Boolean(appEvent)}
+            onRefresh={() => { if (!savingRef.current) refresh(false); }}
+            onHistory={() => { setSettingsPage("history"); window.scrollTo(0, 0); }}
+            onPassword={() => setPasswordModalOpen(true)}
+            onStaffAccess={() => setStaffAccessModalOpen(true)}
+            onToggleTestMode={switchTestMode}
+            onSignOut={() => { if (canLeaveRound()) supabase.auth.signOut(); }}
+            onTournamentNavigate={(eventObject) => { if (!canLeaveRound()) eventObject.preventDefault(); }}
+            onAddTestPlayers={addDemoQueuePlayers}
+            onCopyTestLink={copyTestLink}
+            onResetTest={resetDemo}
+          />}
+        </> : !dashboard.event && !isStaff ? (
           <CreateEventCard context={context} mutate={mutate} session={session} venues={dashboard.venues || []} />
         ) : !dashboard.event ? (
           <section className="badminton-card badminton-empty"><h2>ยังไม่มีรอบที่เปิดอยู่</h2><p>สตาฟจะเข้าใช้งานได้เมื่อเจ้าของเปิดรอบแล้ว</p></section>
         ) : (
           <>
-            {!isStaff ? <RoundSwitcher
-              events={eventSummaries}
-              onChange={(eventId) => { if (canLeaveRound()) refresh(false, { eventId }); }}
-              onDelete={(round) => mutate(
-                () => deleteCompletedEvent(round.id),
-                round.status === "draft" ? "ลบรอบที่กำลังเตรียมแล้ว" : "ลบรอบที่ชำระเงินครบแล้ว",
-                { selectLatest: true, errorMode: "alert" },
-              )}
-              selectedEventId={selectedEventId}
-            /> : null}
-            <nav aria-label="เมนูหลังบ้าน" className="badminton-tabs">
-              {visibleTabs.map(({ id, label, icon: Icon }) => (
-                <button className={activeTab === id ? "is-active" : ""} key={id} onClick={() => changeTab(id)} type="button"><Icon size={18} /><span>{label}</span>{id === "payments" && appEvent.paymentSlips?.length ? <b className="badminton-tab-count" title={`${appEvent.paymentSlips.length} สลิปรอตรวจสอบ`}>{appEvent.paymentSlips.length}</b> : null}</button>
-              ))}
-            </nav>
-
             {!isStaff && activeTab === "round" ? <>
               <EventControlCard
                 dashboard={dashboard}
@@ -735,9 +736,15 @@ function AdminDashboard({ session }) {
 
             {!isStaff && activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} settlement={settlement} /> : null}
             {!isStaff && activeTab === "payments" ? <SettlementPanel context={context} event={appEvent} mutate={mutate} previousOutstanding={previousOutstanding} session={session} settlement={settlement} /> : null}
-            {!isStaff && activeTab === "history" ? <AuditPanel actions={appEvent.actions} /> : null}
           </>
         )}
+        </div>
+        <nav aria-label="เมนูหลังบ้าน" className="badminton-tabs badminton-bottom-nav" style={{ "--admin-tab-count": visibleTabs.length }}>
+          {visibleTabs.map(({ id, label, disabled }) => {
+            const Icon = ADMIN_TAB_ICONS[id];
+            return <button aria-current={activeTab === id ? "page" : undefined} className={activeTab === id ? "is-active" : ""} disabled={disabled} key={id} onClick={() => changeTab(id)} title={disabled ? "กรุณาสร้างหรือเปิดรอบก่อน" : label} type="button"><Icon size={20} /><span>{label}</span>{id === "payments" && appEvent?.paymentSlips?.length ? <b className="badminton-tab-count" title={`${appEvent.paymentSlips.length} สลิปรอตรวจสอบ`}>{appEvent.paymentSlips.length}</b> : null}</button>;
+          })}
+        </nav>
         {!isStaff && passwordModalOpen ? (
           <AdminPasswordModal
             onClose={() => setPasswordModalOpen(false)}
@@ -806,12 +813,12 @@ function StaffAccessModal({ clubId, onClose, onSave, saving }) {
   return <div className="badminton-modal-backdrop" role="presentation"><form className="badminton-custom-charge-modal badminton-password-modal" onSubmit={submit}><div className="badminton-modal-title"><div><p className="badminton-kicker">สิทธิ์ทีมงาน</p><h2>ตั้งค่ารหัสสตาฟ</h2></div><button aria-label="ปิด" onClick={onClose} type="button"><X size={18} /></button></div><p>เปลี่ยนรหัสเมื่อใด สตาฟที่เปิดค้างไว้จะถูกให้ออกจากระบบทันที และต้องใช้รหัสใหม่</p><label>รหัสสตาฟใหม่<input autoComplete="new-password" minLength="6" maxLength="72" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} /></label><label>ยืนยันรหัส<input autoComplete="new-password" minLength="6" maxLength="72" onChange={(event) => setConfirmation(event.target.value)} required type="password" value={confirmation} /></label>{localError ? <p className="badminton-form-message is-error">{localError}</p> : null}<button className="badminton-primary" disabled={saving} type="submit"><Save size={17} /> ตั้งหรือเปลี่ยนรหัสสตาฟ</button><button className="badminton-delete-button badminton-full-button" disabled={saving} onClick={disable} type="button"><X size={17} /> ปิดใช้งานรหัสสตาฟ</button></form></div>;
 }
 
-function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
+function RoundSwitcher({ disabled = false, events, onChange, onDelete, selectedEventId }) {
   const selectedRound = events.find((event) => event.id === selectedEventId);
   const canDelete = selectedRound && ["draft", "closed"].includes(selectedRound.status);
 
   function confirmDelete() {
-    if (!selectedRound) return;
+    if (disabled || !selectedRound) return;
     const detail = selectedRound.status === "draft"
       ? "ข้อมูลคอร์ทและการตั้งค่าของรอบที่กำลังเตรียมจะถูกลบ"
       : "รายชื่อ ค่าใช้จ่าย การชำระเงิน และประวัติของรอบนี้จะถูกลบถาวร";
@@ -824,14 +831,15 @@ function RoundSwitcher({ events, onChange, onDelete, selectedEventId }) {
       <label>
         <span>รอบทั้งหมด</span>
         <div className="badminton-round-switcher-controls">
-          <select onChange={(event) => onChange(event.target.value)} value={selectedEventId || ""}>
+          <select aria-label="รอบทั้งหมด" disabled={disabled || !events.length} onChange={(event) => onChange(event.target.value)} value={selectedEventId || ""}>
+            {!events.length ? <option value="">ยังไม่มีรอบ</option> : null}
             {events.map((event, index) => (
               <option key={event.id} value={event.id}>
                 {index === 0 ? "รอบล่าสุด · " : ""}{formatRoundOption(event.event_date)} · {EVENT_STATUS_LABELS[event.status] || event.status}
               </option>
             ))}
           </select>
-          <details className="badminton-round-danger"><summary aria-label="เปิดเมนูจัดการรอบ" title="จัดการรอบ">•••</summary><div><strong>การดำเนินการเพิ่มเติม</strong><button aria-label="ลบรอบที่เลือก" disabled={!canDelete} onClick={confirmDelete} title={selectedRound?.status === "draft" ? "ลบรอบที่กำลังเตรียม" : selectedRound?.status === "closed" ? "ลบรอบที่ชำระเงินครบแล้ว" : "รอบที่เปิดลงชื่ออยู่ยังลบไม่ได้"} type="button"><Trash2 size={17} /> ลบรอบนี้</button></div></details>
+          <details className="badminton-round-danger"><summary aria-label="เปิดเมนูจัดการรอบ" title="จัดการรอบ">•••</summary><div><strong>การดำเนินการเพิ่มเติม</strong><button aria-label="ลบรอบที่เลือก" disabled={disabled || !canDelete} onClick={confirmDelete} title={selectedRound?.status === "draft" ? "ลบรอบที่กำลังเตรียม" : "ลบรอบที่ชำระเงินครบแล้ว"} type="button"><Trash2 size={17} /> ลบรอบนี้</button></div></details>
         </div>
       </label>
       <small>เมนูลบรอบอยู่ในปุ่ม ••• เพื่อป้องกันการแตะผิดระหว่างใช้งาน</small>

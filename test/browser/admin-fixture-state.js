@@ -1,9 +1,19 @@
 // Used only by admin-test-server.mjs. No network or production identifiers.
 const clubId = "local-admin-fixture-club";
 const eventId = "local-admin-fixture-event";
-const sandbox = new URLSearchParams(window.location.search).has("sandbox");
+const parameters = new URLSearchParams(window.location.search);
+const sandbox = parameters.has("sandbox");
+const staff = parameters.get("staff") === "1";
+const empty = parameters.get("empty") === "1";
 const members = Array.from({ length: 18 }, (_, index) => ({ id: `local-member-${index + 1}`, club_id: clubId, role: "member", active: true, nickname: `ทดสอบ ${String(index + 1).padStart(2, "0")}`, display_name: `Player ${index + 1}`, skill_level: index === 0 ? "Rookie-" : index % 2 ? "N" : "BG", playable_skill_levels: ["BG", "N"], created_at: `2026-01-01T00:${String(index).padStart(2, "0")}:00Z` }));
 const event = { id: eventId, club_id: clubId, title: "รอบทดสอบในเครื่อง", venue: "Local court", event_date: "2000-01-01", starts_at: "18:00:00", ends_at: "22:00:00", status: "open", billing_model: "legacy", court_hourly_rate: 200, shuttlecock_count: 4, shuttlecock_unit_price: 95 };
+const closedEvent = { ...event, id: "local-admin-fixture-closed-event", title: "รอบปิดทดสอบในเครื่อง", event_date: "1999-12-31", status: "closed" };
+const auditLogs = [
+  { id: "local-audit-open-line", event_id: eventId, actor_id: null, action: "รอบปัจจุบัน: ลงชื่อผ่าน LINE จำลอง", created_at: "2000-01-01T11:00:00Z" },
+  { id: "local-audit-open-admin", event_id: eventId, actor_id: "local-admin-fixture-user", action: "รอบปัจจุบัน: แอดมินเช็กชื่อจำลอง", created_at: "2000-01-01T11:01:00Z" },
+  { id: "local-audit-closed-line", event_id: closedEvent.id, actor_id: null, action: "รอบปิด: ลงชื่อผ่าน LINE จำลอง", created_at: "1999-12-31T11:00:00Z" },
+  { id: "local-audit-closed-admin", event_id: closedEvent.id, actor_id: "local-admin-fixture-user", action: "รอบปิด: แอดมินจบรอบจำลอง", created_at: "1999-12-31T15:00:00Z" },
+];
 let data = {
   event,
   members,
@@ -13,8 +23,9 @@ let data = {
   expenses: [], payments: [], auditLogs: [], memberExtras: [], queuePlayers: [], queueMatches: [], queueMatchPlayers: [], paymentSlips: [], paymentSlipPayments: [], extraItems: [{ id: "local-water", name: "น้ำเปล่า", price: 10 }], venues: [], duplicateDismissals: [], shuttlecockCheckpoints: [], perRoundSnapshots: [], perRoundSnapshotAllocations: [], perRoundSnapshotMatches: [],
 };
 if (sandbox) Object.assign(event, { event_date: "2099-01-01", status: "draft", starts_at: "21:00:00" });
-const contexts = [{ club_id: clubId, role: "owner", clubs: { id: clubId, name: "สโมสรทดสอบเฉพาะในเครื่อง", is_test: sandbox } }];
-export const fixture = { inFlight: 0, maxParallelWrites: 0, writes: [], failures: [], reads: [], failWrite: false, failRead: false, slowFullRead: false };
+const contexts = [{ club_id: clubId, role: staff ? "staff" : "owner", clubs: { id: clubId, name: "สโมสรทดสอบเฉพาะในเครื่อง", is_test: sandbox } }];
+let hasEvent = !empty;
+export const fixture = { scenario: { sandbox, staff, empty }, inFlight: 0, maxParallelWrites: 0, writes: [], failures: [], reads: [], readDetails: [], failWrite: false, failRead: false, slowFullRead: false };
 let version = 0;
 const listeners = new Set();
 const changed = () => { version += 1; listeners.forEach((listener) => listener()); };
@@ -26,19 +37,35 @@ export const armSlowRead = () => { fixture.slowFullRead = true; changed(); };
 const copy = (value) => structuredClone(value);
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function readDashboard(requestedEventId) {
+  const selected = hasEvent ? requestedEventId === closedEvent.id ? closedEvent : event : null;
+  const result = copy(data);
+  if (selected?.id !== eventId) {
+    for (const key of Object.keys(result)) {
+      if (Array.isArray(result[key]) && !["members", "extraItems", "venues", "duplicateDismissals"].includes(key)) result[key] = [];
+    }
+  }
+  result.event = copy(selected);
+  result.auditLogs = staff ? [] : copy(auditLogs.filter((row) => row.event_id === selected?.id));
+  return result;
+}
+
 export async function fixtureCall(name, args) {
   const reads = ["loadDashboard", "loadQueueState", "loadParticipantState", "loadStaffDashboard", "loadFinanceState", "loadEventControlState", "loadAuditState"];
   if (name === "getAdminContexts") return copy(contexts);
-  if (name === "listClubEvents") return [{ ...event, participant_count: 6, payment_complete: false }];
+  if (name === "listClubEvents") return hasEvent ? [{ ...event, participant_count: 6, payment_complete: false }, { ...closedEvent, participant_count: 0, payment_complete: true }] : [];
   if (name === "listOutstandingPayments") return [];
   if (reads.includes(name)) {
     fixture.reads.push(name);
+    fixture.readDetails.push({ name, args: copy(args) });
     changed();
-    const result = copy(data);
+    const requestedEventId = name === "loadQueueState" ? args[0] : name === "loadStaffDashboard" ? null : args[1];
+    const result = readDashboard(requestedEventId);
     if (name === "loadDashboard" && fixture.slowFullRead) { fixture.slowFullRead = false; await pause(1500); }
     else await pause(50);
     if (fixture.failRead) { fixture.failRead = false; fixture.failures.push(`${name}:simulated read failure`); changed(); throw new Error("จำลองโหลดข้อมูลล้มเหลว"); }
-    return { ...result, queueEventStatus: result.event.status };
+    if (name === "loadAuditState") return { auditLogs: result.auditLogs };
+    return { ...result, queueEventStatus: result.event?.status || null };
   }
   if (name === "recordAudit") return undefined;
   fixture.inFlight += 1;
@@ -51,6 +78,7 @@ export async function fixtureCall(name, args) {
     let result = input;
     if (name === "prepareTestRound") {
       if (!sandbox) throw new Error("Not a sandbox fixture");
+      hasEvent = true;
       event.status = "open";
       result = eventId;
     } else if (name === "addRandomTestPlayers") {

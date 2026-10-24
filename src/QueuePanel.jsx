@@ -158,7 +158,7 @@ export default function QueuePanel({ dashboard, event, isStaff = false, isTestMo
     if (!proposal) throw new Error(queueProposalFailure(proposalPlayers, nextSequence));
     const create = proposal.fallback ? createFallbackQueueDraft : createQueueDraft;
     await create({ eventId: event.id, memberIds: proposal.lineup.map((player) => player.memberId), teamAIds: proposal.teamA.map((player) => player.memberId) });
-    setPlanningMessage(proposal.fallback ? `คิวของ ${proposal.lineup[0].name} เติมด้วยมือสูงกว่าที่ใกล้ที่สุด พร้อมเล่นแล้วและแก้ไขรายชื่อได้` : "");
+    setPlanningMessage("");
     return proposal.fallback;
   }
 
@@ -169,7 +169,7 @@ export default function QueuePanel({ dashboard, event, isStaff = false, isTestMo
       const { lineups, reason } = await planQueueDrafts({ players: proposalPlayers, matches: queue.matches, nextSequence, onProgress: setPlanningProgress });
       if (!lineups.length) throw new Error(reason || queueProposalFailure(proposalPlayers, nextSequence));
       await createQueueDraftsBatch({ eventId: event.id, lineups });
-      setPlanningMessage([lineups.some((lineup) => lineup.fallback) ? "บางคิวเติมด้วยมือสูงกว่าที่ใกล้ที่สุด พร้อมเล่นแล้วและแก้ไขรายชื่อได้" : "", reason].filter(Boolean).join(" · "));
+      setPlanningMessage(reason || "");
     } finally { setPlanningProgress(null); }
   }
 
