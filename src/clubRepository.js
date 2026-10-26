@@ -872,7 +872,7 @@ export async function createManualQueueDraft({ eventId, memberIds, teamAIds }) {
 }
 
 export async function createManualQueue({ eventId, memberIds, teamAIds }) {
-  const { data, error } = await client().rpc("create_manual_queue", {
+  const { data, error } = await client().rpc(memberIds.length === 4 ? "create_manual_queue" : "create_partial_manual_queue", {
     target_event_id: eventId,
     selected_member_ids: memberIds,
     team_a_member_ids: teamAIds || memberIds.slice(0, 2),
@@ -882,7 +882,7 @@ export async function createManualQueue({ eventId, memberIds, teamAIds }) {
 }
 
 export async function saveQueueLineup({ matchId, slots, expectedVersion, approve = false }) {
-  const { data, error } = await client().rpc("save_queue_lineup", {
+  const { data, error } = await client().rpc(slots.length === 4 ? "save_queue_lineup" : "save_partial_queue_lineup", {
     target_match_id: matchId,
     expected_revision: expectedVersion,
     approve_after_save: Boolean(approve),

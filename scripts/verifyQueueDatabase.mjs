@@ -84,6 +84,7 @@ async function check(name, fn) {
   finally { await db.exec("rollback"); }
 }
 const createManual = (players) => value(`select public.create_manual_queue_with_players('${event}',${literalIds(players)},${literalIds(players.slice(0, 2))}) as value`);
+const createPartial = (players) => value(`select public.create_partial_manual_queue('${event}',${literalIds(players)},${literalIds(players.slice(0, 2))}) as value`);
 const revision = (match) => value("select revision as value from public.queue_matches where id=$1", [match]);
 const slots = (players) => players.map((member_id, i) => ({ member_id, team: i < 2 ? "A" : "B", position: i % 2 + 1 }));
 const save = (match, players, version, approve = false) => value("select public.save_queue_lineup($1,$2::jsonb,$3,$4) as value", [match, JSON.stringify(slots(players)), version, approve]);
@@ -98,6 +99,52 @@ await check("manual queue creates exactly four players and allows mixed skills",
   const match = await createManual(ids.slice(0, 4));
   assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1", [match]), 4);
   assert.ok(Number(await revision(match)) > 1);
+});
+await check("one, two and three players save as real queues without changing an active game", async () => {
+  const playing = await value(`select public.create_manual_queue('${event}',${literalIds(ids.slice(16,20))},${literalIds(ids.slice(16,18))}) as value`);
+  await makePlaying(playing, ids.slice(16,20));
+  for (const [index, count] of [1, 2, 3].entries()) {
+    const chosen = ids.slice(index * 4, index * 4 + count);
+    const match = await createPartial(chosen);
+    assert.equal(await value("select status as value from public.queue_matches where id=$1", [match]), "approved");
+    assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1", [match]), count);
+    assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and member_id=any($2::uuid[]) and status='reserved'", [event, chosen]), count);
+  }
+  assert.equal(await value("select status as value from public.queue_matches where id=$1", [playing]), "playing");
+  assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1", [playing]), 4);
+});
+await check("a partial queue can be filled to four and a full queue can be reduced without losing its position", async () => {
+  const match = await createPartial(ids.slice(0,1));
+  const position = await value("select queue_position as value from public.queue_matches where id=$1", [match]);
+  await save(match, ids.slice(0,4), await revision(match), true);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1", [match]), "approved");
+  assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1", [match]), 4);
+  await value("select public.save_partial_queue_lineup($1,$2::jsonb,$3) as value", [match, JSON.stringify(slots(ids.slice(0,2))), await revision(match)]);
+  assert.equal(await value("select status as value from public.queue_matches where id=$1", [match]), "approved");
+  assert.equal(await value("select queue_position as value from public.queue_matches where id=$1", [match]), position);
+  assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1", [match]), 2);
+  assert.equal(await value("select count(*)::int as value from public.event_queue_players where event_id=$1 and member_id=any($2::uuid[]) and status='waiting'", [event, ids.slice(2,4)]), 2);
+});
+await check("empty and duplicate partial saves fail atomically", async () => {
+  await db.exec("savepoint empty_partial");
+  await assert.rejects(createPartial([]), /1–3/);
+  await db.exec("rollback to empty_partial");
+  const match = await createPartial(ids.slice(0,1));
+  const before = await revision(match);
+  await db.exec("savepoint empty_edit");
+  await assert.rejects(value("select public.save_partial_queue_lineup($1,$2::jsonb,$3) as value", [match, "[]", before]), /อย่างน้อย 1 คน|1–3/);
+  await db.exec("rollback to empty_edit");
+  assert.equal(await revision(match), before);
+  assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1", [match]), 1);
+});
+await check("a saved one-player queue cannot start until all four slots are filled", async () => {
+  const match = await createPartial(ids.slice(0,1));
+  const court = await value("insert into public.event_courts(club_id,event_id,court_name,starts_at,ends_at,position) values($1,$2,'Court 1','00:00','23:59',0) returning id as value", [club,event]);
+  await db.exec("savepoint incomplete_start");
+  await assert.rejects(value("select public.start_next_queue_on_court($1,$2) as value", [event,court]), /ไม่ครบ 4 คน/);
+  await db.exec("rollback to incomplete_start");
+  assert.equal(await value("select status as value from public.queue_matches where id=$1", [match]), "approved");
+  assert.equal(await value("select count(*)::int as value from public.queue_match_players where match_id=$1", [match]), 1);
 });
 await check("more than four queues can be created and batch-approved atomically", async () => {
   const drafts = [];

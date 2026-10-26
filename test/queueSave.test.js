@@ -55,7 +55,8 @@ test("queue save error lives in the visible footer and parent forwards offline a
   const editor = source.slice(source.indexOf("function QueueLineupEditor("), source.indexOf("function TimeSelect("));
   assert.match(editor, /footer=\{[\s\S]*className="queue-save-error" role="alert"[\s\S]*<p className="queue-picker-hint"/);
   assert.match(editor, /saveQueueEditor\(\(onError\)/);
-  assert.match(editor, /"บันทึกคิวพร้อมเล่นแล้ว", \{ onError \}/);
+  assert.match(editor, /draft\.memberIds\.length === 4 \? "บันทึกคิวพร้อมเล่นแล้ว" : `บันทึกคิว/);
+  assert.match(editor, /selectedPlayers\.length < 1/);
   assert.doesNotMatch(editor, /errorMode: "alert"/);
   assert.match(editor, /onError: setSaveError, onSaved: \(\) => \{ writeQueueWork[\s\S]*onClose\(\)/);
   assert.ok((editor.match(/setSaveError\(""\)/g) || []).length >= 3, "selection, reload and retry clear stale error");

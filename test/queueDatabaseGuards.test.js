@@ -105,7 +105,8 @@ test("automatic queues are ready immediately with no review or approval interfac
   assert.doesNotMatch(queuePanel, /approveQueueDrafts|QueueApprovalReview|reviewDrafts|readyQueueDrafts|อนุมัติ|ตรวจคิวร่าง/);
   assert.match(queuePanel, /ระบบจัด 1 คิวพร้อมเล่นแล้ว/);
   assert.match(queuePanel, /ระบบจัดคิวทั้งหมดที่ทำได้พร้อมเล่นแล้ว/);
-  assert.match(queuePanel, /คิวที่ยังไม่บันทึก/);
+  assert.match(queuePanel, /บันทึกแล้ว · รอเติมอีก/);
+  assert.match(queuePanel, /เติมคิว 1 ให้ครบ 4 คน/);
   const management = queuePanel.slice(queuePanel.indexOf('className="queue-manage-toolbar"'), queuePanel.indexOf('{upcoming.map'));
   assert.match(management, /cancelQueues\(selectedQueues\)/);
   assert.match(management, /cancelQueues\(upcoming, true\)/);
