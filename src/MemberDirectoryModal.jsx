@@ -1,19 +1,20 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Search, Trash2, Users, X } from "lucide-react";
-import { archiveClubMember, dismissDuplicateMemberSuggestion, mergeClubMembers, updateClubMember } from "./clubRepository.js";
+import { ArrowLeft, Search, Users, X } from "lucide-react";
+import { archiveClubMember, dismissDuplicateMemberSuggestion, listOutstandingPayments, mergeClubMembers, updateClubMember } from "./clubRepository.js";
 import { duplicateGroupSignature, findExactDuplicateMemberGroups } from "./memberSearch.js";
 import { archiveMemberBlockedReason, directoryMemberName, filterDirectoryMembers, hasMemberDraft, mergeMembersBlockedReason, preferredMergeTarget, runDirectoryMutation, toggleMergeMember } from "./memberDirectory.js";
 import { skillLabel } from "./skillLevels.js";
 import MemberDirectoryRow from "./MemberDirectoryRow.jsx";
 import "./member-directory.css";
 
-export default function MemberDirectoryModal({ context, dashboard, mutate, onClose, onDetails }) {
+export default function MemberDirectoryModal({ context, dashboard, settlement, mutate, onClose, onDetails }) {
   const [query, setQuery] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [view, setView] = useState("list");
   const [targetId, setTargetId] = useState("");
   const [archiveId, setArchiveId] = useState("");
+  const [archiveBalance, setArchiveBalance] = useState({ status: "idle", rows: [] });
   const [dismissGroup, setDismissGroup] = useState([]);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -33,6 +34,8 @@ export default function MemberDirectoryModal({ context, dashboard, mutate, onClo
   const target = selected.find((member) => member.id === targetId);
   const source = selected.find((member) => member.id !== targetId);
   const archiveMember = members.find((member) => member.id === archiveId);
+  const archiveUnfinalized = settlement?.rows?.find((row) => row.memberId === archiveId && !row.billingFinalized);
+  const archiveDue = archiveBalance.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const memberDirty = (member) => dirtyIds.has(member?.id) || hasMemberDraft(member?.id);
   const mergeBlocked = mergeMembersBlockedReason(selected, dashboard) || (selected.some(memberDirty) ? "บันทึกหรือยกเลิกร่างชื่อและมือของ 2 คนนี้ก่อนรวมรายชื่อ" : "");
   const archiveBlocked = archiveMemberBlockedReason(archiveMember, dashboard) || (memberDirty(archiveMember) ? "บันทึกหรือยกเลิกร่างชื่อและมือของคนนี้ก่อนนำออกจากรายชื่อ" : "");
@@ -63,6 +66,15 @@ export default function MemberDirectoryModal({ context, dashboard, mutate, onClo
     return () => { document.removeEventListener("keydown", handleKey); document.body.style.overflow = previousOverflow; previousFocus?.focus?.({ preventScroll: true }); };
   }, []);
   useEffect(() => { dialogRef.current?.focus({ preventScroll: true }); }, [view]);
+  useEffect(() => {
+    if (view !== "archive" || !archiveId) return;
+    let active = true;
+    setArchiveBalance({ status: "loading", rows: [] });
+    listOutstandingPayments(context.club_id)
+      .then((rows) => { if (active) setArchiveBalance({ status: "ready", rows: rows.filter((row) => row.member_id === archiveId) }); })
+      .catch(() => { if (active) setArchiveBalance({ status: "error", rows: [] }); });
+    return () => { active = false; };
+  }, [view, archiveId, context.club_id]);
 
   async function run(action, message, actionKey) {
     if (busyRef.current) return false;
@@ -78,13 +90,19 @@ export default function MemberDirectoryModal({ context, dashboard, mutate, onClo
     setSelectedIds(pair.map((member) => member.id)); setTargetId(preferredMergeTarget(pair));
     setConfirmed(false); setError(""); setView("merge");
   }
+  function chooseMergeMember(member) {
+    if (!selecting) { setSelecting(true); setSelectedIds([member.id]); setError(""); return; }
+    const next = toggleMergeMember(selectedIds, member.id);
+    if (next.length === 2) reviewMerge(next);
+    else setSelectedIds(next);
+  }
   async function commitMerge() {
     if (!confirmed || mergeBlocked || !source || !target) return;
     const saved = await run(() => mergeClubMembers({ sourceMemberId: source.id, targetMemberId: target.id }), `รวม ${directoryMemberName(source)} เข้ากับ ${directoryMemberName(target)} แล้ว`, "members:merge");
     if (saved) { setHiddenIds((ids) => [...ids, source.id]); setSelectedIds([]); setSelecting(false); backToList(); }
   }
   async function commitArchive() {
-    if (!confirmed || archiveBlocked || !archiveMember) return;
+    if (!confirmed || archiveBlocked || !archiveMember || archiveBalance.status !== "ready") return;
     const saved = await run(() => archiveClubMember(archiveMember.id), `นำ ${directoryMemberName(archiveMember)} ออกจากรายชื่อแล้ว ประวัติยังอยู่`, `members:archive:${archiveMember.id}`);
     if (saved) { setHiddenIds((ids) => [...ids, archiveMember.id]); setSelectedIds((ids) => ids.filter((id) => id !== archiveMember.id)); backToList(); }
   }
@@ -115,8 +133,7 @@ export default function MemberDirectoryModal({ context, dashboard, mutate, onClo
           {selecting ? <p className="member-directory-help">เลือก 2 รายชื่อของคนเดียวกัน แล้วตรวจว่าต้องการเก็บชื่อใดไว้</p> : null}
           <div className="member-directory-inline-list">{visibleMembers.length ? visibleMembers.map((member) => <article className="member-directory-entry" key={member.id}>
             {selecting ? <label className="member-directory-select"><input checked={selectedIds.includes(member.id)} disabled={busy || (!selectedIds.includes(member.id) && selectedIds.length >= 2)} onChange={() => setSelectedIds((ids) => toggleMergeMember(ids, member.id))} type="checkbox" /><span>เลือก {directoryMemberName(member)}</span></label> : null}
-            <MemberDirectoryRow disabled={busy} member={member} onDirtyChange={onDirtyChange} onDetails={onDetails} onSave={(targetMember, patch) => run(() => updateClubMember(targetMember.id, { displayName: targetMember.display_name || patch.nickname, paymentExempt: Boolean(targetMember.payment_exempt), ...patch }), `บันทึกชื่อและมือของ ${patch.nickname} แล้ว`, `profile:${targetMember.id}`)} />
-            {!selecting ? <button aria-label={`ลบ ${directoryMemberName(member)} ออกจากรายชื่อ`} className="member-directory-archive" disabled={busy} onClick={() => { setArchiveId(member.id); setConfirmed(false); setError(""); setView("archive"); }} type="button"><Trash2 size={15} />ลบออกจากรายชื่อ</button> : null}
+            <MemberDirectoryRow disabled={busy} member={member} onDirtyChange={onDirtyChange} onDetails={selecting ? undefined : onDetails} onArchive={selecting ? undefined : () => { setArchiveId(member.id); setConfirmed(false); setError(""); setView("archive"); }} onMerge={chooseMergeMember} selectedForMerge={selectedIds.includes(member.id)} onSave={(targetMember, patch) => run(() => updateClubMember(targetMember.id, { displayName: targetMember.display_name || patch.nickname, paymentExempt: Boolean(targetMember.payment_exempt), ...patch }), `บันทึกชื่อและมือของ ${patch.nickname} แล้ว`, `profile:${targetMember.id}`)} />
           </article>) : <p className="badminton-empty">ไม่พบรายชื่อที่ค้นหา</p>}</div>
         </div>
       </> : <div className="member-directory-scroll member-directory-review" role="region" aria-label="ตรวจสอบก่อนดำเนินการ" tabIndex={0}>
@@ -128,12 +145,16 @@ export default function MemberDirectoryModal({ context, dashboard, mutate, onClo
         </> : view === "archive" ? <>
           <h3>ลบ “{directoryMemberName(archiveMember)}” ออกจากรายชื่อ?</h3><p>ระบบจะซ่อนชื่อนี้จากรายการสำหรับเพิ่มเข้ารอบใหม่ ไม่ลบประวัติเกม ยอดค้าง หรือการชำระเงินเดิม</p>
           <p>ผู้เล่นที่อยู่ในรอบซึ่งยังไม่จบหรืออยู่ในคิวจะลบไม่ได้ ระบบจะตรวจรอบอื่นอีกครั้งก่อนบันทึกด้วย</p>
+          <div className={`member-directory-balance ${archiveBalance.rows.length ? "has-due" : ""}`} role="status">
+            {archiveBalance.status === "loading" ? "กำลังตรวจยอดค้างทุกรอบ…" : archiveBalance.status === "error" ? "ตรวจยอดค้างไม่ได้ กรุณากลับไปแล้วเปิดรายการนี้อีกครั้ง" : archiveBalance.status === "ready" ? archiveBalance.rows.length ? `มียอดค้างที่สรุปแล้ว ${archiveDue.toLocaleString("th-TH")} บาท · ${archiveBalance.rows.length} รอบ` : "ไม่มียอดค้างที่สรุปไว้" : ""}
+            {archiveUnfinalized ? <small>รอบปัจจุบันยังไม่สรุปยอด จึงอาจมีค่าใช้จ่ายเพิ่ม</small> : null}
+          </div>
           {archiveBlocked ? <p className="member-directory-warning" role="status">{archiveBlocked}</p> : <label className="member-directory-confirm"><input checked={confirmed} disabled={busy} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" /><span>ยืนยันนำ “{directoryMemberName(archiveMember)}” ออกจากรายชื่อ โดยเก็บประวัติไว้</span></label>}
         </> : view === "dismiss" ? <><h3>ยืนยันว่าเป็นคนละคน?</h3><p>{dismissGroup.map(directoryMemberName).join(" ↔ ")}</p><p>จะซ่อนคำแนะนำกลุ่มนี้เท่านั้น ไม่แก้รายชื่อหรือประวัติ</p></> : <><h3>ยังมีชื่อหรือมือที่ไม่บันทึก</h3><p>หากปิดตอนนี้ ร่างจะเก็บไว้ในเบราว์เซอร์นี้ แต่ยังไม่เปลี่ยนข้อมูลจริง</p></>}
       </div>}
       <footer className="member-directory-footer">
         {error ? <p className="member-directory-error" role="alert">{error}</p> : notice ? <p className="member-directory-success" role="status">{notice}</p> : null}
-        {view === "list" ? selecting ? <><span>เลือกแล้ว {selectedIds.length}/2 คน</span><button className="badminton-primary" disabled={busy || selected.length !== 2} onClick={() => reviewMerge()} type="button">ตรวจสอบการรวม</button></> : <small>ลบออกจากรายชื่อเป็นการซ่อนชื่อ ประวัติและยอดค้างยังอยู่</small> : <><button className="badminton-secondary" disabled={busy} onClick={backToList} type="button">กลับไปตรวจรายชื่อ</button>{view === "merge" ? <button className="badminton-primary" disabled={busy || !confirmed || Boolean(mergeBlocked)} onClick={commitMerge} type="button">{busy ? "กำลังรวม…" : "ยืนยันรวมรายชื่อ"}</button> : view === "archive" ? <button className="badminton-danger-button" disabled={busy || !confirmed || Boolean(archiveBlocked)} onClick={commitArchive} type="button">{busy ? "กำลังบันทึก…" : "ยืนยันลบออกจากรายชื่อ"}</button> : view === "dismiss" ? <button className="badminton-primary" disabled={busy} onClick={commitDismiss} type="button">ยืนยันว่าเป็นคนละคน</button> : <button className="badminton-secondary" onClick={onClose} type="button">ปิดและเก็บร่างไว้</button>}</>}
+        {view === "list" ? selecting ? <><span>เลือกแล้ว {selectedIds.length}/2 คน</span><button className="badminton-primary" disabled={busy || selected.length !== 2} onClick={() => reviewMerge()} type="button">ตรวจสอบการรวม</button></> : <small>ลบออกจากรายชื่อเป็นการซ่อนชื่อ ประวัติและยอดค้างยังอยู่</small> : <><button className="badminton-secondary" disabled={busy} onClick={backToList} type="button">กลับไปตรวจรายชื่อ</button>{view === "merge" ? <button className="badminton-primary" disabled={busy || !confirmed || Boolean(mergeBlocked)} onClick={commitMerge} type="button">{busy ? "กำลังรวม…" : "ยืนยันรวมรายชื่อ"}</button> : view === "archive" ? <button className="badminton-danger-button" disabled={busy || !confirmed || Boolean(archiveBlocked) || archiveBalance.status !== "ready"} onClick={commitArchive} type="button">{busy ? "กำลังบันทึก…" : "ยืนยันลบออกจากรายชื่อ"}</button> : view === "dismiss" ? <button className="badminton-primary" disabled={busy} onClick={commitDismiss} type="button">ยืนยันว่าเป็นคนละคน</button> : <button className="badminton-secondary" onClick={onClose} type="button">ปิดและเก็บร่างไว้</button>}</>}
       </footer>
     </section>
   </div>;

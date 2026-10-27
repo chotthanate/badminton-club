@@ -5,6 +5,8 @@ import { archiveMemberBlockedReason, filterDirectoryMembers, hasMemberDraft, mem
 
 const member = (id, patch = {}) => ({ id, role: "member", active: true, nickname: id, ...patch });
 const modal = readFileSync(new URL("../src/MemberDirectoryModal.jsx", import.meta.url), "utf8");
+const row = readFileSync(new URL("../src/MemberDirectoryRow.jsx", import.meta.url), "utf8");
+const directoryCss = readFileSync(new URL("../src/member-directory.css", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/BadmintonApp.jsx", import.meta.url), "utf8");
 
 test("directory searches current names, LINE and old aliases without showing inactive or operator accounts", () => {
@@ -84,7 +86,7 @@ test("callback error, thrown error and bare false preserve explicit failure for 
 
 test("merge/archive require explicit confirmation and keep selection/review intact on mutation failure", () => {
   assert.match(modal, /if \(!confirmed \|\| mergeBlocked \|\| !source \|\| !target\) return/);
-  assert.match(modal, /if \(!confirmed \|\| archiveBlocked \|\| !archiveMember\) return/);
+  assert.match(modal, /if \(!confirmed \|\| archiveBlocked \|\| !archiveMember \|\| archiveBalance\.status !== "ready"\) return/);
   assert.match(modal, /if \(saved\) \{ setHiddenIds[\s\S]*setSelectedIds\(\[\]\)[\s\S]*backToList\(\)/);
   assert.match(modal, /<footer className="member-directory-footer">[\s\S]*role="alert"/);
   assert.doesNotMatch(modal, /window\.confirm|window\.alert|\.from\("club_members"\)/);
@@ -96,6 +98,26 @@ test("directory is the only merge entry, all-member title and safe legacy archiv
   assert.match(app, /เปิดรายชื่อผู้เล่นทั้งหมด/);
   assert.doesNotMatch(app, /mergeSourceId|mergeTargetId|function mergeDuplicateMember|className="badminton-member-merge-form"/);
   assert.match(app, /mutate\(\(\) => archiveClubMember\(editingMember.id\)[\s\S]*actionKey: `members:archive:/);
+});
+
+test("compact directory keeps quick edits guarded and supports starting a merge from either member row", () => {
+  assert.match(row, /window\.confirm\(`ยืนยันแก้ไขข้อมูลผู้เล่นคนนี้/);
+  assert.match(row, /member-directory-quick-save/);
+  assert.match(row, /onMerge\(member\)/);
+  assert.match(row, />แก้ไข<\/button>/);
+  assert.match(modal, /function chooseMergeMember\(member\)/);
+  assert.match(modal, /if \(next\.length === 2\) reviewMerge\(next\)/);
+  assert.match(directoryCss, /grid-template-columns: minmax\(0, 1fr\) minmax\(132px, \.42fr\)/);
+  assert.match(directoryCss, /height: 44px; min-height: 44px/);
+});
+
+test("archive review loads that member's finalized outstanding balance before enabling deletion", () => {
+  assert.match(modal, /listOutstandingPayments\(context\.club_id\)/);
+  assert.match(modal, /rows\.filter\(\(row\) => row\.member_id === archiveId\)/);
+  assert.match(modal, /archiveBalance\.status !== "ready"/);
+  assert.match(modal, /มียอดค้างที่สรุปแล้ว/);
+  assert.match(modal, /ไม่มียอดค้างที่สรุปไว้/);
+  assert.match(modal, /รอบปัจจุบันยังไม่สรุปยอด/);
 });
 
 test("isolated directory fixture supports retry, guards current members and preserves archived records", async () => {

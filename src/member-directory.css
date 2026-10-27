@@ -16,15 +16,22 @@
 .member-directory-v2 .badminton-member-directory-duplicates p { margin: 3px 0 8px; color: #75674e; font-size: 12px; }
 .member-directory-v2 .badminton-member-directory-duplicates article { padding-block: 5px; }
 .member-directory-v2 .badminton-member-directory-duplicates article > span { white-space: normal; font-weight: 600; }
-.member-directory-v2 .member-directory-entry { padding: 5px 0 9px; border-bottom: 1px solid #e1e9e2; }
-.member-directory-v2 .member-directory-edit-row { padding: 7px 0 0; border: 0; grid-template-columns: minmax(0, 1fr) minmax(84px, .38fr) auto; }
-.member-directory-v2 .member-directory-edit-row label { font-size: 12px; }
+.member-directory-v2 .member-directory-entry { padding: 3px 0 4px; border-bottom: 1px solid #e1e9e2; }
+.member-directory-v2 .member-directory-edit-row { grid-template-columns: minmax(0, 1fr) minmax(132px, .42fr); align-items: center; gap: 1px 8px; padding: 0; border: 0; }
+.member-directory-v2 .member-directory-edit-row label { min-width: 0; }
+.member-directory-v2 .member-directory-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .member-directory-v2 .member-directory-edit-row input,
-.member-directory-v2 .member-directory-edit-row select { min-height: 44px; padding: 8px; font-size: 16px; }
-.member-directory-v2 .member-directory-edit-row > button { padding: 8px; }
-.member-directory-v2 .member-directory-edit-row .directory-details { min-height: 44px; padding: 6px; }
-.member-directory-v2 .member-directory-edit-row > small { overflow-wrap: anywhere; }
-.member-directory-v2 .member-directory-archive { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 8px 2px; border: 0; background: transparent; color: #a33f34; font-size: 12px; }
+.member-directory-v2 .member-directory-edit-row select { box-sizing: border-box; width: 100%; height: 44px; min-height: 44px; padding: 7px 9px; font-size: 16px; }
+.member-directory-v2 .member-directory-edit-row > small.member-directory-line-name { grid-column: 1; grid-row: 2; min-width: 0; overflow: hidden; color: #63746b; text-overflow: ellipsis; white-space: nowrap; }
+.member-directory-v2 .member-directory-row-actions { grid-column: 2; grid-row: 2; display: flex; align-items: center; justify-content: flex-end; gap: 3px; min-width: 0; }
+.member-directory-v2 .member-directory-row-actions button { flex: 0 0 auto; min-height: 36px; margin: 0; border: 0; border-radius: 8px; background: transparent; color: #176c50; font-size: 13px; font-weight: 700; }
+.member-directory-v2 .member-directory-row-actions .directory-details { padding: 4px 7px; }
+.member-directory-v2 .member-directory-row-actions .member-directory-quick-save { padding: 4px 7px; background: #e4f3e9; }
+.member-directory-v2 .member-directory-row-actions .member-directory-merge[aria-pressed="true"] { background: #e4f3e9; }
+.member-directory-v2 .member-directory-row-actions .member-directory-archive { width: 36px; display: grid; place-items: center; color: #a33f34; }
+.member-directory-v2 .member-directory-reset { grid-column: 1 / -1; justify-self: start; min-height: 30px; padding: 3px 8px; border: 0; background: transparent; color: #805617; }
+.member-directory-v2 .member-directory-edit-row .member-directory-error,
+.member-directory-v2 .member-directory-edit-row .editor-dirty { grid-column: 1 / -1; white-space: normal; }
 .member-directory-v2 .member-directory-select,
 .member-directory-v2 .member-directory-confirm { min-height: 44px; display: flex; align-items: center; gap: 10px; font-size: 14px; line-height: 1.6; cursor: pointer; }
 .member-directory-v2 .member-directory-select input,
@@ -39,6 +46,9 @@
 .member-directory-v2 .member-directory-target > span { display: grid; gap: 4px; min-width: 0; }
 .member-directory-v2 .member-directory-target small { color: #536b5c; font-size: 12px; overflow-wrap: anywhere; }
 .member-directory-v2 .member-directory-warning { padding: 10px 12px; border-radius: 10px; background: #fff3dc; color: #805617; }
+.member-directory-v2 .member-directory-balance { display: grid; gap: 4px; margin: 10px 0; padding: 12px; border-radius: 12px; background: #edf6ef; color: #176d49; font-weight: 700; }
+.member-directory-v2 .member-directory-balance.has-due { background: #fff3dc; color: #805617; }
+.member-directory-v2 .member-directory-balance small { color: #64756a; font-size: 12px; font-weight: 500; }
 .member-directory-v2 .member-directory-footer { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; flex-wrap: wrap; gap: 8px; padding-top: 10px; padding-bottom: env(safe-area-inset-bottom, 0px); border-top: 1px solid #e1e9e2; }
 .member-directory-v2 .member-directory-footer > button { min-height: 44px; font-size: 13px; }
 .member-directory-v2 .member-directory-footer > small { color: #65766b; font-size: 12px; line-height: 1.5; }
@@ -55,5 +65,5 @@
   .member-directory-v2 .member-directory-toolbar { align-items: stretch; }
   .member-directory-v2 .member-directory-toolbar > span { align-self: center; max-width: 45%; }
   .member-directory-v2 .member-directory-footer > button { flex: 1; padding: 9px; }
-  .member-directory-v2 .member-directory-edit-row { gap: 6px; }
+  .member-directory-v2 .member-directory-edit-row { gap: 1px 6px; }
 }

@@ -8,6 +8,13 @@ import { buildSync } from "esbuild";
 import { createMutationQueue } from "../src/mutationQueue.js";
 import { selectStaffWorkspace } from "../src/staffWorkspace.js";
 
+const navigationCss = readFileSync(new URL("../src/admin-navigation.css", import.meta.url), "utf8");
+
+test("sandbox exit dialog constrains its buttons inside a mobile viewport", () => {
+  assert.match(navigationCss, /\.badminton-sandbox-exit-actions \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(navigationCss, /\.badminton-sandbox-exit-actions button \{ box-sizing: border-box; width: 100%; min-width: 0/);
+});
+
 const compiledBadge = buildSync({
   entryPoints: [fileURLToPath(new URL("../src/SandboxModeBadge.jsx", import.meta.url))],
   bundle: true, format: "cjs", packages: "external", platform: "node", write: false,

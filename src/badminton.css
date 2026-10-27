@@ -3782,6 +3782,22 @@
   z-index: 120;
 }
 
+.badminton-member-edit-modal {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.badminton-member-edit-modal input,
+.badminton-member-edit-modal select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  font-size: 16px;
+}
+
 .badminton-member-edit-actions {
   display: grid;
   gap: 8px;
