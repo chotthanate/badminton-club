@@ -10,6 +10,7 @@ import "./member-directory.css";
 export default function MemberDirectoryModal({ context, dashboard, settlement, mutate, onClose, onDetails }) {
   const [query, setQuery] = useState("");
   const [selecting, setSelecting] = useState(false);
+  const [mergeFromRow, setMergeFromRow] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [view, setView] = useState("list");
   const [targetId, setTargetId] = useState("");
@@ -91,7 +92,7 @@ export default function MemberDirectoryModal({ context, dashboard, settlement, m
     setConfirmed(false); setError(""); setView("merge");
   }
   function chooseMergeMember(member) {
-    if (!selecting) { setSelecting(true); setSelectedIds([member.id]); setError(""); return; }
+    if (!selecting) { setSelecting(true); setMergeFromRow(true); setSelectedIds([member.id]); setError(""); return; }
     const next = toggleMergeMember(selectedIds, member.id);
     if (next.length === 2) reviewMerge(next);
     else setSelectedIds(next);
@@ -99,7 +100,7 @@ export default function MemberDirectoryModal({ context, dashboard, settlement, m
   async function commitMerge() {
     if (!confirmed || mergeBlocked || !source || !target) return;
     const saved = await run(() => mergeClubMembers({ sourceMemberId: source.id, targetMemberId: target.id }), `รวม ${directoryMemberName(source)} เข้ากับ ${directoryMemberName(target)} แล้ว`, "members:merge");
-    if (saved) { setHiddenIds((ids) => [...ids, source.id]); setSelectedIds([]); setSelecting(false); backToList(); }
+    if (saved) { setHiddenIds((ids) => [...ids, source.id]); setSelectedIds([]); setSelecting(false); setMergeFromRow(false); backToList(); }
   }
   async function commitArchive() {
     if (!confirmed || archiveBlocked || !archiveMember || archiveBalance.status !== "ready") return;
@@ -124,15 +125,15 @@ export default function MemberDirectoryModal({ context, dashboard, settlement, m
       </header>
       {view === "list" ? <>
         <label className="badminton-member-directory-search"><Search size={18} /><input aria-label="ค้นหารายชื่อผู้เล่นทั้งหมด" onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อเล่น ชื่อ LINE หรือชื่อเดิม" value={query} />{query ? <button aria-label="ล้างคำค้นหา" onClick={() => setQuery("")} type="button"><X size={16} /></button> : null}</label>
-        <div className="member-directory-toolbar"><span>แก้ชื่อและมือได้จากรายชื่อด้านล่าง</span><button aria-pressed={selecting} disabled={busy} onClick={() => { setSelecting(!selecting); setSelectedIds([]); setError(""); }} type="button"><Users size={16} />{selecting ? "ยกเลิกการเลือก" : "เลือก 2 ชื่อเพื่อรวม"}</button></div>
+        <div className="member-directory-toolbar"><span>{mergeFromRow ? "แตะ รวม ที่ชื่อคนที่สอง" : "แก้ชื่อและมือได้จากรายชื่อด้านล่าง"}</span><button aria-pressed={selecting} disabled={busy} onClick={() => { setSelecting(!selecting); setMergeFromRow(false); setSelectedIds([]); setError(""); }} type="button"><Users size={16} />{selecting ? "ยกเลิกการเลือก" : "เลือก 2 ชื่อเพื่อรวม"}</button></div>
         <div className="member-directory-scroll" role="region" aria-label="รายการสมาชิกและรายชื่อซ้ำ" tabIndex={0}>
-          {duplicateGroups.length ? <details className="badminton-member-directory-duplicates" open={!query && !selecting}>
+          {duplicateGroups.length ? <details className="badminton-member-directory-duplicates" open={!query && (!selecting || mergeFromRow)}>
             <summary>ชื่อที่อาจซ้ำกัน · {duplicateGroups.length} กลุ่ม</summary><p>ตรวจว่าเป็นคนเดียวกันก่อนรวม ชื่อเหมือนกันอาจเป็นคนละคน</p>
             {duplicateGroups.map((group) => <article key={duplicateGroupSignature(group)}><span>{group.map(directoryMemberName).join(" ↔ ")}</span><div><button disabled={busy} onClick={() => reviewMerge(group.map((member) => member.id))} type="button">ตรวจแล้วรวม</button><button disabled={busy} onClick={() => { setDismissGroup(group); setView("dismiss"); setError(""); }} type="button">คนละคน</button></div></article>)}
           </details> : null}
-          {selecting ? <p className="member-directory-help">เลือก 2 รายชื่อของคนเดียวกัน แล้วตรวจว่าต้องการเก็บชื่อใดไว้</p> : null}
+          {selecting && !mergeFromRow ? <p className="member-directory-help">เลือก 2 รายชื่อของคนเดียวกัน แล้วตรวจว่าต้องการเก็บชื่อใดไว้</p> : null}
           <div className="member-directory-inline-list">{visibleMembers.length ? visibleMembers.map((member) => <article className="member-directory-entry" key={member.id}>
-            {selecting ? <label className="member-directory-select"><input checked={selectedIds.includes(member.id)} disabled={busy || (!selectedIds.includes(member.id) && selectedIds.length >= 2)} onChange={() => setSelectedIds((ids) => toggleMergeMember(ids, member.id))} type="checkbox" /><span>เลือก {directoryMemberName(member)}</span></label> : null}
+            {selecting && !mergeFromRow ? <label className="member-directory-select"><input checked={selectedIds.includes(member.id)} disabled={busy || (!selectedIds.includes(member.id) && selectedIds.length >= 2)} onChange={() => setSelectedIds((ids) => toggleMergeMember(ids, member.id))} type="checkbox" /><span>เลือก {directoryMemberName(member)}</span></label> : null}
             <MemberDirectoryRow disabled={busy} member={member} onDirtyChange={onDirtyChange} onDetails={selecting ? undefined : onDetails} onArchive={selecting ? undefined : () => { setArchiveId(member.id); setConfirmed(false); setError(""); setView("archive"); }} onMerge={chooseMergeMember} selectedForMerge={selectedIds.includes(member.id)} onSave={(targetMember, patch) => run(() => updateClubMember(targetMember.id, { displayName: targetMember.display_name || patch.nickname, paymentExempt: Boolean(targetMember.payment_exempt), ...patch }), `บันทึกชื่อและมือของ ${patch.nickname} แล้ว`, `profile:${targetMember.id}`)} />
           </article>) : <p className="badminton-empty">ไม่พบรายชื่อที่ค้นหา</p>}</div>
         </div>

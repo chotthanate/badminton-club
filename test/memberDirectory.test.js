@@ -107,6 +107,7 @@ test("compact directory keeps quick edits guarded and supports starting a merge 
   assert.match(row, />แก้ไข<\/button>/);
   assert.match(modal, /function chooseMergeMember\(member\)/);
   assert.match(modal, /if \(next\.length === 2\) reviewMerge\(next\)/);
+  assert.match(modal, /selecting && !mergeFromRow/);
   assert.match(directoryCss, /grid-template-columns: minmax\(0, 1fr\) minmax\(132px, \.42fr\)/);
   assert.match(directoryCss, /height: 44px; min-height: 44px/);
 });
