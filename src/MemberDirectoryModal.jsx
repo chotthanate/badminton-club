@@ -9,6 +9,7 @@ import "./member-directory.css";
 
 export default function MemberDirectoryModal({ context, dashboard, settlement, mutate, onClose, onDetails }) {
   const [query, setQuery] = useState("");
+  const [lineFilter, setLineFilter] = useState("all");
   const [selecting, setSelecting] = useState(false);
   const [mergeFromRow, setMergeFromRow] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -27,8 +28,9 @@ export default function MemberDirectoryModal({ context, dashboard, settlement, m
   const busyRef = useRef(false);
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
+  const listRef = useRef(null);
   const members = filterDirectoryMembers((dashboard.members || []).filter((member) => !hiddenIds.includes(member.id)));
-  const visibleMembers = filterDirectoryMembers(members, query);
+  const visibleMembers = filterDirectoryMembers(members, query, lineFilter);
   const dismissed = new Set([...(dashboard.duplicateDismissals || []).map((row) => row.signature), ...hiddenSuggestions]);
   const duplicateGroups = findExactDuplicateMemberGroups(members).filter((group) => !dismissed.has(duplicateGroupSignature(group)));
   const selected = selectedIds.map((id) => members.find((member) => member.id === id)).filter(Boolean);
@@ -116,6 +118,10 @@ export default function MemberDirectoryModal({ context, dashboard, settlement, m
   function onDirtyChange(id, dirty) {
     setDirtyIds((current) => { if (current.has(id) === dirty) return current; const next = new Set(current); dirty ? next.add(id) : next.delete(id); return next; });
   }
+  function chooseLineFilter(value) {
+    setLineFilter(value);
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }
 
   return <div className="badminton-modal-backdrop badminton-member-directory-backdrop" role="presentation">
     <section aria-label="รายชื่อผู้เล่นทั้งหมด" aria-modal="true" className="badminton-member-directory-modal member-directory-v2" ref={dialogRef} role="dialog" tabIndex={-1}>
@@ -125,9 +131,12 @@ export default function MemberDirectoryModal({ context, dashboard, settlement, m
       </header>
       {view === "list" ? <>
         <label className="badminton-member-directory-search"><Search size={18} /><input aria-label="ค้นหารายชื่อผู้เล่นทั้งหมด" onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อเล่น ชื่อ LINE หรือชื่อเดิม" value={query} />{query ? <button aria-label="ล้างคำค้นหา" onClick={() => setQuery("")} type="button"><X size={16} /></button> : null}</label>
+        <div aria-label="กรองสถานะ LINE" className="member-directory-line-filters" role="group">
+          {[["all", "รายชื่อทั้งหมด"], ["linked", "เชื่อม LINE แล้ว"], ["unlinked", "ยังไม่เชื่อม LINE"]].map(([value, label]) => <button aria-pressed={lineFilter === value} key={value} onClick={() => chooseLineFilter(value)} type="button">{label}</button>)}
+        </div>
         <div className="member-directory-toolbar"><span>{mergeFromRow ? "แตะ รวม ที่ชื่อคนที่สอง" : "แก้ชื่อและมือได้จากรายชื่อด้านล่าง"}</span><button aria-pressed={selecting} disabled={busy} onClick={() => { setSelecting(!selecting); setMergeFromRow(false); setSelectedIds([]); setError(""); }} type="button"><Users size={16} />{selecting ? "ยกเลิกการเลือก" : "เลือก 2 ชื่อเพื่อรวม"}</button></div>
-        <div className="member-directory-scroll" role="region" aria-label="รายการสมาชิกและรายชื่อซ้ำ" tabIndex={0}>
-          {duplicateGroups.length ? <details className="badminton-member-directory-duplicates" open={!query && (!selecting || mergeFromRow)}>
+        <div className="member-directory-scroll" role="region" aria-label="รายการสมาชิกและรายชื่อซ้ำ" tabIndex={0} ref={listRef}>
+          {lineFilter === "all" && duplicateGroups.length ? <details className="badminton-member-directory-duplicates" open={!query && (!selecting || mergeFromRow)}>
             <summary>ชื่อที่อาจซ้ำกัน · {duplicateGroups.length} กลุ่ม</summary><p>ตรวจว่าเป็นคนเดียวกันก่อนรวม ชื่อเหมือนกันอาจเป็นคนละคน</p>
             {duplicateGroups.map((group) => <article key={duplicateGroupSignature(group)}><span>{group.map(directoryMemberName).join(" ↔ ")}</span><div><button disabled={busy} onClick={() => reviewMerge(group.map((member) => member.id))} type="button">ตรวจแล้วรวม</button><button disabled={busy} onClick={() => { setDismissGroup(group); setView("dismiss"); setError(""); }} type="button">คนละคน</button></div></article>)}
           </details> : null}
@@ -135,7 +144,7 @@ export default function MemberDirectoryModal({ context, dashboard, settlement, m
           <div className="member-directory-inline-list">{visibleMembers.length ? visibleMembers.map((member) => <article className="member-directory-entry" key={member.id}>
             {selecting && !mergeFromRow ? <label className="member-directory-select"><input checked={selectedIds.includes(member.id)} disabled={busy || (!selectedIds.includes(member.id) && selectedIds.length >= 2)} onChange={() => setSelectedIds((ids) => toggleMergeMember(ids, member.id))} type="checkbox" /><span>เลือก {directoryMemberName(member)}</span></label> : null}
             <MemberDirectoryRow disabled={busy} member={member} onDirtyChange={onDirtyChange} onDetails={selecting ? undefined : onDetails} onArchive={selecting ? undefined : () => { setArchiveId(member.id); setConfirmed(false); setError(""); setView("archive"); }} onMerge={chooseMergeMember} selectedForMerge={selectedIds.includes(member.id)} onSave={(targetMember, patch) => run(() => updateClubMember(targetMember.id, { displayName: targetMember.display_name || patch.nickname, paymentExempt: Boolean(targetMember.payment_exempt), ...patch }), `บันทึกชื่อและมือของ ${patch.nickname} แล้ว`, `profile:${targetMember.id}`)} />
-          </article>) : <p className="badminton-empty">ไม่พบรายชื่อที่ค้นหา</p>}</div>
+          </article>) : <p className="badminton-empty">{query ? "ไม่พบรายชื่อที่ค้นหาในตัวกรองนี้" : "ไม่มีรายชื่อในตัวกรองนี้"}</p>}</div>
         </div>
       </> : <div className="member-directory-scroll member-directory-review" role="region" aria-label="ตรวจสอบก่อนดำเนินการ" tabIndex={0}>
         {view === "merge" ? <>

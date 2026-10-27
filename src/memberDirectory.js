@@ -4,9 +4,10 @@ export function directoryMemberName(member) {
   return member?.nickname?.trim() || member?.display_name?.trim() || "ไม่ระบุชื่อ";
 }
 
-export function filterDirectoryMembers(members, query = "") {
+export function filterDirectoryMembers(members, query = "", lineFilter = "all") {
   const search = normalizeMemberSearch(query);
   return members.filter((member) => member.role === "member" && member.active !== false)
+    .filter((member) => lineFilter === "all" || Boolean(String(member.line_user_id || "").trim()) === (lineFilter === "linked"))
     .filter((member) => !search || [member.nickname, member.display_name, ...(member.aliases || [])]
       .some((name) => normalizeMemberSearch(name).includes(search)))
     .sort((a, b) => directoryMemberName(a).localeCompare(directoryMemberName(b), "th"));

@@ -15,6 +15,21 @@ test("directory searches current names, LINE and old aliases without showing ina
   assert.equal(filterDirectoryMembers(rows).length, 1);
 });
 
+test("directory filters linked and unlinked LINE members together with search", () => {
+  const rows = [member("a", { nickname: "ต้น", line_user_id: "line-a" }), member("b", { nickname: "ตั้ม" }), member("c", { nickname: "เต้", line_user_id: "  " }), member("d", { nickname: "มุก", line_user_id: "line-d" })];
+  assert.deepEqual(filterDirectoryMembers(rows, "", "linked").map((row) => row.id).sort(), ["a", "d"]);
+  assert.deepEqual(filterDirectoryMembers(rows, "", "unlinked").map((row) => row.id).sort(), ["b", "c"]);
+  assert.deepEqual(filterDirectoryMembers(rows, "ต้น", "linked").map((row) => row.id), ["a"]);
+  assert.deepEqual(filterDirectoryMembers(rows, "ต้น", "unlinked"), []);
+  assert.equal(filterDirectoryMembers(rows).length, 4);
+});
+
+test("LINE filter controls remain above the directory's scrolling member list", () => {
+  assert.match(modal, /member-directory-line-filters[\s\S]*member-directory-scroll" role="region"[^>]*ref=\{listRef\}/);
+  assert.match(modal, /aria-pressed=\{lineFilter === value\}/);
+  assert.match(directoryCss, /member-directory-line-filters \{[^}]*flex-shrink: 0/);
+});
+
 test("manual merge selects exactly two distinct identities and supports deselection", () => {
   assert.deepEqual(toggleMergeMember(["a"], "a"), []);
   assert.deepEqual(toggleMergeMember(["a"], "b"), ["a", "b"]);
