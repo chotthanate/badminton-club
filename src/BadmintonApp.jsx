@@ -742,7 +742,7 @@ function AdminDashboard({ session }) {
             ) : null}
 
             {activeTab === "queue" ? (
-              <QueuePanel dashboard={dashboard} event={appEvent} isStaff={isStaff} isTestMode={Boolean(context.clubs.is_test)} mutate={mutate} />
+              <QueuePanel dashboard={dashboard} event={appEvent} isStaff={isStaff} isTestMode={Boolean(context.clubs.is_test)} mutate={mutate} onOpenRound={() => changeTab("round")} />
             ) : null}
 
             {!isStaff && activeTab === "costs" ? <PricingPanel event={appEvent} mutate={mutate} session={session} settlement={settlement} /> : null}

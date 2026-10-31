@@ -42,6 +42,15 @@ export function normalizedCourtForm(court) {
   return { name: court.name || court.court_name || "", startsAt: String(court.startsAt || court.starts_at || "").slice(0, 5), endsAt: String(court.endsAt || court.ends_at || "").slice(0, 5) };
 }
 
+export function courtNameSuffix(name) {
+  return String(name || "").trim().replace(/^คอร์ท\s*/u, "");
+}
+
+export function normalizedCourtName(value) {
+  const suffix = courtNameSuffix(value);
+  return suffix ? `คอร์ท ${suffix}` : "";
+}
+
 export function safeCourtStorage(kind = "localStorage") {
   try { return globalThis[kind]; } catch { return null; }
 }

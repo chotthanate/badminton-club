@@ -83,6 +83,33 @@ test("players remain marked as playing when their court booking expires", () => 
   assert.doesNotMatch(statusMap, /courtTimeStatus|expired/);
 });
 
+test("latest queue RPC never ends a live game from court time and transfers are atomic", () => {
+  const sql = readFileSync("supabase/migrations/20261031201500_preserve_live_games_and_transfer_queue_players.sql", "utf8");
+  assert.match(sql, /Never finish another live match from the clock/);
+  assert.doesNotMatch(sql, /finish_queue_match\(stale_match_id\)/);
+  assert.match(sql, /create function public\.save_manual_queue_with_transfers/);
+  assert.match(sql, /perform pg_advisory_xact_lock\(hashtext\(resolved_event_id::text\)\)/);
+  assert.match(sql, /source_match\.revision<>source\.revision/);
+  assert.match(sql, /grant execute on function public\.save_manual_queue_with_transfers[^\n]*to authenticated/);
+  assert.doesNotMatch(sql, /grant execute[^\n]*to anon/);
+});
+
+test("expired empty court offers extension while an active game remains visible", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  assert.match(queuePanel, /หมดเวลาจอง · ต่อเวลาเพื่อใช้คอร์ท/);
+  assert.match(queuePanel, /onOpenRound\?\.\(\)/);
+  assert.match(queuePanel, /const match = playingByCourt\.get\(court\.id\)/);
+});
+
+test("queued player can be selected after confirming an atomic transfer", () => {
+  const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
+  const repository = readFileSync("src/clubRepository.js", "utf8");
+  assert.match(queuePanel, /ย้ายมาคิว/);
+  assert.match(queuePanel, /transfers = upcoming\.filter/);
+  assert.doesNotMatch(queuePanel, /draft\.memberIds\.length >= 4 \|\| Boolean\(position\)/);
+  assert.match(repository, /save_manual_queue_with_transfers/);
+});
+
 test("bulk cancellation confirms the exact count and uses atomic versioned targets", () => {
   const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
   assert.match(queuePanel, /const snapshots = queueVersionRequests\(matches\)/);
@@ -95,7 +122,7 @@ test("normal queue cards have no selection checkbox or duplicate approval action
   const queuePanel = readFileSync("src/QueuePanel.jsx", "utf8");
   assert.match(queuePanel, /\{manageMode \? <label className="queue-manage-checkbox"/);
   assert.doesNotMatch(queuePanel, /setReviewDrafts\(\[match\]\)|selectedDraftIds/);
-  assert.match(queuePanel, /saveQueueLineup\(\{ matchId: match.id, slots, expectedVersion: draft.baseVersion, approve: true \}\)/);
+  assert.match(queuePanel, /saveQueueLineup\(\{ matchId: match.id, slots, expectedVersion: draft.baseVersion, approve: true, transfers \}\)/);
   assert.match(queuePanel, /createManualQueue\(\{ eventId, memberIds: draft.memberIds/);
   assert.doesNotMatch(queuePanel, /save\(false\)|save\(true\)|สร้างคิวร่าง<\/button>/);
 });

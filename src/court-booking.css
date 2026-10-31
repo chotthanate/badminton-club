@@ -23,6 +23,9 @@
 .court-booking-edit, .court-booking-add { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
 .court-booking-edit label, .court-booking-add label { display: grid; gap: 5px; min-width: 0; color: #53665b; font-size: 12px; }
 .court-booking-edit :is(input, select), .court-booking-add :is(input, select) { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #cbd9cd; border-radius: 10px; padding: 8px; background: #fff; color: #213b2c; font-size: 16px; }
+.court-name-input { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; min-height: 44px; border: 1px solid #cbd9cd; border-radius: 10px; overflow: hidden; background: #fff; }
+.court-name-input b { padding: 0 10px; color: #45604e; font-size: 15px; white-space: nowrap; }
+.court-booking-edit .court-name-input input, .court-booking-add .court-name-input input { min-height: 42px; border: 0; border-left: 1px solid #dce7de; border-radius: 0; }
 .court-booking-name, .court-booking-edit-actions, .court-booking-delete-confirm, .court-booking-error, .court-booking-success, .court-booking-help, .court-booking-add > header, .court-booking-add > button { grid-column: 1 / -1; }
 .court-booking-edit-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .court-booking-edit-actions button, .court-booking-delete-confirm button, .court-booking-add-toggle, .court-booking-add > header button { min-height: 44px; padding: 8px 10px; border: 0; border-radius: 10px; background: #eef4ef; color: #306246; font-size: 13px; }

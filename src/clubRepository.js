@@ -871,7 +871,8 @@ export async function createManualQueueDraft({ eventId, memberIds, teamAIds }) {
   return data;
 }
 
-export async function createManualQueue({ eventId, memberIds, teamAIds }) {
+export async function createManualQueue({ eventId, memberIds, teamAIds, transfers = [] }) {
+  if (transfers.length) return saveManualQueueWithTransfers({ eventId, memberIds, teamAIds, transfers });
   const { data, error } = await client().rpc(memberIds.length === 4 ? "create_manual_queue" : "create_partial_manual_queue", {
     target_event_id: eventId,
     selected_member_ids: memberIds,
@@ -881,7 +882,8 @@ export async function createManualQueue({ eventId, memberIds, teamAIds }) {
   return data;
 }
 
-export async function saveQueueLineup({ matchId, slots, expectedVersion, approve = false }) {
+export async function saveQueueLineup({ matchId, slots, expectedVersion, approve = false, transfers = [] }) {
+  if (transfers.length) return saveManualQueueWithTransfers({ matchId, slots, expectedVersion, transfers });
   const { data, error } = await client().rpc(slots.length === 4 ? "save_queue_lineup" : "save_partial_queue_lineup", {
     target_match_id: matchId,
     expected_revision: expectedVersion,
@@ -891,6 +893,23 @@ export async function saveQueueLineup({ matchId, slots, expectedVersion, approve
       team: slot.team,
       position: slot.position,
     })),
+  });
+  throwIfError(error);
+  return data;
+}
+
+export async function saveManualQueueWithTransfers({ eventId = null, matchId = null, memberIds = [], teamAIds = [], slots = null, expectedVersion = null, transfers = [] }) {
+  const assignments = slots || memberIds.map((memberId, index) => ({
+    memberId,
+    team: teamAIds.includes(memberId) ? "A" : "B",
+    position: teamAIds.includes(memberId) ? teamAIds.indexOf(memberId) + 1 : memberIds.filter((id) => !teamAIds.includes(id)).indexOf(memberId) + 1,
+  }));
+  const { data, error } = await client().rpc("save_manual_queue_with_transfers", {
+    target_event_id: eventId,
+    target_match_id: matchId,
+    expected_revision: expectedVersion,
+    slot_assignments: assignments.map((slot) => ({ member_id: slot.memberId, team: slot.team, position: slot.position })),
+    transfer_requests: transfers.map((transfer) => ({ member_id: transfer.memberId, match_id: transfer.matchId, revision: transfer.expectedVersion })),
   });
   throwIfError(error);
   return data;

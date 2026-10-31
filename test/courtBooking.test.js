@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { bookingDuration, bookingEndLabel, bookingMinutes, bookingTimeOptions, clearLegacyCourtWork, extendedBookingEnd, legacyCourtWork, normalizedCourtForm, runCourtBookingMutation, safeCourtStorage } from "../src/courtBooking.js";
+import { bookingDuration, bookingEndLabel, bookingMinutes, bookingTimeOptions, clearLegacyCourtWork, courtNameSuffix, extendedBookingEnd, legacyCourtWork, normalizedCourtForm, normalizedCourtName, runCourtBookingMutation, safeCourtStorage } from "../src/courtBooking.js";
 
 test("court extension crosses midnight without changing the booked start or event date", () => {
   const court = { startsAt: "21:00", endsAt: "00:00" };
@@ -32,6 +32,14 @@ test("invalid time and a full-day rollover cannot silently shrink a booking", ()
 
 test("saved court values normalize both repository rows and mapped UI courts", () => {
   assert.deepEqual(normalizedCourtForm({ court_name: "Court", starts_at: "21:00:00", ends_at: "00:30:00" }), { name: "Court", startsAt: "21:00", endsAt: "00:30" });
+});
+
+test("court editor shows a fixed Thai prefix and stores one normalized name", () => {
+  assert.equal(courtNameSuffix("คอร์ท 13"), "13");
+  assert.equal(courtNameSuffix(" 8 "), "8");
+  assert.equal(normalizedCourtName("13"), "คอร์ท 13");
+  assert.equal(normalizedCourtName("คอร์ท 13"), "คอร์ท 13");
+  assert.equal(normalizedCourtName(""), "");
 });
 
 test("mutation captures authoritative returned end time even when parent returns only boolean", async () => {

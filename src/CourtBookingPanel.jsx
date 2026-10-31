@@ -3,7 +3,7 @@ import { Clock3, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { extendCourtBooking, removeOperatorCourt, upsertOperatorCourt } from "./clubRepository.js";
 import { readQueueWork, writeQueueWork } from "./queueDrafts.js";
 import { courtTimeStatus } from "./queueCourtTime.js";
-import { bookingDuration, bookingEndLabel, bookingTimeOptions, clearLegacyCourtWork, extendedBookingEnd, legacyCourtWork, normalizedCourtForm, runCourtBookingMutation, safeCourtStorage } from "./courtBooking.js";
+import { bookingDuration, bookingEndLabel, bookingTimeOptions, clearLegacyCourtWork, courtNameSuffix, extendedBookingEnd, legacyCourtWork, normalizedCourtForm, normalizedCourtName, runCourtBookingMutation, safeCourtStorage } from "./courtBooking.js";
 import "./court-booking.css";
 
 function readWork(eventId, workId) { return readQueueWork(eventId, workId, safeCourtStorage()); }
@@ -41,10 +41,11 @@ export default function CourtBookingPanel({ event, dashboard, mutate, isTestMode
   async function addCourt(submitEvent) {
     submitEvent.preventDefault();
     if (addingRef.current || !canWrite) return;
-    if (!newCourt.name.trim() || !bookingDuration(newCourt.startsAt, newCourt.endsAt)) { setAddError("กรอกชื่อคอร์ทและเวลาเริ่ม–จบให้ถูกต้อง"); return; }
+    const courtName = normalizedCourtName(newCourt.name);
+    if (!courtName || !bookingDuration(newCourt.startsAt, newCourt.endsAt)) { setAddError("กรอกเลขคอร์ทและเวลาเริ่ม–จบให้ถูกต้อง"); return; }
     addingRef.current = true; setAdding(true); setAddError("");
     try {
-      const result = await runCourtBookingMutation(mutate, () => upsertOperatorCourt({ eventId: event.id, courtName: newCourt.name.trim(), startsAt: newCourt.startsAt, endsAt: newCourt.endsAt }), "เพิ่มคอร์ทแล้ว", `court:${event.id}:new`);
+      const result = await runCourtBookingMutation(mutate, () => upsertOperatorCourt({ eventId: event.id, courtName, startsAt: newCourt.startsAt, endsAt: newCourt.endsAt }), "เพิ่มคอร์ทแล้ว", `court:${event.id}:new`);
       if (!result.saved) setAddError(result.error);
       else { writeWork(event.id, "court:new", null); setNewCourt({ name: "", startsAt: event.startTime, endsAt: event.endTime }); setAddingOpen(false); }
     } finally { addingRef.current = false; setAdding(false); }
@@ -55,7 +56,7 @@ export default function CourtBookingPanel({ event, dashboard, mutate, isTestMode
     {!event.courts.length ? <p className="court-booking-help">ยังไม่มีคอร์ทในรอบนี้</p> : null}
     {canWrite && event.status !== "closed" ? addingOpen ? <form className="court-booking-add" onSubmit={addCourt}>
       <header><strong>เพิ่มคอร์ท</strong><button aria-label="ยกเลิกเพิ่มคอร์ท" disabled={adding} onClick={() => { if (!newDirty || window.confirm("ยกเลิกร่างคอร์ทใหม่?")) { writeWork(event.id, "court:new", null); setNewCourt({ name: "", startsAt: event.startTime, endsAt: event.endTime }); setAddingOpen(false); } }} type="button"><X size={18} /></button></header>
-      <label className="court-booking-name">ชื่อคอร์ท<input aria-label="ชื่อคอร์ทใหม่" disabled={adding} onChange={(eventObject) => changeNewCourt({ name: eventObject.target.value })} placeholder="เช่น คอร์ท 13" required value={newCourt.name} /></label>
+      <label className="court-booking-name">เลขคอร์ท<span className="court-name-input"><b>คอร์ท</b><input aria-label="เลขคอร์ทใหม่" disabled={adding} inputMode="numeric" onChange={(eventObject) => changeNewCourt({ name: eventObject.target.value })} placeholder="เช่น 13" required value={courtNameSuffix(newCourt.name)} /></span></label>
       <label>เริ่ม<BookingTimeSelect disabled={adding} label="เวลาเริ่มคอร์ทใหม่" onChange={(startsAt) => changeNewCourt({ startsAt })} value={newCourt.startsAt} /></label>
       <label>จบ<BookingTimeSelect disabled={adding} label="เวลาจบคอร์ทใหม่" onChange={(endsAt) => changeNewCourt({ endsAt })} startsAt={newCourt.startsAt} value={newCourt.endsAt} /></label>
       {addError ? <p className="court-booking-error" role="alert">{addError}</p> : null}
@@ -112,8 +113,9 @@ function CourtBookingRow({ court, event, mutate, canWrite, isPlaying, isTestMode
   }
   async function save() {
     if (conflict) { setError("ข้อมูลคอร์ทเปลี่ยนจากเครื่องอื่น กรุณาใช้ข้อมูลล่าสุดก่อนแก้ใหม่"); return; }
-    if (!work.form.name.trim() || !bookingDuration(work.form.startsAt, work.form.endsAt)) { setError("กรอกชื่อคอร์ทและเวลาเริ่ม–จบให้ถูกต้อง"); return; }
-    const submitted = { ...work.form, name: work.form.name.trim() };
+    const courtName = normalizedCourtName(work.form.name);
+    if (!courtName || !bookingDuration(work.form.startsAt, work.form.endsAt)) { setError("กรอกเลขคอร์ทและเวลาเริ่ม–จบให้ถูกต้อง"); return; }
+    const submitted = { ...work.form, name: courtName };
     const result = await run("save", () => upsertOperatorCourt({ eventId: event.id, courtId: court.id, courtName: submitted.name, startsAt: submitted.startsAt, endsAt: submitted.endsAt }), `บันทึก ${submitted.name} แล้ว`);
     if (result.saved) { setLocalCourt(submitted); resetWork(submitted); setEditing(false); }
   }
@@ -127,7 +129,7 @@ function CourtBookingRow({ court, event, mutate, canWrite, isPlaying, isTestMode
     <div className="court-booking-actions"><button aria-label={`ต่อเวลา ${serverForm.name} อีก 30 นาที`} className="court-booking-extend" disabled={Boolean(busy) || !canWrite || !nextEnd} onClick={extend} type="button"><Plus size={18} /><span><strong>{busy === "extend" ? "กำลังต่อเวลา…" : "+30 นาที"}</strong><small>{nextEnd ? `ถึง ${bookingEndLabel(nextEnd, serverForm.startsAt)}` : "ครบระยะเวลาสูงสุดของรอบ"}</small></span></button><button className="court-booking-edit-toggle" disabled={Boolean(busy) || !canWrite} onClick={() => setEditing(!editing)} type="button"><Pencil size={16} />{editing ? "ซ่อน" : "แก้เวลา"}</button></div>
     {dirty ? <small className="court-booking-dirty">ยังไม่บันทึก · ปุ่ม +30 นาทีเพิ่มจากเวลาที่บันทึกจริง ไม่ทับร่างที่แก้ไว้</small> : null}
     {editing ? <div className="court-booking-edit">
-      <label className="court-booking-name">ชื่อคอร์ท<input aria-label={`ชื่อ ${court.name}`} disabled={Boolean(busy) || !canWrite} onChange={(eventObject) => change({ name: eventObject.target.value })} value={work.form.name} /></label>
+      <label className="court-booking-name">เลขคอร์ท<span className="court-name-input"><b>คอร์ท</b><input aria-label={`เลข ${court.name}`} disabled={Boolean(busy) || !canWrite} inputMode="numeric" onChange={(eventObject) => change({ name: eventObject.target.value })} value={courtNameSuffix(work.form.name)} /></span></label>
       <label>เริ่ม<BookingTimeSelect disabled={Boolean(busy) || !canWrite || isPlaying} label={`เวลาเริ่ม ${court.name}`} onChange={(startsAt) => change({ startsAt })} value={work.form.startsAt} /></label>
       <label>จบ<BookingTimeSelect disabled={Boolean(busy) || !canWrite} label={`เวลาจบ ${court.name}`} onChange={(endsAt) => change({ endsAt })} startsAt={work.form.startsAt} value={work.form.endsAt} /></label>
       {isPlaying ? <small className="court-booking-help">ขณะกำลังเล่น แก้เวลาจบให้เร็วขึ้นหรือต่อเวลาได้ แต่ไม่เปลี่ยนเวลาเริ่ม</small> : null}
