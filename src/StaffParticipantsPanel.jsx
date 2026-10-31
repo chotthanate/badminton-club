@@ -26,7 +26,7 @@ function priceOf(value) {
   return new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 }).format(Number(value) || 0);
 }
 
-export default function StaffParticipantsPanel({ dashboard, event, mutate, pendingKeys = [] }) {
+export default function StaffParticipantsPanel({ dashboard, event, isTestMode = false, mutate, pendingKeys = [] }) {
   const [editing, setEditing] = useState(null);
   const [sortMode, setSortMode] = useState(loadPlayerSortMode);
   const [rosterQuery, setRosterQuery] = useState("");
@@ -37,6 +37,8 @@ export default function StaffParticipantsPanel({ dashboard, event, mutate, pendi
   const [newPlayerArrival, setNewPlayerArrival] = useState("");
   const addArrival = newPlayerArrival || liveAddArrival || event.startTime;
   const addArrivalOptions = participantTimeOptions({ startTime: event.startTime, endTime: event.endTime, current: addArrival, includeEnd: false });
+  const [addPlayerTimePromptOpen, setAddPlayerTimePromptOpen] = useState(false);
+  const shouldAskAddArrival = event.status === "open" && Boolean(liveAddArrival || isTestMode || (dashboard.queueMatches || []).some((match) => match.status === "playing"));
   const [customExtraFor, setCustomExtraFor] = useState(null);
   const [customExtra, setCustomExtra] = useState({ name: "", price: "" });
   const membersById = new Map((dashboard.members || []).map((member) => [member.id, member]));
@@ -78,8 +80,13 @@ export default function StaffParticipantsPanel({ dashboard, event, mutate, pendi
     }, `เช็กชื่อ ${nameOf(player.member)} แล้ว`, { actionKey: `attendance:${player.member.id}` });
   }
 
-  async function addNewPlayer(submitEvent) {
+  async function addNewPlayer(submitEvent, confirmedArrival = false) {
     submitEvent.preventDefault();
+    if (shouldAskAddArrival && !confirmedArrival) {
+      setNewPlayerArrival((current) => current || liveAddArrival || event.startTime);
+      setAddPlayerTimePromptOpen(true);
+      return;
+    }
     const saved = await mutate(
       async () => {
         const member = resolveParticipantMember(availableMembers, newPlayer.name, selectedMemberId);
@@ -90,13 +97,13 @@ export default function StaffParticipantsPanel({ dashboard, event, mutate, pendi
         if (!skillLevel) throw new Error("กรุณาเลือกระดับมือของผู้เล่น");
         const createdMember = await addOperatorParticipant({ eventId: event.id, memberId: member?.id || null, nickname: member ? null : newPlayer.name.trim(), skillLevel });
         const memberId = member?.id || createdMember?.id || createdMember;
-        if (liveAddArrival && addArrival !== event.startTime && memberId) await updateOperatorSignupArrival({ eventId: event.id, memberId, arrivalTime: addArrival });
+        if (shouldAskAddArrival && addArrival !== event.startTime && memberId) await updateOperatorSignupArrival({ eventId: event.id, memberId, arrivalTime: addArrival });
         return createdMember;
       },
       `เพิ่ม ${newPlayer.name.trim()} เข้ารอบแล้ว`,
       { actionKey: `player:add:${event.id}:${selectedMemberId || newPlayer.name.trim()}` },
     );
-    if (saved) { setNewPlayer({ name: "", skillLevel: "" }); setSelectedMemberId(null); setNewPlayerArrival(""); }
+    if (saved) { setNewPlayer({ name: "", skillLevel: "" }); setSelectedMemberId(null); setNewPlayerArrival(""); setAddPlayerTimePromptOpen(false); }
   }
 
   function removePlayer(player) {
@@ -150,9 +157,9 @@ export default function StaffParticipantsPanel({ dashboard, event, mutate, pendi
       <ParticipantPicker allowCreate={event.status !== "closed"} disabled={addingPlayer} members={availableMembers} participantIds={signupMemberIds} selectedId={selectedMemberId} value={newPlayer.name} onQuery={(name) => { setSelectedMemberId(null); setNewPlayer({ name, skillLevel: "" }); }} onSelect={(member) => { setSelectedMemberId(member.id); setNewPlayer({ name: nameOf(member), skillLevel: member.skill_level || "" }); }} />
       {event.status === "closed" ? <small>รอบปิดแล้ว เลือกได้เฉพาะผู้เล่นที่เคยนำออกจากรอบนี้</small> : null}
       <label>ระดับมือ<select aria-label="ระดับมือผู้เล่น" disabled={addingPlayer || Boolean(selectedMemberId && membersById.get(selectedMemberId)?.skill_level)} onChange={(changeEvent) => setNewPlayer({ ...newPlayer, skillLevel: changeEvent.target.value })} required value={newPlayer.skillLevel}><option value="">เลือกระดับ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select></label>
-      {event.status === "open" && liveAddArrival ? <label className="badminton-add-player-arrival">มาถึงเวลา<select aria-label="เวลามาถึงของผู้เล่นใหม่สำหรับสตาฟ" disabled={addingPlayer} onChange={(changeEvent) => setNewPlayerArrival(changeEvent.target.value)} value={addArrival}>{addArrivalOptions.map((time) => <option key={time} value={time}>{participantTimeLabel(time, event.startTime, event.endTime)}</option>)}</select></label> : null}
       <button className="badminton-secondary" disabled={addingPlayer} type="submit"><Plus size={16} /> {addingPlayer ? "กำลังเพิ่ม…" : "เพิ่มผู้เล่น"}</button>
     </form></div></details>
+    {addPlayerTimePromptOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="เลือกเวลามาถึงของผู้เล่นใหม่สำหรับสตาฟ" aria-modal="true" className="badminton-custom-charge-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เพิ่มผู้เล่นระหว่างเกม</p><h2>{newPlayer.name.trim() || "ผู้เล่นใหม่"} มากี่โมง?</h2></div><button aria-label="ปิดหน้าต่างเลือกเวลามาถึง" onClick={() => setAddPlayerTimePromptOpen(false)} type="button"><X size={18} /></button></div><label className="badminton-add-player-arrival">เวลามาถึง<select aria-label="เวลามาถึงของผู้เล่นใหม่สำหรับสตาฟ" disabled={addingPlayer} onChange={(changeEvent) => setNewPlayerArrival(changeEvent.target.value)} value={addArrival}>{addArrivalOptions.map((time) => <option key={time} value={time}>{participantTimeLabel(time, event.startTime, event.endTime)}</option>)}</select></label><div className="badminton-check-in-actions"><button className="badminton-secondary" disabled={addingPlayer} onClick={() => setAddPlayerTimePromptOpen(false)} type="button">ยกเลิก</button><button className="badminton-primary" disabled={addingPlayer} onClick={() => addNewPlayer({ preventDefault() {} }, true)} type="button"><UserPlus size={17} /> {addingPlayer ? "กำลังเพิ่ม…" : `เพิ่มเวลา ${participantTimeLabel(addArrival, event.startTime, event.endTime)}`}</button></div></div></div> : null}
     <ParticipantFilters rows={players} query={rosterQuery} onQuery={setRosterQuery} filter={rosterFilter} onFilter={setRosterFilter} /><div className="badminton-staff-player-list">{filterParticipants(players, rosterQuery, rosterFilter).map((player, index) => {
       const arrived = Boolean(player.attendance?.arrived && !player.attendance?.left_at);
       const leftAt = player.attendance?.left_at?.slice(0, 5) || "";

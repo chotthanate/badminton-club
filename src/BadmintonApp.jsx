@@ -730,7 +730,7 @@ function AdminDashboard({ session }) {
             {isStaff && activeTab === "round" ? <OperatorCourtControls dashboard={dashboard} event={appEvent} isStaff isTestMode={context.clubs.is_test} mutate={mutate} /> : null}
 
             {activeTab === "players" ? (
-              isStaff ? <StaffParticipantsPanel dashboard={dashboard} event={appEvent} mutate={mutate} pendingKeys={pendingKeys} /> : <ParticipantsPanel
+              isStaff ? <StaffParticipantsPanel dashboard={dashboard} event={appEvent} isTestMode={Boolean(context.clubs.is_test)} mutate={mutate} pendingKeys={pendingKeys} /> : <ParticipantsPanel
                 context={context}
                 dashboard={dashboard}
                 event={appEvent}
@@ -1271,6 +1271,8 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [newPlayerArrival, setNewPlayerArrival] = useState("");
   const addArrival = newPlayerArrival || liveAddArrival || event.startTime;
   const addArrivalOptions = participantTimeOptions({ startTime: event.startTime, endTime: event.endTime, current: addArrival, includeEnd: false });
+  const [addPlayerTimePromptOpen, setAddPlayerTimePromptOpen] = useState(false);
+  const shouldAskAddArrival = event.status === "open" && Boolean(liveAddArrival || context.clubs.is_test || (dashboard.queueMatches || []).some((match) => match.status === "playing"));
   const [newItem, setNewItem] = useState({ name: "", price: "" });
   const [customChargeFor, setCustomChargeFor] = useState(null);
   const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
@@ -1308,8 +1310,13 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
     savePlayerSortMode(nextMode);
   }
 
-  async function addMember(eventObject) {
+  async function addMember(eventObject, confirmedArrival = false) {
     eventObject.preventDefault();
+    if (shouldAskAddArrival && !confirmedArrival) {
+      setNewPlayerArrival((current) => current || liveAddArrival || event.startTime);
+      setAddPlayerTimePromptOpen(true);
+      return;
+    }
     const trimmedName = name.trim();
     const normalizedName = normalizeMemberSearch(trimmedName);
     let existingMember = savedMembers.find((member) => member.id === selectedMemberId);
@@ -1368,6 +1375,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       setSelectedMemberId(null);
       setNewMemberSkill({ level: "", playableLevels: [] });
       setNewPlayerArrival("");
+      setAddPlayerTimePromptOpen(false);
     }
   }
 
@@ -1595,9 +1603,10 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           <select aria-label="ระดับมือผู้เล่น" disabled={Boolean(savedMembers.find((member) => member.id === selectedMemberId)?.skill_level)} onChange={(changeEvent) => setNewMemberSkill({ level: changeEvent.target.value, playableLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={newMemberSkill.level}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select>
           {!selectedMemberId ? <SkillCompatibilityPicker onChange={(playableLevels) => setNewMemberSkill({ ...newMemberSkill, playableLevels })} skillLevel={newMemberSkill.level} value={newMemberSkill.playableLevels} /> : null}
         </fieldset>}
-        {event.status === "open" && liveAddArrival ? <label className="badminton-add-player-arrival">มาถึงเวลา<select aria-label="เวลามาถึงของผู้เล่นใหม่" disabled={addingPlayer} onChange={(changeEvent) => setNewPlayerArrival(changeEvent.target.value)} value={addArrival}>{addArrivalOptions.map((time) => <option key={time} value={time}>{participantTimeLabel(time, event.startTime, event.endTime)}</option>)}</select></label> : null}
         <button className="badminton-primary badminton-add-player" disabled={addingPlayer} type="submit"><UserPlus size={17} /> {addingPlayer ? "กำลังเพิ่ม…" : "เพิ่มผู้เล่น"}</button>
       </form>
+
+      {addPlayerTimePromptOpen ? <div className="badminton-modal-backdrop" role="presentation"><div aria-label="เลือกเวลามาถึงของผู้เล่นใหม่" aria-modal="true" className="badminton-custom-charge-modal" role="dialog"><div className="badminton-modal-title"><div><p className="badminton-kicker">เพิ่มผู้เล่นระหว่างเกม</p><h2>{name.trim() || "ผู้เล่นใหม่"} มากี่โมง?</h2></div><button aria-label="ปิดหน้าต่างเลือกเวลามาถึง" onClick={() => setAddPlayerTimePromptOpen(false)} type="button"><X size={19} /></button></div><label className="badminton-add-player-arrival">เวลามาถึง<select aria-label="เวลามาถึงของผู้เล่นใหม่" disabled={addingPlayer} onChange={(changeEvent) => setNewPlayerArrival(changeEvent.target.value)} value={addArrival}>{addArrivalOptions.map((time) => <option key={time} value={time}>{participantTimeLabel(time, event.startTime, event.endTime)}</option>)}</select></label><div className="badminton-check-in-actions"><button className="badminton-secondary" disabled={addingPlayer} onClick={() => setAddPlayerTimePromptOpen(false)} type="button">ยกเลิก</button><button className="badminton-primary" disabled={addingPlayer} onClick={() => addMember({ preventDefault() {} }, true)} type="button"><UserPlus size={17} /> {addingPlayer ? "กำลังเพิ่ม…" : `เพิ่มเวลา ${participantTimeLabel(addArrival, event.startTime, event.endTime)}`}</button></div></div></div> : null}
 
       <ParticipantFilters rows={participants} query={rosterQuery} onQuery={setRosterQuery} filter={rosterFilter} onFilter={setRosterFilter} />
       <div className="badminton-attendance-list">

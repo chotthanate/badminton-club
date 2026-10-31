@@ -92,6 +92,24 @@ test("staff new name follows the same form and sends no existing member ID", asy
   assert.deepEqual(calls, [{ eventId: "event", memberId: null, nickname: "คนใหม่จริง", skillLevel: "N" }]);
 });
 
+test("sandbox add opens an arrival-time dialog before saving the player", async () => {
+  const calls = [];
+  const panel = harness("StaffParticipantsPanel.jsx", { dashboard, event: { ...event, status: "open" }, isTestMode: true, mutate: async (work) => { await work(); return true; } }, {
+    addOperatorParticipant: async (value) => { calls.push(value); return value.memberId; },
+    updateOperatorSignupArrival: async (value) => calls.push(value),
+  });
+  panel.find((node) => node.type?.name === "ParticipantPicker").props.onSelect(second); panel.render();
+  await panel.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); panel.render();
+  assert.equal(calls.length, 0);
+  assert.equal(panel.label("เลือกเวลามาถึงของผู้เล่นใหม่สำหรับสตาฟ").props.role, "dialog");
+  panel.label("เวลามาถึงของผู้เล่นใหม่สำหรับสตาฟ").props.onChange({ target: { value: "22:00" } }); panel.render();
+  await panel.find((node) => node.type === "button" && text(node).includes("เพิ่มเวลา 22:00")).props.onClick(); panel.render();
+  assert.deepEqual(calls, [
+    { eventId: "event", memberId: "two", nickname: null, skillLevel: "Rookie" },
+    { eventId: "event", memberId: "two", arrivalTime: "22:00" },
+  ]);
+});
+
 test("staff arrival/departure handlers capture selected values before queued work and preserve midnight", async () => {
   const calls = [], work = [];
   const panel = harness("StaffParticipantsPanel.jsx", { dashboard, event, mutate: (action) => work.push(action) }, { updateOperatorSignupArrival: async (value) => calls.push(value), updateOperatorAttendance: async (value) => calls.push(value) });
@@ -147,13 +165,24 @@ test("picker displays all existing matches, keeps touch blur open, filters and r
 
 test("owner actual add handler restores a removed identity without overwriting old times or bills", async () => {
   const source = readFileSync(new URL("../src/BadmintonApp.jsx", import.meta.url), "utf8");
-  const start = source.indexOf("  async function addMember(eventObject)");
+  const start = source.indexOf("  async function addMember(");
   const end = source.indexOf("\n  async function addCatalogItem", start);
   const calls = [];
-  const context = { name: "ต้น", selectedMemberId: "one", savedMembers: [member], removedMemberIds: new Set(["one"]), participantIds: new Set(), event: { ...event, signups: [{ memberId: "one", removedAt: "now" }] }, normalizeMemberSearch: (value) => value.trim(), resolveParticipantMember, mutate: async (work) => { await work(); return true; }, restoreParticipant: async (value) => calls.push(value), memberName: (value) => value.nickname, setName: (value) => calls.push(["name", value]), setSelectedMemberId() {}, setNewMemberSkill() {}, setNewPlayerArrival() {} };
+  const context = { name: "ต้น", selectedMemberId: "one", savedMembers: [member], removedMemberIds: new Set(["one"]), participantIds: new Set(), event: { ...event, signups: [{ memberId: "one", removedAt: "now" }] }, shouldAskAddArrival: false, normalizeMemberSearch: (value) => value.trim(), resolveParticipantMember, mutate: async (work) => { await work(); return true; }, restoreParticipant: async (value) => calls.push(value), memberName: (value) => value.nickname, setName: (value) => calls.push(["name", value]), setSelectedMemberId() {}, setNewMemberSkill() {}, setNewPlayerArrival() {}, setAddPlayerTimePromptOpen() {} };
   const action = new Function(...Object.keys(context), `${source.slice(start, end)}; return addMember;`)(...Object.values(context));
   await action({ preventDefault() {} });
   assert.deepEqual(calls, [{ eventId: "event", memberId: "one" }, ["name", ""]]);
+});
+
+test("owner sandbox add stops at the arrival dialog before writing a signup", async () => {
+  const source = readFileSync(new URL("../src/BadmintonApp.jsx", import.meta.url), "utf8");
+  const start = source.indexOf("  async function addMember(");
+  const end = source.indexOf("\n  async function addCatalogItem", start);
+  const calls = [];
+  const context = { shouldAskAddArrival: true, liveAddArrival: null, event: { startTime: "21:00" }, setNewPlayerArrival: (value) => calls.push(["arrival", typeof value === "function" ? value("") : value]), setAddPlayerTimePromptOpen: (value) => calls.push(["prompt", value]) };
+  const action = new Function(...Object.keys(context), `${source.slice(start, end)}; return addMember;`)(...Object.values(context));
+  await action({ preventDefault() {} });
+  assert.deepEqual(calls, [["arrival", "21:00"], ["prompt", true]]);
 });
 
 test("owner actual arrival handler issues one atomic operation even for a closed midnight round", async () => {
