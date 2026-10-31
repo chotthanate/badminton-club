@@ -150,7 +150,7 @@ test("owner actual add handler restores a removed identity without overwriting o
   const start = source.indexOf("  async function addMember(eventObject)");
   const end = source.indexOf("\n  async function addCatalogItem", start);
   const calls = [];
-  const context = { name: "ต้น", selectedMemberId: "one", savedMembers: [member], removedMemberIds: new Set(["one"]), participantIds: new Set(), event: { ...event, signups: [{ memberId: "one", removedAt: "now" }] }, normalizeMemberSearch: (value) => value.trim(), resolveParticipantMember, mutate: async (work) => { await work(); return true; }, restoreParticipant: async (value) => calls.push(value), memberName: (value) => value.nickname, setName: (value) => calls.push(["name", value]), setSelectedMemberId() {}, setNewMemberSkill() {} };
+  const context = { name: "ต้น", selectedMemberId: "one", savedMembers: [member], removedMemberIds: new Set(["one"]), participantIds: new Set(), event: { ...event, signups: [{ memberId: "one", removedAt: "now" }] }, normalizeMemberSearch: (value) => value.trim(), resolveParticipantMember, mutate: async (work) => { await work(); return true; }, restoreParticipant: async (value) => calls.push(value), memberName: (value) => value.nickname, setName: (value) => calls.push(["name", value]), setSelectedMemberId() {}, setNewMemberSkill() {}, setNewPlayerArrival() {} };
   const action = new Function(...Object.keys(context), `${source.slice(start, end)}; return addMember;`)(...Object.values(context));
   await action({ preventDefault() {} });
   assert.deepEqual(calls, [{ eventId: "event", memberId: "one" }, ["name", ""]]);
@@ -167,6 +167,17 @@ test("owner actual arrival handler issues one atomic operation even for a closed
   assert.equal(queued.length, 1);
   await queued[0]();
   assert.deepEqual(calls, [{ actionKey: "arrival:one" }, { eventId: "event", memberId: "one", arrivalTime: "00:15" }]);
+});
+
+test("owner and staff expose a live arrival selector and an explicit undo-departure action", () => {
+  const owner = readFileSync(new URL("../src/BadmintonApp.jsx", import.meta.url), "utf8");
+  const staff = readFileSync(new URL("../src/StaffParticipantsPanel.jsx", import.meta.url), "utf8");
+  assert.match(owner, /aria-label="เวลามาถึงของผู้เล่นใหม่"/);
+  assert.match(staff, /aria-label="เวลามาถึงของผู้เล่นใหม่สำหรับสตาฟ"/);
+  assert.match(owner, />ยังไม่กลับ<\/button>/);
+  assert.match(staff, />ยังไม่กลับ<\/button>/);
+  assert.match(owner, /disabled=\{Boolean\(leftAt\)\}/);
+  assert.match(staff, /disabled=\{Boolean\(leftAt\)\}/);
 });
 
 test("staff add controls stay disabled while their save is pending", () => {

@@ -7,6 +7,7 @@ import {
   calculateSettlement,
   compareCourtNames,
   completedRoundsByMember,
+  currentEventArrivalTime,
   earliestSessionStart,
   formatPlayedDuration,
   finalizedCollectionSummary,
@@ -963,6 +964,21 @@ test("suggestArrivalTimeOnCheck keeps the signed-up time when check-in is not la
     endTime: "00:00",
     plannedArrival: "21:00",
   }), null);
+});
+
+test("suggestArrivalTimeOnCheck offers the current time when a player arrives early", () => {
+  assert.equal(suggestArrivalTimeOnCheck({
+    now: new Date(2026, 6, 24, 21, 30),
+    eventDate: "2026-07-24",
+    startTime: "21:00",
+    endTime: "00:00",
+    plannedArrival: "22:00",
+  }), "21:30");
+});
+
+test("currentEventArrivalTime only suggests a selectable time during the session", () => {
+  assert.equal(currentEventArrivalTime({ now: new Date(2026, 6, 24, 21, 37), eventDate: "2026-07-24", startTime: "21:00", endTime: "00:00" }), "21:30");
+  assert.equal(currentEventArrivalTime({ now: new Date(2026, 6, 24, 20, 45), eventDate: "2026-07-24", startTime: "21:00", endTime: "00:00" }), null);
 });
 
 test("suggestArrivalTimeOnCheck supports a session after midnight", () => {

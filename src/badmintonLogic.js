@@ -775,12 +775,18 @@ export function suggestArrivalTimeOnCheck({
   endTime,
   plannedArrival,
 }) {
+  const arrivalMinutes = parseTime(plannedArrival);
+  const currentArrival = currentEventArrivalTime({ now, eventDate, startTime, endTime });
+  if (arrivalMinutes === null || !currentArrival || currentArrival === plannedArrival) return null;
+  return currentArrival;
+}
+
+export function currentEventArrivalTime({ now = new Date(), eventDate, startTime, endTime }) {
   const dateParts = String(eventDate || "").split("-").map(Number);
   const startMinutes = parseTime(startTime);
   const endMinutes = parseTime(endTime);
-  const arrivalMinutes = parseTime(plannedArrival);
   const current = now instanceof Date ? now : new Date(now);
-  if (dateParts.length !== 3 || dateParts.some(Number.isNaN) || startMinutes === null || endMinutes === null || arrivalMinutes === null || Number.isNaN(current.getTime())) return null;
+  if (dateParts.length !== 3 || dateParts.some(Number.isNaN) || startMinutes === null || endMinutes === null || Number.isNaN(current.getTime())) return null;
 
   const [year, month, day] = dateParts;
   const startsAt = new Date(year, month - 1, day, Math.floor(startMinutes / 60), startMinutes % 60);
@@ -788,12 +794,10 @@ export function suggestArrivalTimeOnCheck({
   if (endsAt <= startsAt) endsAt.setDate(endsAt.getDate() + 1);
   if (current < startsAt || current >= endsAt) return null;
 
-  const plannedAt = new Date(year, month - 1, day, Math.floor(arrivalMinutes / 60), arrivalMinutes % 60);
-  if (plannedAt < startsAt) plannedAt.setDate(plannedAt.getDate() + 1);
-
   const quarterHourMs = 15 * 60 * 1000;
-  const roundedAt = new Date(Math.round(current.getTime() / quarterHourMs) * quarterHourMs);
-  if (roundedAt <= plannedAt || roundedAt >= endsAt) return null;
+  let roundedAt = new Date(Math.round(current.getTime() / quarterHourMs) * quarterHourMs);
+  if (roundedAt < startsAt) roundedAt = startsAt;
+  if (roundedAt >= endsAt) roundedAt = new Date(endsAt.getTime() - quarterHourMs);
   return `${String(roundedAt.getHours()).padStart(2, "0")}:${String(roundedAt.getMinutes()).padStart(2, "0")}`;
 }
 

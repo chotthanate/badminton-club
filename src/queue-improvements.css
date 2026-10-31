@@ -50,6 +50,7 @@
 .queue-compact-card .badminton-queue-order-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 44px; min-height: 44px; padding: 8px; border: 0; border-radius: 12px; background: #f0f4f1; color: #355b47; }
 .queue-compact-card .badminton-queue-order-actions button[aria-label^="เลื่อนคิว"] { width: 44px; font-size: 20px; line-height: 1; }
 .queue-compact-card .badminton-queue-order-actions button[aria-label^="แก้ไขคิว"] { background: #e8f5ed; color: #176c45; padding-inline: 12px; }
+.queue-compact-card .badminton-queue-order-actions .queue-card-delete { background: #fff0ed; color: #b42318; padding-inline: 12px; }
 .queue-compact-card .badminton-queue-order-actions button:disabled { opacity: .4; cursor: not-allowed; }
 .queue-compact-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .queue-compact-footer button { min-height: 42px; }

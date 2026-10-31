@@ -952,6 +952,17 @@
   padding: 0 16px;
 }
 
+.badminton-add-player-arrival {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: #637064;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.badminton-add-player-arrival select { min-height: 42px; }
+
 .badminton-member-search {
   position: relative;
   min-width: 0;
@@ -4471,6 +4482,24 @@
   background: rgba(255, 255, 255, 0.78);
 }
 
+.participant-left-status {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.participant-left-status button {
+  min-height: 32px;
+  padding: 4px 9px;
+  border: 1px solid #aab6ad;
+  border-radius: 999px;
+  background: #fff;
+  color: #355b47;
+  font: inherit;
+  cursor: pointer;
+}
+
 .badminton-player-billing-meta {
   min-width: 0;
   display: flex;
@@ -6259,7 +6288,7 @@
   cursor: pointer;
 }
 .badminton-staff-add-player > div { display: grid; gap: 9px; padding: 0 10px 10px; }
-.badminton-staff-add-player form { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(92px, .7fr) auto; gap: 7px; align-items: end; }
+.badminton-staff-add-player form { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(92px, .7fr) minmax(108px, .7fr) auto; gap: 7px; align-items: end; }
 .badminton-staff-add-player label { display: grid; gap: 4px; min-width: 0; color: #637064; font-size: 12px; font-weight: 800; }
 .badminton-staff-add-player button { min-height: 42px; white-space: nowrap; }
 .badminton-staff-player {

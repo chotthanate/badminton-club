@@ -211,7 +211,7 @@ export default function QueuePanel({ dashboard, event, isStaff = false, isTestMo
       <div className="badminton-queue-create-actions"><div className="badminton-auto-queue-actions">
         <button className="badminton-primary" disabled={event.status !== "open" || availableWaiting.length < 4 || busyKeys.has("create")} onClick={() => runAction("create", createAutomaticDraft, "ระบบจัด 1 คิวพร้อมเล่นแล้ว", { errorMode: "alert" })} type="button"><Plus size={17} /> สร้าง 1 คิว</button>
         <button className="badminton-primary" disabled={event.status !== "open" || availableWaiting.length < 4 || busyKeys.has("create")} onClick={() => runAction("create", createAllAutomaticDrafts, "ระบบจัดคิวทั้งหมดที่ทำได้พร้อมเล่นแล้ว", { errorMode: "alert" })} type="button"><ListOrdered size={17} /> {busyKeys.has("create") ? "กำลังจัดคิว…" : "สร้างทั้งหมด"}</button>
-      </div><button className="badminton-secondary" disabled={event.status !== "open" || availableWaiting.length + availablePlaying.length < 1} onClick={() => setEditingMatchId("new")} type="button"><Users size={17} /> สร้างคิวด้วยตัวเอง{readQueueWork(event.id, "new") ? " · มีร่างค้าง" : ""}</button></div>
+      </div><button className="badminton-secondary" disabled={event.status !== "open" || availableWaiting.length + availablePlaying.length < 1} onClick={() => { writeQueueWork(event.id, "new", null); setEditingMatchId("new"); }} type="button"><Users size={17} /> สร้างคิวด้วยตัวเอง</button></div>
       {planningProgress ? <p role="status">กำลังเตรียมคิว {planningProgress.completed} / {planningProgress.maximum}</p> : null}
       {planningMessage ? <p className="queue-work-notice" role="status">{planningMessage}</p> : null}
       {upcoming.length ? <div className="queue-batch-actions">
@@ -224,7 +224,7 @@ export default function QueuePanel({ dashboard, event, isStaff = false, isTestMo
       </div> : null}
       {upcoming.map((match, index) => <section className={`badminton-upcoming-card queue-compact-card is-${match.status}`} key={match.id}>
         <header><div className="queue-compact-heading">{manageMode ? <label className="queue-manage-checkbox"><input aria-label={`เลือกคิว ${index + 1}`} checked={selectedQueueIds.includes(match.id)} disabled={managingBusy} onChange={(eventObject) => setSelectedQueueIds((current) => eventObject.target.checked ? [...new Set([...current, match.id])] : current.filter((id) => id !== match.id))} type="checkbox" /></label> : null}<strong>คิว {index + 1}</strong><span>{match.status === "draft" ? match.players.length ? "คิวเดิม · กดแก้ไขเพื่อบันทึก" : "คิวว่าง" : match.players.length === 4 ? "พร้อมเล่น" : `บันทึกแล้ว · รอเติมอีก ${4 - match.players.length} คน`}</span>{hasLocalWork(match.id) ? <span className="queue-dirty-badge">ยังไม่บันทึก</span> : null}</div>
-          <div className="badminton-queue-order-actions">{match.status === "approved" ? <><button aria-label={`เลื่อนคิว ${index + 1} ขึ้น`} disabled={managingBusy || index === 0 || upcoming[index - 1]?.status !== "approved" || busyKeys.has(`move:${match.id}`)} onClick={() => runAction(`move:${match.id}`, () => moveUpcomingQueue(match.id, -1), "เลื่อนคิวขึ้นแล้ว")} type="button">↑</button><button aria-label={`เลื่อนคิว ${index + 1} ลง`} disabled={managingBusy || index === upcoming.length - 1 || upcoming[index + 1]?.status !== "approved" || busyKeys.has(`move:${match.id}`)} onClick={() => runAction(`move:${match.id}`, () => moveUpcomingQueue(match.id, 1), "เลื่อนคิวลงแล้ว")} type="button">↓</button></> : null}<button aria-label={`แก้ไขคิว ${index + 1}`} disabled={managingBusy} onClick={() => setEditingMatchId(match.id)} type="button"><Pencil size={15} /> แก้ไข</button></div>
+          <div className="badminton-queue-order-actions">{match.status === "approved" ? <><button aria-label={`เลื่อนคิว ${index + 1} ขึ้น`} disabled={managingBusy || index === 0 || upcoming[index - 1]?.status !== "approved" || busyKeys.has(`move:${match.id}`)} onClick={() => runAction(`move:${match.id}`, () => moveUpcomingQueue(match.id, -1), "เลื่อนคิวขึ้นแล้ว")} type="button">↑</button><button aria-label={`เลื่อนคิว ${index + 1} ลง`} disabled={managingBusy || index === upcoming.length - 1 || upcoming[index + 1]?.status !== "approved" || busyKeys.has(`move:${match.id}`)} onClick={() => runAction(`move:${match.id}`, () => moveUpcomingQueue(match.id, 1), "เลื่อนคิวลงแล้ว")} type="button">↓</button></> : null}<button aria-label={`แก้ไขคิว ${index + 1}`} disabled={managingBusy} onClick={() => setEditingMatchId(match.id)} type="button"><Pencil size={15} /> แก้ไข</button><button aria-label={`ลบคิว ${index + 1}`} className="queue-card-delete" disabled={managingBusy} onClick={() => cancelQueues([match])} type="button"><Trash2 size={15} /> ลบ</button></div>
         </header><QueueTeamPreview fullNames match={match} />
       </section>)}{!upcoming.length ? <div className="badminton-empty">ยังไม่มีคิวล่วงหน้า</div> : null}
     </article>
@@ -273,8 +273,8 @@ function QueueModal({ title, onClose, children, footer, className = "" }) {
 
 function QueueLineupEditor({ clock, eventId, isNew, match, matches, onClose, playingCourtByMember, queuePlayers, runAction, upcoming, workId }) {
   const freshDraft = () => ({ memberIds: (match?.players || []).map((player) => player.memberId), baseVersion: match?.revision || 0, baseSignature: queueLineupSignature(match?.players) });
-  const [draft, setDraft] = useState(() => readQueueWork(eventId, workId) || freshDraft());
-  const [dirty, setDirty] = useState(() => Boolean(readQueueWork(eventId, workId)));
+  const [draft, setDraft] = useState(() => isNew ? freshDraft() : readQueueWork(eventId, workId) || freshDraft());
+  const [dirty, setDirty] = useState(() => !isNew && Boolean(readQueueWork(eventId, workId)));
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -282,6 +282,7 @@ function QueueLineupEditor({ clock, eventId, isNew, match, matches, onClose, pla
   const savingRef = useRef(false);
   const conflict = !isNew && (!match || queueDraftConflicts(draft, match));
   const liveSignature = queueLineupSignature(match?.players);
+  useEffect(() => { if (isNew) writeQueueWork(eventId, workId, null); }, [eventId, isNew, workId]);
   useEffect(() => { if (!dirty && match) setDraft(freshDraft()); }, [liveSignature, match?.revision, dirty]);
   const currentMemberIds = new Set(match?.players.map((player) => player.memberId) || []);
   const queuePositionByMember = new Map(upcoming.filter((entry) => entry.id !== match?.id).flatMap((entry) => entry.players.map((player) => [player.memberId, entry.queuePosition])));
@@ -298,11 +299,12 @@ function QueueLineupEditor({ clock, eventId, isNew, match, matches, onClose, pla
     setSaveError("");
     const next = { ...draft, memberIds: toggleQueueSelection(draft.memberIds, memberId) };
     setDraft(next); setDirty(true);
-    setStorageWarning(!writeQueueWork(eventId, workId, next));
+    if (!isNew) setStorageWarning(!writeQueueWork(eventId, workId, next));
   }
   function close() {
     if (savingRef.current) return;
-    if (dirty && !window.confirm("มีรายชื่อที่ยังไม่บันทึก ปิดหน้าต่างและเก็บร่างไว้ทำต่อใช่ไหม?")) return;
+    if (dirty && !window.confirm(isNew ? "มีรายชื่อที่ยังไม่บันทึก ปิดหน้าต่างและทิ้งการเลือกนี้ใช่ไหม?" : "มีรายชื่อที่ยังไม่บันทึก ปิดหน้าต่างและเก็บร่างไว้ทำต่อใช่ไหม?")) return;
+    if (isNew) writeQueueWork(eventId, workId, null);
     onClose();
   }
   function reload() {

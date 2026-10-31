@@ -106,6 +106,7 @@ import {
   calculateSettlement,
   completedRoundsByMember,
   createInitialEvent,
+  currentEventArrivalTime,
   formatPlayedDuration,
   formatThaiLongDate,
   finalizedCollectionSummary,
@@ -1266,6 +1267,10 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
   const [name, setName] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState(null);
   const [newMemberSkill, setNewMemberSkill] = useState({ level: "", playableLevels: [] });
+  const liveAddArrival = currentEventArrivalTime({ eventDate: event.date, startTime: event.startTime, endTime: event.endTime });
+  const [newPlayerArrival, setNewPlayerArrival] = useState("");
+  const addArrival = newPlayerArrival || liveAddArrival || event.startTime;
+  const addArrivalOptions = participantTimeOptions({ startTime: event.startTime, endTime: event.endTime, current: addArrival, includeEnd: false });
   const [newItem, setNewItem] = useState({ name: "", price: "" });
   const [customChargeFor, setCustomChargeFor] = useState(null);
   const [customCharge, setCustomCharge] = useState({ name: "", price: "" });
@@ -1347,7 +1352,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
         eventId: event.id,
         memberId: member.id,
         status: "coming",
-        arrivalTime: event.startTime,
+        arrivalTime: addArrival,
         skillLevel: selectedSkill,
         playableSkillLevels,
       });
@@ -1362,6 +1367,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
       setName("");
       setSelectedMemberId(null);
       setNewMemberSkill({ level: "", playableLevels: [] });
+      setNewPlayerArrival("");
     }
   }
 
@@ -1589,6 +1595,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           <select aria-label="ระดับมือผู้เล่น" disabled={Boolean(savedMembers.find((member) => member.id === selectedMemberId)?.skill_level)} onChange={(changeEvent) => setNewMemberSkill({ level: changeEvent.target.value, playableLevels: defaultPlayableSkillLevels(changeEvent.target.value) })} required value={newMemberSkill.level}><option value="">เลือกระดับมือ</option>{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLabel(level)}</option>)}</select>
           {!selectedMemberId ? <SkillCompatibilityPicker onChange={(playableLevels) => setNewMemberSkill({ ...newMemberSkill, playableLevels })} skillLevel={newMemberSkill.level} value={newMemberSkill.playableLevels} /> : null}
         </fieldset>}
+        {event.status === "open" && liveAddArrival ? <label className="badminton-add-player-arrival">มาถึงเวลา<select aria-label="เวลามาถึงของผู้เล่นใหม่" disabled={addingPlayer} onChange={(changeEvent) => setNewPlayerArrival(changeEvent.target.value)} value={addArrival}>{addArrivalOptions.map((time) => <option key={time} value={time}>{participantTimeLabel(time, event.startTime, event.endTime)}</option>)}</select></label> : null}
         <button className="badminton-primary badminton-add-player" disabled={addingPlayer} type="submit"><UserPlus size={17} /> {addingPlayer ? "กำลังเพิ่ม…" : "เพิ่มผู้เล่น"}</button>
       </form>
 
@@ -1608,7 +1615,7 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           const due = settlementRow?.roundedDue || 0;
           const isPaid = Boolean(settlementRow?.paid) && !settlementRow?.paymentExempt;
           const lineName = member.nickname && member.nickname !== member.display_name ? member.display_name : "";
-          const checkedIn = Boolean(row?.checkedIn);
+          const checkedIn = Boolean(row?.checkedIn && !leftAt);
           const personPending = pendingKeys.some((key) => typeof key === "string" && key.endsWith(`:${member.id}`));
 
           function updateArrival(nextArrival) {
@@ -1723,14 +1730,14 @@ function ParticipantsPanel({ context, dashboard, event, mutate, session, settlem
           return (
             <fieldset disabled={personPending} aria-busy={personPending} className={`participant-controls-lock badminton-attendance-row ${checkedIn ? "is-checked-in" : ""} ${leftAt ? "has-left" : ""} ${settlementRow?.billingFinalized ? "is-billed" : ""} ${settlementRow?.paid && !settlementRow?.paymentExempt ? "is-paid" : ""}`} key={member.id}>
               <div className="badminton-player-identity">
-                <label className="badminton-check-in-box" title={`เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label>
+                <label className="badminton-check-in-box" title={leftAt ? `${participantName} กลับแล้ว` : `เช็กชื่อ ${participantName}`}><input aria-label={`เช็กชื่อ ${participantName}`} checked={checkedIn} disabled={Boolean(leftAt)} onChange={(changeEvent) => toggleCheckIn(changeEvent.target.checked)} type="checkbox" /><span aria-hidden="true"><Check size={14} /></span></label>
                 <b className="badminton-player-index">{playerIndex + 1}.</b>
                 <div className="badminton-player-name"><strong>{participantName}</strong>{personPending ? <span className="participant-pending" role="status">กำลังบันทึก…</span> : null}{lineName ? <span title={`LINE: ${lineName}`}>LINE: {lineName}</span> : null}</div>
                 {roundSkillLevel || member.skill_level ? <em className="badminton-skill-badge">{skillLabel(roundSkillLevel || member.skill_level)}</em> : null}
                 <button aria-label={`แก้ไขชื่อ ${participantName}`} className="badminton-member-edit-button" onClick={() => openMemberEditor(member)} type="button"><Pencil size={13} /></button>
                 {submittedByLineName ? <small className="badminton-signup-attribution" title={`ลงชื่อให้โดย LINE: ${submittedByLineName}`}>ลงชื่อให้โดย LINE: {submittedByLineName}</small> : null}
               </div>
-              <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span>กลับ {leftAt}</span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}>{event.billingModel === "per_round" ? <span className="badminton-round-count">{settlementRow?.roundsPlayed || 0} รอบ</span> : <select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>}<small>{event.billingModel === "per_round" ? "คิดตามเกมที่จบ" : formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `สรุปแล้ว ${baht(due)}` : `ยังไม่สรุป · ≈ ${baht(due)}`} บาท</strong></div></div>
+              <div className={`badminton-player-cost-status ${leftAt ? "has-departure-status" : ""}`}>{leftAt ? <span className="participant-left-status">กลับแล้ว · {leftAt}<button onClick={() => { if (window.confirm(`ให้ ${participantName} กลับมาอยู่ในรายการรอเล่นต่อใช่ไหม?`)) updateDeparture(""); }} type="button">ยังไม่กลับ</button></span> : null}<div className={`badminton-player-billing-meta ${settlementRow?.locked ? "is-locked" : ""}`}>{event.billingModel === "per_round" ? <span className="badminton-round-count">{settlementRow?.roundsPlayed || 0} รอบ</span> : <select aria-label={`เปอร์เซ็นต์คิดเงิน ${participantName}`} onChange={(changeEvent) => updateBillingPercentage(changeEvent.target.value, changeEvent.currentTarget)} value={billingPercentage}>{BILLING_PERCENT_OPTIONS.map((percentage) => <option key={percentage} value={percentage}>{percentage}%</option>)}</select>}<small>{event.billingModel === "per_round" ? "คิดตามเกมที่จบ" : formatPlayedDuration(playedMinutes)}</small><strong>{settlementRow?.paid && !settlementRow?.paymentExempt ? `จ่ายแล้ว ${baht(due)}` : settlementRow?.billingFinalized ? `สรุปแล้ว ${baht(due)}` : `ยังไม่สรุป · ≈ ${baht(due)}`} บาท</strong></div></div>
               <div className="badminton-player-controls">
                 <label><span>มา</span><select aria-label={`เวลามา ${participantName}`} value={plannedArrival} onChange={(changeEvent) => updateArrival(changeEvent.target.value)}>{arrivalOptions.map((time) => <option key={time} value={time}>{participantTimeLabel(time, event.startTime, event.endTime)}</option>)}</select></label>
                 <label><span>กลับ</span><select aria-label={`เวลากลับ ${participantName}`} value={leftAt} onChange={(changeEvent) => updateDeparture(changeEvent.target.value)}><option value="">อยู่จนจบรอบ</option>{departureOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label>

@@ -82,3 +82,13 @@ test("queue edit and reorder buttons use rounded touch targets without heavy bor
   assert.match(styles, /\.queue-picker-modal > footer \{[^}]*display: grid/);
   assert.match(styles, /\.queue-save-error \{[^}]*grid-column: 1 \/ -1/);
 });
+
+test("new partial queues save immediately without a persistent draft and every card can be deleted", () => {
+  const source = readFileSync(new URL("../src/QueuePanel.jsx", import.meta.url), "utf8");
+  const editor = source.slice(source.indexOf("function QueueLineupEditor("), source.indexOf("export function OperatorCourtControls"));
+  assert.doesNotMatch(source, /มีร่างค้าง/);
+  assert.match(source, /writeQueueWork\(event\.id, "new", null\); setEditingMatchId\("new"\)/);
+  assert.match(editor, /if \(!isNew\) setStorageWarning/);
+  assert.match(source, /aria-label=\{`ลบคิว \$\{index \+ 1\}`\}/);
+  assert.match(source, /onClick=\{\(\) => cancelQueues\(\[match\]\)\}/);
+});

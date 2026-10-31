@@ -91,8 +91,16 @@ test("same-id extension uses server atomic delta; active game can extend end but
   assert.match(panel, /busyRef.current = true/);
   assert.match(panel, /label>เริ่ม<BookingTimeSelect disabled=\{Boolean\(busy\) \|\| !canWrite \|\| isPlaying\}/);
   assert.match(panel, /label>จบ<BookingTimeSelect disabled=\{Boolean\(busy\) \|\| !canWrite\}/);
+  assert.doesNotMatch(panel, /minimumDuration=\{isPlaying/);
   assert.doesNotMatch(panel, /updateEvent\(|replaceEventCourts|updateCourts\(/);
   assert.match(panel, /event.status !== "closed" \? <button aria-label=\{`ลบ/);
+});
+
+test("live-court migration permits an earlier end while keeping a playing start immutable", () => {
+  const migration = readFileSync(new URL("../supabase/migrations/20261031183000_allow_live_court_end_corrections.sql", import.meta.url), "utf8");
+  assert.match(migration, /and next_starts_at<>old_court\.starts_at/);
+  assert.doesNotMatch(migration, /new_duration<old_duration/);
+  assert.match(migration, /แก้เวลาจบได้ แต่ห้ามเปลี่ยนเวลาเริ่ม/);
 });
 
 test("isolated closed staff fixture extends same court preserving status, rosters, games and bills", async () => {
