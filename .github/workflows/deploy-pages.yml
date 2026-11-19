@@ -39,6 +39,19 @@ jobs:
           VITE_ADMIN_EMAIL: ${{ vars.VITE_ADMIN_EMAIL }}
           VITE_LINE_LIFF_ID: ${{ vars.VITE_LINE_LIFF_ID }}
 
+      - name: Test and build Academy
+        run: |
+          npm --prefix academy test
+          npm --prefix academy run build
+          mkdir -p dist/academy
+          cp -R academy/dist/. dist/academy/
+        env:
+          ACADEMY_BASE_PATH: /badminton-club/academy/
+          VITE_ACADEMY_SUPABASE_URL: ${{ vars.VITE_ACADEMY_SUPABASE_URL }}
+          VITE_ACADEMY_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_ACADEMY_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_ACADEMY_DEMO_MODE: ${{ vars.VITE_ACADEMY_DEMO_MODE }}
+          VITE_ACADEMY_LINE_LIFF_ID: ${{ vars.VITE_ACADEMY_LINE_LIFF_ID }}
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:

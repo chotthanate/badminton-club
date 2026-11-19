@@ -1,0 +1,19 @@
+project_id = "badminton-academy"
+
+[api]
+enabled = true
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:4288"
+
+[storage]
+enabled = true
+
+[functions.academy-username-auth]
+verify_jwt = false
+
+[functions.academy-line]
+verify_jwt = false

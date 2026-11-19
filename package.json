@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "build:academy": "npm --prefix academy run build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:academy": "npm --prefix academy test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.6",
