@@ -204,8 +204,9 @@ create table public.academy_payments (
   id uuid primary key default gen_random_uuid(),
   payer_id uuid not null references public.academy_profiles(user_id),
   amount_satang bigint not null check (amount_satang > 0),
+  method text not null default 'slip' check (method in ('slip', 'manual')),
   status text not null default 'slip_pending' check (status in ('slip_pending', 'manual_review', 'paid', 'rejected')),
-  slip_path text not null,
+  slip_path text,
   slip_reference text,
   submitted_at timestamptz not null default now(),
   reviewed_at timestamptz,
@@ -290,6 +291,17 @@ end;
 $$;
 create trigger academy_sessions_finalized_immutable before update on public.academy_sessions for each row execute function public.academy_protect_finalized_session();
 
+create or replace function public.academy_protect_past_session_costs()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if old.session_date < (now() at time zone 'Asia/Bangkok')::date
+    and (new.service_fee_satang is distinct from old.service_fee_satang or new.court_cost_satang is distinct from old.court_cost_satang)
+  then raise exception 'past session costs are locked'; end if;
+  return new;
+end;
+$$;
+create trigger academy_sessions_past_costs_immutable before update on public.academy_sessions for each row execute function public.academy_protect_past_session_costs();
+
 create or replace function public.academy_finalize_session_billing(p_session_id uuid)
 returns table(invoice_id uuid, student_id uuid, total_satang bigint)
 language plpgsql security definer set search_path = '' as $$
@@ -345,10 +357,10 @@ begin
   if auth.uid() is null or coalesce(array_length(p_invoice_ids, 1), 0) = 0 then raise exception 'invalid request'; end if;
   if split_part(p_slip_path, '/', 1) <> auth.uid()::text then raise exception 'invalid slip path'; end if;
   select count(*), sum(total_satang) into v_count, v_total from public.academy_invoices
-    where id = any(p_invoice_ids) and status = 'unpaid';
+    where id = any(p_invoice_ids) and student_id = auth.uid() and status = 'unpaid';
   if v_count <> array_length(p_invoice_ids, 1) then raise exception 'invoice unavailable'; end if;
   if exists(select 1 from public.academy_payment_allocations where invoice_id = any(p_invoice_ids)) then raise exception 'invoice already submitted'; end if;
-  insert into public.academy_payments(payer_id, amount_satang, slip_path) values (auth.uid(), v_total, p_slip_path) returning id into v_payment_id;
+  insert into public.academy_payments(payer_id, amount_satang, method, slip_path) values (auth.uid(), v_total, 'slip', p_slip_path) returning id into v_payment_id;
   insert into public.academy_payment_allocations(payment_id, invoice_id, amount_satang)
     select v_payment_id, id, total_satang from public.academy_invoices where id = any(p_invoice_ids);
   update public.academy_invoices set status = 'slip_pending' where id = any(p_invoice_ids);
@@ -365,9 +377,45 @@ language sql stable security definer set search_path = '' as $$
   join public.academy_profiles p on p.user_id = i.student_id and p.active
   join public.academy_sessions s on s.id = i.session_id
   left join public.academy_invoice_items ii on ii.invoice_id = i.id
-  where auth.uid() is not null and i.status in ('unpaid', 'slip_pending', 'manual_review')
+  where auth.uid() is not null
+    and (i.student_id = auth.uid() or private.academy_is_admin())
+    and i.status in ('unpaid', 'slip_pending', 'manual_review')
   group by i.id, p.display_name, s.session_date
   order by p.display_name, s.session_date;
+$$;
+
+create or replace function public.academy_update_current_session_costs(p_session_id uuid, p_service_fee_satang bigint, p_court_cost_satang bigint)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not private.academy_is_admin() then raise exception 'not authorized'; end if;
+  if p_service_fee_satang < 0 or p_court_cost_satang < 0 then raise exception 'invalid amount'; end if;
+  update public.academy_sessions
+    set service_fee_satang = p_service_fee_satang, court_cost_satang = p_court_cost_satang, updated_at = now()
+    where id = p_session_id
+      and session_date = (now() at time zone 'Asia/Bangkok')::date
+      and status not in ('finalized', 'cancelled');
+  if not found then raise exception 'only current session costs can be edited'; end if;
+end;
+$$;
+
+create or replace function public.academy_mark_invoice_paid(p_invoice_id uuid)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_invoice public.academy_invoices%rowtype; v_payment_id uuid;
+begin
+  if not private.academy_is_admin() then raise exception 'not authorized'; end if;
+  select * into v_invoice from public.academy_invoices where id = p_invoice_id and status = 'unpaid' for update;
+  if not found then raise exception 'invoice is not payable'; end if;
+  if exists(select 1 from public.academy_payment_allocations where invoice_id = p_invoice_id) then raise exception 'invoice already submitted'; end if;
+  insert into public.academy_payments(payer_id, amount_satang, method, status, reviewed_at, reviewed_by, review_note)
+    values (v_invoice.student_id, v_invoice.total_satang, 'manual', 'paid', now(), auth.uid(), 'รับเงินโดยแอดมิน')
+    returning id into v_payment_id;
+  insert into public.academy_payment_allocations(payment_id, invoice_id, amount_satang)
+    values (v_payment_id, p_invoice_id, v_invoice.total_satang);
+  update public.academy_invoices set status = 'paid', paid_at = now() where id = p_invoice_id;
+  insert into public.academy_audit_log(actor_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'manual_payment', 'invoice', p_invoice_id, jsonb_build_object('payment_id', v_payment_id, 'amount_satang', v_invoice.total_satang));
+  return v_payment_id;
+end;
 $$;
 
 create or replace function public.academy_adjust_invoice(p_invoice_id uuid, p_amount_satang bigint, p_reason text)
@@ -416,12 +464,16 @@ $$;
 revoke all on function public.academy_finalize_session_billing(uuid) from public, anon;
 revoke all on function public.academy_submit_payment(uuid[], text) from public, anon;
 revoke all on function public.academy_list_payable_invoices() from public, anon;
+revoke all on function public.academy_update_current_session_costs(uuid, bigint, bigint) from public, anon;
+revoke all on function public.academy_mark_invoice_paid(uuid) from public, anon;
 revoke all on function public.academy_review_payment(uuid, boolean, text) from public, anon;
 revoke all on function public.academy_adjust_invoice(uuid, bigint, text) from public, anon;
 revoke all on function public.academy_check_in_teacher(uuid) from public, anon;
 grant execute on function public.academy_finalize_session_billing(uuid) to authenticated;
 grant execute on function public.academy_submit_payment(uuid[], text) to authenticated;
 grant execute on function public.academy_list_payable_invoices() to authenticated;
+grant execute on function public.academy_update_current_session_costs(uuid, bigint, bigint) to authenticated;
+grant execute on function public.academy_mark_invoice_paid(uuid) to authenticated;
 grant execute on function public.academy_review_payment(uuid, boolean, text) to authenticated;
 grant execute on function public.academy_adjust_invoice(uuid, bigint, text) to authenticated;
 grant execute on function public.academy_check_in_teacher(uuid) to authenticated;

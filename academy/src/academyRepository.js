@@ -122,11 +122,11 @@ export function createAcademyRepository() {
       return mapSession({ ...data, registrations: [], purchases: [], lesson_topics: [] });
     },
     async updateSessionCosts(sessionId, input) {
-      const { error } = await assertClient().from("academy_sessions").update({
-        service_fee_satang: input.serviceFeeSatang,
-        court_cost_satang: input.courtCostSatang,
-        updated_at: new Date().toISOString(),
-      }).eq("id", sessionId).neq("status", "finalized");
+      const { error } = await assertClient().rpc("academy_update_current_session_costs", {
+        p_session_id: sessionId,
+        p_service_fee_satang: input.serviceFeeSatang,
+        p_court_cost_satang: input.courtCostSatang,
+      });
       if (error) throw error;
     },
     async register(sessionId, student) {
@@ -189,6 +189,10 @@ export function createAcademyRepository() {
         await client.storage.from("academy-payment-slips").remove([path]);
         throw error;
       }
+    },
+    async markInvoicePaid(invoiceId) {
+      const { error } = await assertClient().rpc("academy_mark_invoice_paid", { p_invoice_id: invoiceId });
+      if (error) throw error;
     },
     async saveProduct(input) {
       const { data, error } = await assertClient().from("academy_products").insert({ name: input.name, price_satang: input.priceSatang }).select().single();

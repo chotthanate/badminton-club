@@ -33,9 +33,10 @@ export function createDemoRepository() {
       return clone(session);
     },
     async updateSessionCosts(sessionId, input) {
-      sessions = sessions.map((session) => session.id === sessionId && session.status !== "finalized"
-        ? { ...session, serviceFeeSatang: input.serviceFeeSatang, courtCostSatang: input.courtCostSatang }
-        : session);
+      const currentDate = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+      const session = sessions.find((entry) => entry.id === sessionId);
+      if (!session || session.date !== currentDate || ["finalized", "cancelled"].includes(session.status)) throw new Error("แก้ค่าใช้จ่ายได้เฉพาะคลาสปัจจุบันก่อนสรุปยอด");
+      sessions = sessions.map((entry) => entry.id === sessionId ? { ...entry, serviceFeeSatang: input.serviceFeeSatang, courtCostSatang: input.courtCostSatang } : entry);
     },
     async register(sessionId, student) {
       sessions = sessions.map((session) => session.id !== sessionId ? session : {
@@ -96,6 +97,11 @@ export function createDemoRepository() {
     },
     async submitPayment(invoiceIds) {
       invoices = invoices.map((invoice) => invoiceIds.includes(invoice.id) ? { ...invoice, status: "slip_pending" } : invoice);
+    },
+    async markInvoicePaid(invoiceId) {
+      const invoice = invoices.find((entry) => entry.id === invoiceId);
+      if (!invoice || invoice.status !== "unpaid") throw new Error("รายการนี้รับเงินไม่ได้");
+      invoices = invoices.map((entry) => entry.id === invoiceId ? { ...entry, status: "paid", paidAt: new Date().toISOString() } : entry);
     },
     async createProfile(input) {
       const { password: _password, ...safeInput } = input;

@@ -84,3 +84,24 @@ test("class fees can be filled in later before billing is finalized", async () =
   assert.equal(session.serviceFeeSatang, 6000);
   assert.equal(session.courtCostSatang, 150000);
 });
+
+test("past class fees cannot be edited", async () => {
+  const repository = createDemoRepository();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const created = await repository.createSession({
+    date: yesterday.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" }),
+    startTime: "21:00", endTime: "23:00", venue: "สนามทดสอบ", venueId: "venue-khao-noi",
+    serviceFeeSatang: 5000, courtCostSatang: 0, teacherId: "teacher-1",
+  });
+  await assert.rejects(() => repository.updateSessionCosts(created.id, { serviceFeeSatang: 6000, courtCostSatang: 100000 }), /เฉพาะคลาสปัจจุบัน/);
+});
+
+test("admin can mark one daily invoice paid manually", async () => {
+  const repository = createDemoRepository();
+  const invoice = (await repository.listInvoices()).find((entry) => entry.status === "unpaid");
+  await repository.markInvoicePaid(invoice.id);
+  const updated = (await repository.listInvoices()).find((entry) => entry.id === invoice.id);
+  assert.equal(updated.status, "paid");
+  await assert.rejects(() => repository.markInvoicePaid(invoice.id), /รับเงินไม่ได้/);
+});

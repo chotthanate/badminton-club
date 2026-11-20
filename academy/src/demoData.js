@@ -2,7 +2,7 @@ const today = new Date();
 const isoDate = (offset = 0) => {
   const value = new Date(today);
   value.setDate(value.getDate() + offset);
-  return value.toISOString().slice(0, 10);
+  return value.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
 };
 
 export const demoProfiles = [
