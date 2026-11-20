@@ -11,7 +11,8 @@ test("Academy uses the detailed navigation and the dedicated today-player workfl
   assert.match(source, /"classes", "คลาส"/);
   assert.match(source, /"payments", "ชำระเงิน"/);
   assert.match(source, /"students", "นักเรียน"/);
-  assert.match(source, /ไม่เช็กถือว่าขาด/);
+  assert.doesNotMatch(source, /PageTitle title="เช็กชื่อ"/);
+  assert.match(source, /className="checkin-session"/);
   assert.match(source, /type="checkbox" checked=\{entry\.attendance === "present"\}/);
   assert.match(source, /function SessionContext/);
   assert.doesNotMatch(source, /arrivalTime|departureTime/);
