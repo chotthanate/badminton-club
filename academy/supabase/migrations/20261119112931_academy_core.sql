@@ -15,6 +15,17 @@ create table public.academy_settings (
 );
 insert into public.academy_settings (id) values (true) on conflict do nothing;
 
+create table public.academy_venues (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique check (length(trim(name)) > 0),
+  active boolean not null default true,
+  is_default boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create unique index academy_venues_one_default on public.academy_venues (is_default) where is_default;
+insert into public.academy_venues(id, name, is_default)
+values ('00000000-0000-4000-8000-000000000001', 'สนามแบดมินตันเขาน้อย (สนามใหม่)', true);
+
 create table public.academy_profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   username text not null,
@@ -40,7 +51,8 @@ create table public.academy_sessions (
   session_date date not null,
   starts_at timestamptz not null,
   ends_at timestamptz not null,
-  venue text not null,
+  venue_id uuid not null default '00000000-0000-4000-8000-000000000001' references public.academy_venues(id),
+  venue text not null default 'สนามแบดมินตันเขาน้อย (สนามใหม่)',
   service_fee_satang bigint not null default 5000 check (service_fee_satang >= 0),
   court_cost_satang bigint not null default 0 check (court_cost_satang >= 0),
   status text not null default 'draft' check (status in ('draft', 'open', 'in_progress', 'awaiting_summary', 'finalized', 'cancelled')),
@@ -114,8 +126,10 @@ create index academy_purchases_student_session_idx on public.academy_purchases (
 
 create table public.academy_lesson_topics (
   id uuid primary key default gen_random_uuid(),
-  session_id uuid not null unique references public.academy_sessions(id) on delete cascade,
+  session_id uuid not null references public.academy_sessions(id) on delete cascade,
   title text not null,
+  description text,
+  display_order integer not null default 0,
   notes text,
   updated_by uuid not null default auth.uid() references public.academy_profiles(user_id),
   updated_at timestamptz not null default now()
@@ -188,7 +202,7 @@ create table public.academy_invoice_adjustments (
 
 create table public.academy_payments (
   id uuid primary key default gen_random_uuid(),
-  student_id uuid not null references public.academy_profiles(user_id),
+  payer_id uuid not null references public.academy_profiles(user_id),
   amount_satang bigint not null check (amount_satang > 0),
   status text not null default 'slip_pending' check (status in ('slip_pending', 'manual_review', 'paid', 'rejected')),
   slip_path text not null,
@@ -331,15 +345,29 @@ begin
   if auth.uid() is null or coalesce(array_length(p_invoice_ids, 1), 0) = 0 then raise exception 'invalid request'; end if;
   if split_part(p_slip_path, '/', 1) <> auth.uid()::text then raise exception 'invalid slip path'; end if;
   select count(*), sum(total_satang) into v_count, v_total from public.academy_invoices
-    where id = any(p_invoice_ids) and student_id = auth.uid() and status = 'unpaid';
+    where id = any(p_invoice_ids) and status = 'unpaid';
   if v_count <> array_length(p_invoice_ids, 1) then raise exception 'invoice unavailable'; end if;
   if exists(select 1 from public.academy_payment_allocations where invoice_id = any(p_invoice_ids)) then raise exception 'invoice already submitted'; end if;
-  insert into public.academy_payments(student_id, amount_satang, slip_path) values (auth.uid(), v_total, p_slip_path) returning id into v_payment_id;
+  insert into public.academy_payments(payer_id, amount_satang, slip_path) values (auth.uid(), v_total, p_slip_path) returning id into v_payment_id;
   insert into public.academy_payment_allocations(payment_id, invoice_id, amount_satang)
     select v_payment_id, id, total_satang from public.academy_invoices where id = any(p_invoice_ids);
   update public.academy_invoices set status = 'slip_pending' where id = any(p_invoice_ids);
   return v_payment_id;
 end;
+$$;
+
+create or replace function public.academy_list_payable_invoices()
+returns table(invoice_id uuid, student_id uuid, student_name text, session_id uuid, session_date date, total_satang bigint, status text, details text)
+language sql stable security definer set search_path = '' as $$
+  select i.id, i.student_id, p.display_name, i.session_id, s.session_date, i.total_satang, i.status,
+    coalesce(string_agg(ii.description, ' · ' order by ii.kind, ii.description), '')
+  from public.academy_invoices i
+  join public.academy_profiles p on p.user_id = i.student_id and p.active
+  join public.academy_sessions s on s.id = i.session_id
+  left join public.academy_invoice_items ii on ii.invoice_id = i.id
+  where auth.uid() is not null and i.status in ('unpaid', 'slip_pending', 'manual_review')
+  group by i.id, p.display_name, s.session_date
+  order by p.display_name, s.session_date;
 $$;
 
 create or replace function public.academy_adjust_invoice(p_invoice_id uuid, p_amount_satang bigint, p_reason text)
@@ -387,16 +415,19 @@ $$;
 
 revoke all on function public.academy_finalize_session_billing(uuid) from public, anon;
 revoke all on function public.academy_submit_payment(uuid[], text) from public, anon;
+revoke all on function public.academy_list_payable_invoices() from public, anon;
 revoke all on function public.academy_review_payment(uuid, boolean, text) from public, anon;
 revoke all on function public.academy_adjust_invoice(uuid, bigint, text) from public, anon;
 revoke all on function public.academy_check_in_teacher(uuid) from public, anon;
 grant execute on function public.academy_finalize_session_billing(uuid) to authenticated;
 grant execute on function public.academy_submit_payment(uuid[], text) to authenticated;
+grant execute on function public.academy_list_payable_invoices() to authenticated;
 grant execute on function public.academy_review_payment(uuid, boolean, text) to authenticated;
 grant execute on function public.academy_adjust_invoice(uuid, bigint, text) to authenticated;
 grant execute on function public.academy_check_in_teacher(uuid) to authenticated;
 
 alter table public.academy_settings enable row level security;
+alter table public.academy_venues enable row level security;
 alter table public.academy_profiles enable row level security;
 alter table public.academy_line_accounts enable row level security;
 alter table public.academy_sessions enable row level security;
@@ -418,6 +449,8 @@ alter table public.academy_audit_log enable row level security;
 
 create policy academy_settings_read on public.academy_settings for select to authenticated using (true);
 create policy academy_settings_admin on public.academy_settings for all to authenticated using (private.academy_is_admin()) with check (private.academy_is_admin());
+create policy academy_venues_read on public.academy_venues for select to authenticated using (active or private.academy_is_admin());
+create policy academy_venues_admin on public.academy_venues for all to authenticated using (private.academy_is_admin()) with check (private.academy_is_admin());
 create policy academy_profiles_read_self_or_staff on public.academy_profiles for select to authenticated using (user_id = auth.uid() or private.academy_role() in ('admin','teacher'));
 create policy academy_line_self on public.academy_line_accounts for select to authenticated using (user_id = auth.uid() or private.academy_is_admin());
 
@@ -455,16 +488,16 @@ create policy academy_invoices_read on public.academy_invoices for select to aut
 create policy academy_items_read on public.academy_invoice_items for select to authenticated using (exists(select 1 from public.academy_invoices i where i.id = invoice_id and (i.student_id = auth.uid() or private.academy_is_admin())));
 create policy academy_adjustments_read on public.academy_invoice_adjustments for select to authenticated using (exists(select 1 from public.academy_invoices i where i.id = invoice_id and (i.student_id = auth.uid() or private.academy_is_admin())));
 create policy academy_adjustments_admin on public.academy_invoice_adjustments for insert to authenticated with check (private.academy_is_admin() and created_by = auth.uid());
-create policy academy_payments_read on public.academy_payments for select to authenticated using (student_id = auth.uid() or private.academy_is_admin());
-create policy academy_allocations_read on public.academy_payment_allocations for select to authenticated using (exists(select 1 from public.academy_payments p where p.id = payment_id and (p.student_id = auth.uid() or private.academy_is_admin())));
+create policy academy_payments_read on public.academy_payments for select to authenticated using (payer_id = auth.uid() or private.academy_is_admin());
+create policy academy_allocations_read on public.academy_payment_allocations for select to authenticated using (exists(select 1 from public.academy_payments p where p.id = payment_id and (p.payer_id = auth.uid() or private.academy_is_admin())));
 create policy academy_audit_admin on public.academy_audit_log for select to authenticated using (private.academy_is_admin());
 
-grant select on public.academy_settings, public.academy_profiles, public.academy_line_accounts, public.academy_sessions,
+grant select on public.academy_settings, public.academy_venues, public.academy_profiles, public.academy_line_accounts, public.academy_sessions,
   public.academy_session_teachers, public.academy_registrations, public.academy_attendance, public.academy_products,
   public.academy_purchases, public.academy_lesson_topics, public.academy_kpis, public.academy_scores,
   public.academy_feedback, public.academy_invoices, public.academy_invoice_items, public.academy_invoice_adjustments,
   public.academy_payments, public.academy_payment_allocations, public.academy_audit_log to authenticated;
-grant insert, update, delete on public.academy_settings, public.academy_sessions,
+grant insert, update, delete on public.academy_settings, public.academy_venues, public.academy_sessions,
   public.academy_session_teachers, public.academy_registrations, public.academy_attendance, public.academy_products,
   public.academy_purchases, public.academy_lesson_topics, public.academy_kpis, public.academy_scores,
   public.academy_feedback to authenticated;

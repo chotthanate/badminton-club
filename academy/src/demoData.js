@@ -19,23 +19,33 @@ export const demoProducts = [
   { id: "sport", name: "เครื่องดื่มเกลือแร่", priceSatang: 2000, active: true },
 ];
 
+export const demoVenues = [
+  { id: "venue-khao-noi", name: "สนามแบดมินตันเขาน้อย (สนามใหม่)", active: true, isDefault: true },
+];
+
 export const demoSessions = [
   {
     id: "session-1", date: isoDate(0), startTime: "17:00", endTime: "19:00", venue: "สนาม Headshot",
     serviceFeeSatang: 5000, courtCostSatang: 120000, status: "open", teacherIds: ["teacher-1"],
-    topic: "พื้นฐานลูกหน้ามือและการเคลื่อนที่", registrations: [
+    registrations: [
       { studentId: "student-1", name: "น้องน้ำ", status: "registered", attendance: "present", source: "student" },
       { studentId: "student-2", name: "น้องปัน", status: "registered", attendance: null, source: "student" },
       { studentId: "student-3", name: "น้องออกัส", status: "registered", attendance: "present", source: "walk_in" },
     ],
     purchases: [{ id: "purchase-1", studentId: "student-1", productId: "water", name: "น้ำเปล่า", quantity: 2, unitPriceSatang: 1000 }],
-    kpis: [{ id: "kpi-1", name: "ตีลูกถึงท้ายคอร์ท", maximum: 10, scores: { "student-1": 8, "student-3": 6 } }],
+    lessons: [
+      { id: "lesson-1", title: "ฝึกเซฟหน้าเน็ต", description: "ยืนตำแหน่งหน้าเน็ต อ่านทิศทางลูก และเซฟลูกให้ข้ามเน็ตอย่างควบคุมได้", kpis: [
+        { id: "kpi-1", name: "เซฟลูกข้ามเน็ต", maximum: 10, scores: { "student-1": 8, "student-3": 6 } },
+        { id: "kpi-2", name: "กลับเข้าตำแหน่งพร้อมเล่น", maximum: 5, scores: { "student-1": 4, "student-3": 3 } },
+      ] },
+      { id: "lesson-2", title: "ฟุตเวิร์กหน้า–หลัง", description: "เคลื่อนที่หกลูกและกลับจุดศูนย์กลางโดยไม่เสียสมดุล", kpis: [] },
+    ],
   },
   {
     id: "session-2", date: isoDate(2), startTime: "17:00", endTime: "19:00", venue: "สนาม Headshot",
     serviceFeeSatang: 5000, courtCostSatang: 120000, status: "open", teacherIds: ["teacher-1"], topic: "ลูกหลังมือ",
     registrations: [{ studentId: "student-4", name: "น้องอิง", status: "registered", attendance: null, source: "student" }],
-    purchases: [], kpis: [],
+    purchases: [], lessons: [],
   },
 ];
 

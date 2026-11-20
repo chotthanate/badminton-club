@@ -1,4 +1,4 @@
-import { demoInvoices, demoProducts, demoProfiles, demoSessions } from "./demoData.js";
+import { demoInvoices, demoProducts, demoProfiles, demoSessions, demoVenues } from "./demoData.js";
 
 const clone = (value) => structuredClone(value);
 
@@ -7,6 +7,7 @@ export function createDemoRepository() {
   let profiles = clone(demoProfiles);
   let products = clone(demoProducts);
   let invoices = clone(demoInvoices);
+  let venues = clone(demoVenues);
 
   return {
     mode: "demo",
@@ -16,13 +17,25 @@ export function createDemoRepository() {
     async listProfiles() { return clone(profiles); },
     async listSessions() { return clone(sessions); },
     async listProducts() { return clone(products); },
+    async listVenues() { return clone(venues); },
     async listInvoices(studentId = null) {
       return clone(studentId ? invoices.filter((invoice) => invoice.studentId === studentId) : invoices);
     },
+    async listPaymentOptions() {
+      return clone(invoices.map((invoice) => ({
+        ...invoice,
+        studentName: profiles.find((profile) => profile.id === invoice.studentId)?.displayName || "นักเรียน",
+      })));
+    },
     async createSession(input) {
-      const session = { ...input, id: crypto.randomUUID(), teacherIds: input.teacherId ? [input.teacherId] : [], status: "open", registrations: [], purchases: [], kpis: [] };
+      const session = { ...input, id: crypto.randomUUID(), teacherIds: input.teacherId ? [input.teacherId] : [], status: "open", registrations: [], purchases: [], lessons: [] };
       sessions = [session, ...sessions];
       return clone(session);
+    },
+    async updateSessionCosts(sessionId, input) {
+      sessions = sessions.map((session) => session.id === sessionId && session.status !== "finalized"
+        ? { ...session, serviceFeeSatang: input.serviceFeeSatang, courtCostSatang: input.courtCostSatang }
+        : session);
     },
     async register(sessionId, student) {
       sessions = sessions.map((session) => session.id !== sessionId ? session : {
@@ -61,8 +74,16 @@ export function createDemoRepository() {
     async addPurchase(sessionId, purchase) {
       sessions = sessions.map((session) => session.id !== sessionId ? session : { ...session, purchases: [...session.purchases, { ...purchase, id: crypto.randomUUID() }] });
     },
-    async saveLearning(sessionId, { topic, kpis }) {
-      sessions = sessions.map((session) => session.id !== sessionId ? session : { ...session, topic, kpis });
+    async addLesson(sessionId, lesson) {
+      const created = { ...lesson, id: crypto.randomUUID(), kpis: lesson.kpis.map((kpi) => ({ ...kpi, id: crypto.randomUUID(), scores: {} })) };
+      sessions = sessions.map((session) => session.id !== sessionId ? session : { ...session, lessons: [...(session.lessons || []), created] });
+      return clone(created);
+    },
+    async saveLessonScores(sessionId, lessonId, kpis) {
+      sessions = sessions.map((session) => session.id !== sessionId ? session : {
+        ...session,
+        lessons: session.lessons.map((lesson) => lesson.id === lessonId ? { ...lesson, kpis: clone(kpis) } : lesson),
+      });
     },
     async finalizeSession(sessionId, preview) {
       const session = sessions.find((entry) => entry.id === sessionId);
@@ -86,6 +107,11 @@ export function createDemoRepository() {
       const product = { ...input, id: crypto.randomUUID(), active: true };
       products = [...products, product];
       return clone(product);
+    },
+    async createVenue(input) {
+      const venue = { id: crypto.randomUUID(), name: input.name, active: true, isDefault: false };
+      venues = [...venues, venue];
+      return clone(venue);
     },
   };
 }

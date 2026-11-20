@@ -48,3 +48,39 @@ test("one payment can move multiple invoices to pending", async () => {
   const updated = await repository.listInvoices("student-1");
   assert.ok(updated.filter((invoice) => invoices.some((selected) => selected.id === invoice.id)).every((invoice) => invoice.status === "slip_pending"));
 });
+
+test("a class can contain multiple lesson cards and retain per-student scores", async () => {
+  const repository = createDemoRepository();
+  const lesson = await repository.addLesson("session-1", {
+    title: "ฝึกเสิร์ฟสั้น",
+    description: "ควบคุมทิศทางและความสูง",
+    kpis: [{ name: "ลงพื้นที่เป้าหมาย", maximum: 10 }],
+  });
+  await repository.saveLessonScores("session-1", lesson.id, [
+    { ...lesson.kpis[0], scores: { "student-1": 9, "student-3": 7 } },
+  ]);
+  const session = (await repository.listSessions()).find((entry) => entry.id === "session-1");
+  const saved = session.lessons.find((entry) => entry.id === lesson.id);
+  assert.equal(saved.title, "ฝึกเสิร์ฟสั้น");
+  assert.deepEqual(saved.kpis[0].scores, { "student-1": 9, "student-3": 7 });
+  assert.ok(session.lessons.length >= 3);
+});
+
+test("venues and cross-student payment options are available to the Academy flows", async () => {
+  const repository = createDemoRepository();
+  const initial = await repository.listVenues();
+  assert.equal(initial.find((venue) => venue.isDefault)?.name, "สนามแบดมินตันเขาน้อย (สนามใหม่)");
+  const created = await repository.createVenue({ name: "สนามทดสอบ" });
+  assert.equal(created.name, "สนามทดสอบ");
+  assert.ok((await repository.listVenues()).some((venue) => venue.id === created.id));
+  const paymentOptions = await repository.listPaymentOptions();
+  assert.ok(paymentOptions.every((invoice) => invoice.studentName));
+});
+
+test("class fees can be filled in later before billing is finalized", async () => {
+  const repository = createDemoRepository();
+  await repository.updateSessionCosts("session-1", { serviceFeeSatang: 6000, courtCostSatang: 150000 });
+  const session = (await repository.listSessions()).find((entry) => entry.id === "session-1");
+  assert.equal(session.serviceFeeSatang, 6000);
+  assert.equal(session.courtCostSatang, 150000);
+});

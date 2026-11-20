@@ -36,6 +36,7 @@ main { width: min(1180px, 100%); margin: 0 auto; }
 .metric span { display: block; color: var(--muted); font-size: 13px; }
 .metric strong { display: block; margin-top: 8px; font-size: 25px; }
 .card { padding: 20px; min-width: 0; }
+.page > .card + .card, .page > .session-tabs + .card, .page > .session-hero + .card { margin-top: 18px; }
 .card header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .card h2 { margin: 0; font-size: 18px; }
 .two-columns, .class-layout { display: grid; grid-template-columns: 1.05fr .95fr; gap: 18px; align-items: start; }
@@ -125,12 +126,65 @@ label { display: grid; gap: 6px; color: #41564e; font-size: 13px; font-weight: 6
 .login-card h1, .login-card p { margin: 0; }
 .login-card > p:not(.eyebrow) { color: var(--muted); }
 
+/* Academy information architecture */
+.detailed-nav { width: min(760px, calc(100% - 24px)); }
+.today-layout { display: grid; grid-template-columns: 1.05fr .95fr; gap: 18px; align-items: start; }
+.attendance-list { display: grid; }
+.attendance-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; padding: 9px 0; border-bottom: 1px solid #edf1ee; }
+.attendance-row small { display: block; margin-top: 3px; color: var(--muted); }
+.session-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; padding: 20px 22px; border: 1px solid #bcd9cc; border-radius: 22px; background: linear-gradient(135deg, #f7fbf8, #e3f3eb); }
+.session-hero span { color: var(--green); font-size: 13px; font-weight: 800; }
+.session-hero h2 { margin: 5px 0; font-size: clamp(19px, 3vw, 27px); }
+.session-hero p { margin: 0; color: var(--muted); }
+.session-hero > strong { flex: 0 0 auto; padding: 7px 11px; border-radius: 999px; color: var(--green-dark); background: white; font-size: 12px; }
+.purchase-controls { display: grid; grid-template-columns: 1.3fr 1fr 72px auto; gap: 8px; }
+.purchase-controls button, .beneficiary-picker button, .add-venue button, .purchase-controls + button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; color: var(--green-dark); background: white; font-weight: 750; }
+.purchase-history { display: grid; gap: 7px; margin-top: 14px; }
+.purchase-history span { display: flex; justify-content: space-between; gap: 8px; padding: 9px 11px; border-radius: 11px; background: #f5f8f6; color: #40584e; font-size: 13px; }
+.lesson-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 12px; }
+.lesson-toolbar strong, .lesson-toolbar span { display: block; }
+.lesson-toolbar strong { font-size: 19px; }
+.lesson-toolbar span { margin-top: 3px; color: var(--muted); font-size: 13px; }
+.lesson-grid { display: grid; gap: 14px; }
+.lesson-card { overflow: hidden; border: 1px solid #bed8cc; border-radius: 22px; background: white; box-shadow: 0 7px 22px rgba(32,75,58,.06); }
+.lesson-card.open { border-color: #76bba4; box-shadow: 0 14px 34px rgba(32,75,58,.11); }
+.lesson-card-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px 22px; border: 0; color: inherit; background: transparent; text-align: left; }
+.lesson-card-head > div { min-width: 0; }
+.lesson-card-head h2 { margin: 5px 0; font-size: 21px; }
+.lesson-card-head p { margin: 0; color: var(--muted); }
+.lesson-card-head > svg { flex: 0 0 auto; color: var(--green); }
+.lesson-number { color: var(--green); font-size: 11px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.lesson-body { padding: 0 22px 22px; border-top: 1px solid #edf1ee; }
+.lesson-kpi { margin-top: 17px; padding: 15px; border-radius: 16px; background: #f6f9f7; }
+.lesson-kpi-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.lesson-kpi-title span { color: var(--muted); font-size: 12px; }
+.lesson-score { grid-template-columns: 1fr 74px 35px; align-items: center; gap: 8px; min-height: 48px; border-top: 1px solid #e6ede9; }
+.lesson-score input { text-align: center; }
+.lesson-score small { color: var(--muted); }
+.save-scores { width: 100%; margin-top: 16px; }
+.lesson-empty { margin: 0; }
+.signup-action { width: 100%; display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 48px; margin-bottom: 17px; border: 0; border-radius: 14px; color: white; background: var(--green); font-weight: 800; }
+.signup-action.registered { color: var(--green-dark); background: var(--green-soft); }
+.beneficiary-picker { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.beneficiary-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.beneficiary-chips button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 11px; border: 0; border-radius: 999px; color: var(--green-dark); background: var(--green-soft); }
+.beneficiary-chips svg { width: 15px; }
+.venue-first { margin-bottom: 18px; padding: 15px; border: 1px solid #bcd9cc; border-radius: 17px; background: #f5faf7; }
+.add-venue { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 9px; }
+textarea { width: 100%; min-height: 100px; padding: 11px 12px; resize: vertical; border: 1px solid #cbdad1; border-radius: 12px; color: #183229; background: white; outline: none; font: inherit; }
+textarea:focus { border-color: #52a88d; box-shadow: 0 0 0 3px rgba(44,145,113,.12); }
+.kpi-create { display: grid; grid-template-columns: 1fr 90px auto; gap: 8px; margin-bottom: 8px; }
+.kpi-create button { width: 44px; border: 1px solid var(--line); border-radius: 12px; color: var(--danger); background: white; }
+.secondary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; border: 1px solid #abd0c1; border-radius: 13px; color: var(--green-dark); background: white; font-weight: 750; }
+
 @media (max-width: 800px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .two-columns, .class-layout { grid-template-columns: 1fr; }
   .student-grid { grid-template-columns: repeat(2, 1fr); }
   .form-grid.compact { grid-template-columns: 1fr 1fr; }
   .payment-box { grid-template-columns: 1fr; }
+  .today-layout { grid-template-columns: 1fr; }
+  .purchase-controls { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 520px) {
   .topbar { padding: 11px 14px; }
@@ -151,6 +205,17 @@ label { display: grid; gap: 6px; color: #41564e; font-size: 13px; font-weight: 6
   .billing-summary { grid-template-columns: 1fr 1fr; }
   .bottom-nav { bottom: max(6px, env(safe-area-inset-bottom)); width: calc(100% - 12px); }
   .bottom-nav button { height: 54px; }
+  .detailed-nav { width: calc(100% - 12px); }
+  .detailed-nav span { font-size: 10px; }
+  .session-hero { align-items: flex-start; padding: 16px; border-radius: 18px; }
+  .session-hero > strong { display: none; }
+  .lesson-card-head { padding: 17px; }
+  .lesson-body { padding: 0 14px 17px; }
+  .lesson-score { grid-template-columns: 1fr 68px 30px; }
+  .purchase-controls { grid-template-columns: 1fr 80px; }
+  .purchase-controls select:first-child { grid-column: 1 / -1; }
+  .purchase-controls button { min-width: 80px; }
+  .kpi-create { grid-template-columns: 1fr 76px auto; }
   .session-tabs button { min-width: 136px; }
   .modal { padding: 18px; }
 }

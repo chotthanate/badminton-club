@@ -73,3 +73,12 @@
 - Added a separate Academy Supabase migration with explicit Data API grants, RLS, protected RPCs, private slip storage, username/password Edge authentication, one-to-one LINE linking, signed LINE webhook commands and admin-only account creation. Never apply this migration to club project `biwnmiedcfmfwuciybus`.
 - The Academy Supabase project has not been created or deployed yet. The connected Supabase account exposes organization `BOY` (`fhqcxlhxyysinsiadrqb`); project creation requires the user's explicit organization/cost confirmation. LINE secrets and a new LIFF ID are also still required.
 - Verification: 13 Academy tests, Academy production build, Edge Function TypeScript transforms, 416 existing club tests and the existing club production build. Browser visual inspection was blocked by local-origin permission, so mobile layout is build/static reviewed rather than physically verified.
+
+## Academy navigation and class workflow — 20 November 2026
+
+- Split Academy operations into dedicated dashboard, today-player, class/lesson, student, payment and finance pages. The today-player page now mirrors the useful club workflow: attendance, walk-ins and per-student water/snacks, without arrival/departure time tracking.
+- Class content is now a list of expandable lesson cards. Each card stores its own description and KPI definitions, and expands to score every student who attended. Multiple lesson cards are supported per class.
+- Class creation puts venue first, uses a managed venue dropdown with `สนามแบดมินตันเขาน้อย (สนามใหม่)` as the default, and defaults to 21:00–23:00 with the label `ค่าเรียนต่อคน`. Venue and time are shown on every selected class. Fee and court cost can also be filled in later from Finance before billing is finalized.
+- Payment now supports selecting one or more students, choosing their outstanding class invoices and attaching one slip for the combined selection. Payments store the payer separately from invoice owners while duplicate allocations remain blocked.
+- The Academy Supabase project is still not created or deployed. These schema changes remain isolated under `academy/` and must never be applied to club project `biwnmiedcfmfwuciybus`.
+- Verification: 19 Academy tests, Academy production build, both Edge Function TypeScript transforms, hands-on iPhone-size browser checks for attendance, lesson expansion/scoring, class defaults and payment selection, plus 416 existing club tests and the existing club production build.

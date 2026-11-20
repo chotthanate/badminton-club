@@ -17,7 +17,7 @@ test("every Academy public table enables RLS and Data API access is explicit", a
 
 test("privileged Academy RPCs revoke anonymous execution and authorize internally", async () => {
   const sql = await readFile(migrationUrl, "utf8");
-  for (const functionName of ["academy_finalize_session_billing", "academy_submit_payment", "academy_review_payment", "academy_adjust_invoice", "academy_check_in_teacher"]) {
+  for (const functionName of ["academy_finalize_session_billing", "academy_submit_payment", "academy_list_payable_invoices", "academy_review_payment", "academy_adjust_invoice", "academy_check_in_teacher"]) {
     assert.match(sql, new RegExp(`revoke all on function public\\.${functionName}`));
   }
   assert.match(sql, /if not private\.academy_is_admin\(\) then raise exception 'not authorized'/);

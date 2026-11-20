@@ -15,7 +15,7 @@ function mapSession(row) {
     serviceFeeSatang: Number(row.service_fee_satang),
     courtCostSatang: Number(row.court_cost_satang),
     status: row.status,
-    topic: row.lesson_topics?.[0]?.title || "",
+    venueId: row.venue_id,
     registrations: (row.registrations || []).map((registration) => ({
       studentId: registration.student_id,
       name: registration.student?.display_name || "ผู้เรียน",
@@ -32,11 +32,16 @@ function mapSession(row) {
       unitPriceSatang: Number(purchase.unit_price_satang),
     })),
     teachers: (row.teachers || []).map((teacher) => ({ id: teacher.teacher_id, checkedAt: teacher.checked_at })),
-    kpis: (row.kpis || []).map((kpi) => ({
-      id: kpi.id,
-      name: kpi.name,
-      maximum: Number(kpi.maximum_score),
-      scores: Object.fromEntries((kpi.scores || []).map((score) => [score.student_id, Number(score.score)])),
+    lessons: (row.lesson_topics || []).map((lesson) => ({
+      id: lesson.id,
+      title: lesson.title,
+      description: lesson.description || "",
+      kpis: (lesson.kpis || []).map((kpi) => ({
+        id: kpi.id,
+        name: kpi.name,
+        maximum: Number(kpi.maximum_score),
+        scores: Object.fromEntries((kpi.scores || []).map((score) => [score.student_id, Number(score.score)])),
+      })),
     })),
   };
 }
@@ -61,8 +66,8 @@ export function createAcademyRepository() {
     async listSessions() {
       const { data, error } = await assertClient().from("academy_sessions").select(`
         *, teachers:academy_session_teachers(teacher_id, checked_at), registrations:academy_registrations(*, student:academy_profiles!academy_registrations_student_id_fkey(display_name), attendance:academy_attendance(status)),
-        purchases:academy_purchases(*), lesson_topics:academy_lesson_topics(title),
-        kpis:academy_kpis(*, scores:academy_scores(student_id, score))
+        purchases:academy_purchases(*),
+        lesson_topics:academy_lesson_topics(*, kpis:academy_kpis(*, scores:academy_scores(student_id, score)))
       `).order("starts_at", { ascending: true });
       if (error) throw error;
       return data.map(mapSession);
@@ -71,6 +76,11 @@ export function createAcademyRepository() {
       const { data, error } = await assertClient().from("academy_products").select("*").eq("active", true).order("name");
       if (error) throw error;
       return data.map((row) => ({ id: row.id, name: row.name, priceSatang: Number(row.price_satang), active: row.active }));
+    },
+    async listVenues() {
+      const { data, error } = await assertClient().from("academy_venues").select("*").eq("active", true).order("is_default", { ascending: false }).order("name");
+      if (error) throw error;
+      return data.map((row) => ({ id: row.id, name: row.name, active: row.active, isDefault: row.is_default }));
     },
     async listInvoices(studentId = null) {
       let query = assertClient().from("academy_invoices").select("*, session:academy_sessions(session_date), items:academy_invoice_items(description)").order("created_at", { ascending: false });
@@ -82,12 +92,26 @@ export function createAcademyRepository() {
         totalSatang: Number(row.total_satang), status: row.status, details: row.items?.map((item) => item.description).join(" · ") || "",
       }));
     },
+    async listPaymentOptions() {
+      const { data, error } = await assertClient().rpc("academy_list_payable_invoices");
+      if (error) throw error;
+      return data.map((row) => ({
+        id: row.invoice_id,
+        studentId: row.student_id,
+        studentName: row.student_name,
+        sessionId: row.session_id,
+        date: row.session_date,
+        totalSatang: Number(row.total_satang),
+        status: row.status,
+        details: row.details || "",
+      }));
+    },
     async createSession(input) {
       const client = assertClient();
       const startsAt = `${input.date}T${input.startTime}:00+07:00`;
       const endsAt = `${input.date}T${input.endTime}:00+07:00`;
       const { data, error } = await client.from("academy_sessions").insert({
-        session_date: input.date, starts_at: startsAt, ends_at: endsAt, venue: input.venue,
+        session_date: input.date, starts_at: startsAt, ends_at: endsAt, venue_id: input.venueId, venue: input.venue,
         service_fee_satang: input.serviceFeeSatang, court_cost_satang: input.courtCostSatang, status: "open",
       }).select().single();
       if (error) throw error;
@@ -95,7 +119,15 @@ export function createAcademyRepository() {
         const { error: teacherError } = await client.from("academy_session_teachers").insert({ session_id: data.id, teacher_id: input.teacherId });
         if (teacherError) throw teacherError;
       }
-      return mapSession({ ...data, registrations: [], purchases: [], kpis: [], lesson_topics: [] });
+      return mapSession({ ...data, registrations: [], purchases: [], lesson_topics: [] });
+    },
+    async updateSessionCosts(sessionId, input) {
+      const { error } = await assertClient().from("academy_sessions").update({
+        service_fee_satang: input.serviceFeeSatang,
+        court_cost_satang: input.courtCostSatang,
+        updated_at: new Date().toISOString(),
+      }).eq("id", sessionId).neq("status", "finalized");
+      if (error) throw error;
     },
     async register(sessionId, student) {
       const { error } = await assertClient().from("academy_registrations").upsert({ session_id: sessionId, student_id: student.id, status: "registered", source: "student", cancelled_at: null }, { onConflict: "session_id,student_id" });
@@ -125,22 +157,22 @@ export function createAcademyRepository() {
       });
       if (error) throw error;
     },
-    async saveLearning(sessionId, { topic, kpis }) {
+    async addLesson(sessionId, lesson) {
       const client = assertClient();
-      const { data: topicRow, error: topicError } = await client.from("academy_lesson_topics").upsert({ session_id: sessionId, title: topic }, { onConflict: "session_id" }).select().single();
+      const { data: topicRow, error: topicError } = await client.from("academy_lesson_topics").insert({ session_id: sessionId, title: lesson.title, description: lesson.description }).select().single();
       if (topicError) throw topicError;
-      for (const kpi of kpis) {
-        const payload = { lesson_topic_id: topicRow.id, name: kpi.name, maximum_score: kpi.maximum };
-        const result = kpi.id?.startsWith("kpi-")
-          ? await client.from("academy_kpis").insert(payload).select().single()
-          : await client.from("academy_kpis").upsert({ ...payload, ...(kpi.id ? { id: kpi.id } : {}) }).select().single();
+      for (const [index, kpi] of lesson.kpis.entries()) {
+        const result = await client.from("academy_kpis").insert({ lesson_topic_id: topicRow.id, name: kpi.name, maximum_score: kpi.maximum, display_order: index }).select().single();
         if (result.error) throw result.error;
-        const scoreRows = Object.entries(kpi.scores || {}).map(([studentId, score]) => ({ kpi_id: result.data.id, student_id: studentId, score }));
-        if (scoreRows.length) {
-          const { error } = await client.from("academy_scores").upsert(scoreRows, { onConflict: "kpi_id,student_id" });
-          if (error) throw error;
-        }
       }
+      return topicRow;
+    },
+    async saveLessonScores(sessionId, lessonId, kpis) {
+      const client = assertClient();
+      const rows = kpis.flatMap((kpi) => Object.entries(kpi.scores || {}).filter(([, score]) => score !== "" && score !== null).map(([studentId, score]) => ({ kpi_id: kpi.id, student_id: studentId, score: Number(score) })));
+      if (!rows.length) return;
+      const { error } = await client.from("academy_scores").upsert(rows, { onConflict: "kpi_id,student_id" });
+      if (error) throw error;
     },
     async finalizeSession(sessionId) {
       const { error } = await assertClient().rpc("academy_finalize_session_billing", { p_session_id: sessionId });
@@ -162,6 +194,11 @@ export function createAcademyRepository() {
       const { data, error } = await assertClient().from("academy_products").insert({ name: input.name, price_satang: input.priceSatang }).select().single();
       if (error) throw error;
       return { id: data.id, name: data.name, priceSatang: Number(data.price_satang), active: data.active };
+    },
+    async createVenue(input) {
+      const { data, error } = await assertClient().from("academy_venues").insert({ name: input.name }).select().single();
+      if (error) throw error;
+      return { id: data.id, name: data.name, active: data.active, isDefault: data.is_default };
     },
     async createProfile(input) {
       const { data, error } = await assertClient().functions.invoke("academy-username-auth", {
