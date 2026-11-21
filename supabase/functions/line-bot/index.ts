@@ -6,6 +6,7 @@ import { resolveLiffClubContext, resolveLiffClubId } from "../_shared/liffClubCo
 import { reconcileSlipAmount } from "../_shared/slipAmount.js";
 import { parseSlipDateValue } from "../_shared/slipDate.js";
 import { evaluatePaymentSubmission, isSamePaymentSubmission, paymentSubmissionState } from "../_shared/paymentSubmission.js";
+import { buildPaymentExtraRequests } from "../_shared/paymentExtras.js";
 import { registrationProfile, registrationSnapshot, signupCancellationBlockReason } from "../_shared/liffProfile.js";
 import { buildArrivalTimeOptionsForEvent, normalizeArrivalTimeForEvent, sessionBoundsForEvent } from "../_shared/eventSchedule.js";
 
@@ -809,15 +810,20 @@ async function handlePaymentLiffRequest(payload: any) {
           if (!latestSlipByPayment.has(paymentId)) latestSlipByPayment.set(paymentId, savedSlip);
         }
       }
-      const dueEventIds = [...new Set((duePayments || []).map((payment: any) => payment.event_id))];
-      const { data: dueExtras, error: extrasError } = dueEventIds.length
-        ? await admin.from("member_extra_charges")
+      const dueExtras = [];
+      const extraRequests = buildPaymentExtraRequests(duePayments || []);
+      for (let index = 0; index < extraRequests.length; index += 6) {
+        const results = await Promise.all(extraRequests.slice(index, index + 6).map(({ eventId, memberIds }) => admin
+          .from("member_extra_charges")
           .select("event_id, member_id, item_name, unit_price, quantity, created_at")
-          .in("event_id", dueEventIds)
-          .in("member_id", beneficiaryIds)
-          .order("created_at")
-        : { data: [], error: null };
-      if (extrasError) throw extrasError;
+          .eq("event_id", eventId)
+          .in("member_id", memberIds)
+          .order("created_at")));
+        for (const result of results) {
+          if (result.error) throw result.error;
+          dueExtras.push(...(result.data || []));
+        }
+      }
       const extrasByPayment = new Map<string, any[]>();
       for (const extra of dueExtras || []) {
         const key = `${extra.event_id}:${extra.member_id}`;
@@ -1135,8 +1141,15 @@ async function handlePaymentLiffRequest(payload: any) {
     });
   } catch (error) {
     console.error("LIFF payment request failed", error);
-    const message = error instanceof Error ? error.message : "ตรวจสลิปไม่สำเร็จ";
-    return json({ error: message }, message.includes("LINE login") ? 401 : 500);
+    const detail = error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error
+      ? String(error.message)
+      : "";
+    const message = payload.action === "get_liff_payments"
+      ? "โหลดข้อมูลชำระเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"
+      : "ตรวจสลิปไม่สำเร็จ";
+    return json({ error: message }, detail.includes("LINE login") ? 401 : 500);
   }
 }
 
