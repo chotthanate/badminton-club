@@ -257,7 +257,11 @@ export default function LiffPaymentApp() {
   }
 
   if (loading) return <PaymentShell language={language} setLanguage={setLanguage}><div className="liff-loading"><LoaderCircle size={30} /><strong>{tr("กำลังเปิดยอดค้างชำระ...", "Loading outstanding balances...")}</strong></div></PaymentShell>;
-  if (error && !data) return <PaymentShell language={language} setLanguage={setLanguage}><div className="liff-error"><strong>{tr("เปิดหน้าแจ้งโอนไม่ได้", "Unable to open payment")}</strong><span>{error}</span></div></PaymentShell>;
+  if (error && !data) return <PaymentShell language={language} setLanguage={setLanguage}><div className="liff-error"><strong>{tr("เปิดหน้าแจ้งโอนไม่ได้", "Unable to open payment")}</strong><span>{error}</span><button type="button" disabled={refreshing} onClick={async () => {
+    if (!liffReadyRef.current) { window.location.reload(); return; }
+    try { await refreshPayments({ force: true, initial: true }); setError(""); }
+    catch (nextError) { setError(localizeError(nextError.message, language, tr("โหลดข้อมูลไม่สำเร็จ กรุณาลองอีกครั้ง", "Unable to load. Please retry."))); }
+  }}>{refreshing ? tr("กำลังโหลด...", "Loading...") : tr("ลองใหม่", "Try again")}</button></div></PaymentShell>;
 
   return (
     <PaymentShell language={language} setLanguage={setLanguage}>
@@ -270,6 +274,7 @@ export default function LiffPaymentApp() {
         <button disabled={refreshing || reading || submitting} onClick={() => refreshPayments({ force: true })} type="button"><RefreshCw className={refreshing ? "is-spinning" : ""} size={16} /> {refreshing ? tr("กำลังอัปเดต", "Refreshing") : tr("อัปเดตสถานะ", "Refresh status")}</button>
       </div>
       {refreshError ? <div className="payment-refresh-warning" role="status">{refreshError}</div> : null}
+      {data.extrasUnavailable ? <div className="payment-refresh-warning" role="status">{tr("รายละเอียดน้ำ/ขนมบางรายการโหลดไม่ได้ ยอดชำระยังเป็นยอดที่แอดมินสรุปไว้ กดอัปเดตสถานะเพื่อลองใหม่", "Some refreshment details could not load. The finalized amount is unchanged. Refresh to retry.")}</div> : null}
       {result ? <section aria-live="polite" className={`liff-payment-result is-${result.status}`}><Check size={25} /><div><strong>{result.status === "auto_paid" ? tr("บันทึกว่าชำระแล้ว", "Payment recorded") : tr("รับสลิปแล้ว · รอตรวจสอบ", "Slip received · Pending review")}</strong><span>{result.status === "auto_paid" ? tr("ยอดที่เลือกถูกบันทึกว่าชำระแล้ว", "Your selected balances have been marked as paid.") : tr("แอดมินจะตรวจสอบและอัปเดตสถานะให้ ไม่ต้องส่งสลิปซ้ำ", "An admin will review it. You do not need to resubmit the slip.")}</span>{result.submittedAt ? <small>{tr("ส่งเมื่อ", "Submitted")} {formatPaymentTime(result.submittedAt, language)}</small> : null}</div></section> : null}
 
       <section className="liff-payment-card">

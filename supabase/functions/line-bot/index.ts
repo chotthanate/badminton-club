@@ -6,7 +6,7 @@ import { resolveLiffClubContext, resolveLiffClubId } from "../_shared/liffClubCo
 import { reconcileSlipAmount } from "../_shared/slipAmount.js";
 import { parseSlipDateValue } from "../_shared/slipDate.js";
 import { evaluatePaymentSubmission, isSamePaymentSubmission, paymentSubmissionState } from "../_shared/paymentSubmission.js";
-import { buildPaymentExtraRequests } from "../_shared/paymentExtras.js";
+import { loadPaymentBalances } from "../_shared/paymentRead.js";
 import { registrationProfile, registrationSnapshot, signupCancellationBlockReason } from "../_shared/liffProfile.js";
 import { buildArrivalTimeOptionsForEvent, normalizeArrivalTimeForEvent, sessionBoundsForEvent } from "../_shared/eventSchedule.js";
 
@@ -772,56 +772,18 @@ async function handlePaymentLiffRequest(payload: any) {
     if (submitterError) throw submitterError;
 
     if (payload.action === "get_liff_payments") {
-      const { data: clubMembers, error: memberError } = await admin.from("club_members")
-        .select("id, nickname, display_name, line_user_id")
-        .eq("club_id", clubId)
-        .eq("active", true)
-        .order("created_at");
-      if (memberError) throw memberError;
-      const beneficiaryIds = (clubMembers || []).map((member) => member.id);
-      const { data: duePayments, error: paymentError } = beneficiaryIds.length
-        ? await admin.from("payments")
-          .select("id, member_id, event_id, amount, extras_amount, payment_status, paid_at, events!inner(event_date, venue)")
-          .eq("club_id", clubId)
-          .in("member_id", beneficiaryIds)
-          .not("admin_confirmed_at", "is", null)
-          .in("payment_status", ["awaiting", "review"])
-          .is("paid_at", null)
-          .order("created_at")
-        : { data: [], error: null };
-      if (paymentError) throw paymentError;
-      const duePaymentIds = (duePayments || []).map((payment: any) => payment.id);
-      const [slipsResult, paidResult] = await Promise.all([
-        duePaymentIds.length ? admin.from("payment_slips")
-          .select("id, payment_ids, status, created_at, review_reason")
-          .eq("club_id", clubId).overlaps("payment_ids", duePaymentIds).order("created_at", { ascending: false })
-          : Promise.resolve({ data: [], error: null }),
-        submitter?.id ? admin.from("payments")
+      const { clubMembers, duePayments, slips, dueExtras, extrasUnavailable } = await loadPaymentBalances(admin, clubId,
+        (stage, error) => reportPaymentReadFailure(stage, error));
+      const paidResult = submitter?.id ? await admin.from("payments")
           .select("id, event_id, amount, paid_at, events!inner(event_date, venue)")
           .eq("club_id", clubId).eq("member_id", submitter.id).not("paid_at", "is", null)
           .order("paid_at", { ascending: false }).limit(12)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-      if (slipsResult.error) throw slipsResult.error;
+          : { data: [], error: null };
       if (paidResult.error) throw paidResult.error;
       const latestSlipByPayment = new Map<string, any>();
-      for (const savedSlip of slipsResult.data || []) {
+      for (const savedSlip of slips) {
         for (const paymentId of savedSlip.payment_ids || []) {
           if (!latestSlipByPayment.has(paymentId)) latestSlipByPayment.set(paymentId, savedSlip);
-        }
-      }
-      const dueExtras = [];
-      const extraRequests = buildPaymentExtraRequests(duePayments || []);
-      for (let index = 0; index < extraRequests.length; index += 6) {
-        const results = await Promise.all(extraRequests.slice(index, index + 6).map(({ eventId, memberIds }) => admin
-          .from("member_extra_charges")
-          .select("event_id, member_id, item_name, unit_price, quantity, created_at")
-          .eq("event_id", eventId)
-          .in("member_id", memberIds)
-          .order("created_at")));
-        for (const result of results) {
-          if (result.error) throw result.error;
-          dueExtras.push(...(result.data || []));
         }
       }
       const extrasByPayment = new Map<string, any[]>();
@@ -879,6 +841,7 @@ async function handlePaymentLiffRequest(payload: any) {
           nickname: submitter?.nickname || "",
         },
         beneficiaries,
+        extrasUnavailable,
         recipientNames,
         recentPaid: (paidResult.data || []).map((payment: any) => {
           const event = Array.isArray(payment.events) ? payment.events[0] : payment.events;
@@ -1140,7 +1103,8 @@ async function handlePaymentLiffRequest(payload: any) {
         : "รับสลิปแล้ว รายการอยู่ระหว่างรอตรวจสอบ",
     });
   } catch (error) {
-    console.error("LIFF payment request failed", error);
+    if (payload.action === "get_liff_payments") reportPaymentReadFailure("balances_unavailable", error);
+    else console.error("LIFF payment request failed", error);
     const detail = error instanceof Error
       ? error.message
       : error && typeof error === "object" && "message" in error
@@ -1151,6 +1115,17 @@ async function handlePaymentLiffRequest(payload: any) {
       : "ตรวจสลิปไม่สำเร็จ";
     return json({ error: message }, detail.includes("LINE login") ? 401 : 500);
   }
+}
+
+function reportPaymentReadFailure(stage: string, error: any) {
+  // Structured logs deliberately exclude names, tokens and request URLs.
+  console.error(JSON.stringify({ component: "liff_payment_read", stage, code: String(error?.code || "request_failed").slice(0, 80) }));
+  const alertUrl = Deno.env.get("PAYMENT_ALERT_WEBHOOK_URL");
+  if (alertUrl) EdgeRuntime.waitUntil(fetch(alertUrl, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ component: "liff_payment_read", stage }),
+    signal: AbortSignal.timeout(5000),
+  }).then(() => {}).catch(() => console.error("Payment alert delivery failed")));
 }
 
 function summarizePaymentExtraRows(charges: any[]) {
